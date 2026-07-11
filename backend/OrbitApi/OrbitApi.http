@@ -1,0 +1,6 @@
+@OrbitApi_HostAddress = https://localhost:7065
+
+GET {{OrbitApi_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
