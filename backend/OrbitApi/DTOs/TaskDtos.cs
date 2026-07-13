@@ -71,7 +71,7 @@ namespace OrbitApi.DTOs
     public class CommentDto
     {
         public int Id { get; set; }
-        public OrbitApi.Models.EntityType EntityType { get; set; } = OrbitApi.Models.EntityType.Task;
+        public string EntityType { get; set; } = "Task";
         public int EntityId { get; set; }
         public int UserId { get; set; }
         public string? UserName { get; set; }
@@ -91,7 +91,7 @@ namespace OrbitApi.DTOs
     public class AttachmentDto
     {
         public int Id { get; set; }
-        public OrbitApi.Models.EntityType EntityType { get; set; } = OrbitApi.Models.EntityType.Task;
+        public string EntityType { get; set; } = "Task";
         public int EntityId { get; set; }
         public string FileName { get; set; } = null!;
         public string AbsoluteFilePath { get; set; } = null!;
@@ -99,6 +99,8 @@ namespace OrbitApi.DTOs
         public string MimeType { get; set; } = null!;
         public long FileSizeBytes { get; set; }
         public bool PreviewEnabled { get; set; }
+        public string DownloadUrl { get; set; } = null!;
+        public string? PreviewUrl { get; set; }
         public int? UserId { get; set; }
     }
 

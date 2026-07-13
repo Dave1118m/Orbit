@@ -19,15 +19,21 @@ namespace OrbitApi.Services
         {
             while (!stoppingToken.IsCancellationRequested)
             {
-                _logger.LogInformation("ComplianceReminderService running at: {time}", DateTimeOffset.Now);
-
                 try
                 {
+                    _logger.LogInformation("ComplianceReminderService running at: {time}", DateTimeOffset.Now);
                     await ProcessRemindersAsync(stoppingToken);
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Error occurred processing compliance reminders.");
+                    try
+                    {
+                        _logger.LogError(ex, "Error occurred processing compliance reminders.");
+                    }
+                    catch
+                    {
+                        // Logger might be disposed, ignore
+                    }
                 }
 
                 await Task.Delay(TimeSpan.FromDays(1), stoppingToken);
@@ -47,7 +53,7 @@ namespace OrbitApi.Services
                 .Where(c => c.Organization != null && !c.Organization.IsDeleted)
                 .Where(c => (c.RegistrationRenewalDate.HasValue && c.RegistrationRenewalDate <= thresholdDate)
                          || (c.TaxExemptRenewalDate.HasValue && c.TaxExemptRenewalDate <= thresholdDate))
-                .ToListAsync(stoppingToken);
+                .ToListAsync();
 
             foreach (var compliance in compliances)
             {

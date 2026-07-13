@@ -45,6 +45,12 @@ namespace OrbitApi.DTOs
         public byte[]? RowVersion { get; set; }
     }
 
+    public class PostponeProjectRequest
+    {
+        public DateTime NewEndDate { get; set; }
+        public string Reason { get; set; } = null!;
+    }
+
     public class ProjectPostponementDto
     {
         public int Id { get; set; }

@@ -28,14 +28,41 @@ public class SmtpEmailSender : IEmailSender
         var from = _config["Smtp:From"] ?? user ?? "no-reply@example.com";
         var enableSsl = bool.Parse(_config["Smtp:EnableSsl"] ?? "true");
 
-        using var client = new SmtpClient(smtp, port)
-        {
-            EnableSsl = enableSsl,
-            DeliveryMethod = SmtpDeliveryMethod.Network,
-            Credentials = string.IsNullOrEmpty(user) ? CredentialCache.DefaultNetworkCredentials : new NetworkCredential(user, pass)
-        };
+        Console.WriteLine($"SMTP Configuration: Host={smtp}, Port={port}, Username={user}, From={from}, SSL={enableSsl}");
 
-        using var msg = new MailMessage(from, to, subject, htmlBody) { IsBodyHtml = true };
-        await client.SendMailAsync(msg);
+        try
+        {
+            using var client = new SmtpClient(smtp, port)
+            {
+                EnableSsl = enableSsl,
+                DeliveryMethod = SmtpDeliveryMethod.Network,
+                Credentials = string.IsNullOrEmpty(user) ? CredentialCache.DefaultNetworkCredentials : new NetworkCredential(user, pass)
+            };
+
+            using var msg = new MailMessage(from, to, subject, htmlBody) { IsBodyHtml = true };
+            Console.WriteLine($"Attempting to send email to {to} via {smtp}:{port}");
+            await client.SendMailAsync(msg);
+            Console.WriteLine($"Email successfully sent to {to}");
+        }
+        catch (SmtpException smtpEx)
+        {
+            Console.WriteLine($"SMTP Error: {smtpEx.Message}");
+            Console.WriteLine($"SMTP Status Code: {smtpEx.StatusCode}");
+            if (smtpEx.InnerException != null)
+            {
+                Console.WriteLine($"Inner Exception: {smtpEx.InnerException.Message}");
+            }
+            throw new InvalidOperationException($"Failed to send email: {smtpEx.Message}", smtpEx);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"General Error sending email: {ex.Message}");
+            Console.WriteLine($"Exception Type: {ex.GetType().Name}");
+            if (ex.InnerException != null)
+            {
+                Console.WriteLine($"Inner Exception: {ex.InnerException.Message}");
+            }
+            throw new InvalidOperationException($"Failed to send email: {ex.Message}", ex);
+        }
     }
 }

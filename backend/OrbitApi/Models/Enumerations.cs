@@ -54,10 +54,10 @@ public enum MediaType
     Other
 }
 
-public enum EntityType
+public static class EntityType
 {
-    Project,
-    Task
+    public const string Project = "Project";
+    public const string Task = "Task";
 }
 
 public enum VisibilityLevel

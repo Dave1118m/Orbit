@@ -215,7 +215,7 @@ public class Comment
 {
     [Key]
     public int Id { get; set; }
-    public EntityType EntityType { get; set; } = EntityType.Task;
+    public string EntityType { get; set; } = "Task";
     public int EntityId { get; set; }
     public int UserId { get; set; }
     public string Content { get; set; } = string.Empty;
@@ -231,7 +231,7 @@ public class Attachment
 {
     [Key]
     public int Id { get; set; }
-    public EntityType EntityType { get; set; } = EntityType.Task;
+    public string EntityType { get; set; } = "Task";
     public int EntityId { get; set; }
     public string FileName { get; set; } = string.Empty;
     public string AbsoluteFilePath { get; set; } = string.Empty;
@@ -251,6 +251,9 @@ public class Notification
     public int UserId { get; set; }
     public string Message { get; set; } = string.Empty;
     public NotificationChannel Channel { get; set; } = NotificationChannel.InApp;
+    public bool IsRead { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public string? Link { get; set; }
 }
 
 public class AuditLog

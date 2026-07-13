@@ -7,6 +7,10 @@ export default function Organizations() {
   const fileInputRef = useRef(null);
   const [organizations, setOrganizations] = useState([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState(false);
+  const [selectedOrgForTransfer, setSelectedOrgForTransfer] = useState(null);
+  const [orgMembers, setOrgMembers] = useState([]);
+  const [selectedNewOwner, setSelectedNewOwner] = useState(null);
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -17,24 +21,65 @@ export default function Organizations() {
   });
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState('');
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [currentUser, setCurrentUser] = useState(null);
 
   const fetchOrganizations = async () => {
     try {
       const token = localStorage.getItem('token');
+      if (!token) {
+        setOrganizations([]);
+        return;
+      }
       const response = await fetch(API_URL, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
         const data = await response.json();
         setOrganizations(data);
+      } else if (response.status === 401) {
+        setOrganizations([]);
       }
     } catch (err) {
       console.error(err);
     }
   };
 
+  const fetchCurrentUser = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      const response = await fetch('https://localhost:7065/api/v1/users/me', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setCurrentUser(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch current user', err);
+    }
+  };
+
+  const fetchOrgMembers = async (orgId) => {
+    try {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+      const response = await fetch(`${API_URL}/${orgId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setOrgMembers(data.members || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch organization members', err);
+    }
+  };
+
   useEffect(() => {
     fetchOrganizations();
+    fetchCurrentUser();
   }, []);
 
   const handleChange = (e) => {
@@ -84,7 +129,10 @@ export default function Organizations() {
     console.log('Organizations.create submit', formData, logoFile);
     try {
       const token = localStorage.getItem('token');
-      const logoValue = logoFile ? await readFileAsDataUrl(logoFile) : formData.logoUrl;
+      if (!token) {
+        alert('You must be signed in to create an organization. Please sign in and try again.');
+        return;
+      }
       const response = await fetch(API_URL, {
         method: 'POST',
         headers: {
@@ -94,7 +142,7 @@ export default function Organizations() {
         body: JSON.stringify({
           name: formData.name,
           description: formData.description,
-          logoUrl: logoValue,
+          logoUrl: formData.logoUrl, // Only use string if no file
           registrationNumber: formData.registrationNumber,
           country: formData.country,
           budget: formData.budget ? parseFloat(formData.budget) : null
@@ -102,9 +150,47 @@ export default function Organizations() {
       });
       
       if (response.ok) {
+        const newOrg = await response.json();
+
+        // If there's a file, upload it with progress and update the created org immediately
+        if (logoFile) {
+          const uploadResult = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', `${API_URL}/${newOrg.id}/logo`);
+            xhr.setRequestHeader('Authorization', `Bearer ${token}`);
+            xhr.upload.onprogress = (event) => {
+              if (event.lengthComputable) {
+                const pct = Math.round((event.loaded / event.total) * 100);
+                setUploadProgress(pct);
+              }
+            };
+            xhr.onload = () => {
+              if (xhr.status >= 200 && xhr.status < 300) {
+                try { resolve(JSON.parse(xhr.responseText)); } catch (e) { resolve(null); }
+              } else {
+                reject(new Error(`Upload failed: ${xhr.status}`));
+              }
+            };
+            xhr.onerror = () => reject(new Error('Upload network error'));
+            const fd = new FormData();
+            fd.append('file', logoFile);
+            xhr.send(fd);
+          });
+
+          if (uploadResult && uploadResult.LogoUrl) {
+            newOrg.logoUrl = uploadResult.LogoUrl;
+          }
+
+          // Insert the new org into the current list for immediate UX feedback
+          setOrganizations(prev => [newOrg, ...prev]);
+          setUploadProgress(0);
+        } else {
+          // No file: just prepend the created org
+          setOrganizations(prev => [newOrg, ...prev]);
+        }
+
         setIsModalOpen(false);
         resetForm();
-        fetchOrganizations();
       } else {
         const errorText = await response.text();
         alert(`Failed to create organization: ${response.status} ${response.statusText}\n${errorText}`);
@@ -127,6 +213,45 @@ export default function Organizations() {
     } catch (err) {
       console.error(err);
     }
+  };
+
+  const handleTransferOwnership = async (e) => {
+    e.preventDefault();
+    if (!selectedOrgForTransfer || !selectedNewOwner) {
+      alert('Please select a new owner');
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch(`${API_URL}/${selectedOrgForTransfer.id}/transfer-ownership`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ newOwnerUserId: selectedNewOwner.userId })
+      });
+      if (response.ok) {
+        alert('Ownership transfer request sent. The new owner will receive an email to confirm the transfer.');
+        setIsTransferModalOpen(false);
+        setSelectedOrgForTransfer(null);
+        setSelectedNewOwner(null);
+        setOrgMembers([]);
+      } else {
+        const error = await response.text();
+        alert('Failed to transfer ownership: ' + error);
+      }
+    } catch (err) {
+      console.error('Failed to transfer ownership', err);
+      alert('Failed to transfer ownership: ' + err.message);
+    }
+  };
+
+  const openTransferModal = async (org) => {
+    setSelectedOrgForTransfer(org);
+    setSelectedNewOwner(null);
+    await fetchOrgMembers(org.id);
+    setIsTransferModalOpen(true);
   };
 
   return (
@@ -172,12 +297,22 @@ export default function Organizations() {
                     <span title="Compliance Docs Added" className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-green-100 text-xs text-green-700">✓</span>
                   )}
                 </div>
-                <button
-                  onClick={() => handleDelete(org.id)}
-                  className="text-sm font-medium text-red-500 hover:text-red-700"
-                >
-                  Delete
-                </button>
+                <div className="flex gap-2">
+                  {currentUser && org.ownerId === currentUser.id && (
+                    <button
+                      onClick={() => openTransferModal(org)}
+                      className="text-sm font-medium text-brand-500 hover:text-brand-700"
+                    >
+                      Transfer Ownership
+                    </button>
+                  )}
+                  <button
+                    onClick={() => handleDelete(org.id)}
+                    className="text-sm font-medium text-red-500 hover:text-red-700"
+                  >
+                    Delete
+                  </button>
+                </div>
               </div>
             </div>
           ))}
@@ -294,6 +429,14 @@ export default function Organizations() {
             {logoPreview && (
               <p className="mt-3 text-sm text-slate-500">Selected file: {logoFile?.name}</p>
             )}
+            {uploadProgress > 0 && (
+              <div className="mt-3">
+                <div className="w-full rounded-full bg-slate-100 h-2">
+                  <div className="h-2 rounded-full bg-brand-500" style={{ width: `${uploadProgress}%` }} />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">Uploading: {uploadProgress}%</p>
+              </div>
+            )}
           </div>
           <div className="mt-4 flex justify-end gap-3">
             <button
@@ -304,11 +447,85 @@ export default function Organizations() {
               Cancel
             </button>
             <button
-              type="button"
-              onClick={handleSubmit}
+              type="submit"
               className="rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600"
             >
               Create
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Transfer Ownership Modal */}
+      <Modal 
+        isOpen={isTransferModalOpen} 
+        onClose={() => {
+          setIsTransferModalOpen(false);
+          setSelectedOrgForTransfer(null);
+          setSelectedNewOwner(null);
+          setOrgMembers([]);
+        }} 
+        title={`Transfer Ownership: ${selectedOrgForTransfer?.name}`}
+      >
+        <form onSubmit={handleTransferOwnership} className="flex flex-col gap-4">
+          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+            <p className="text-sm text-amber-800">
+              ⚠️ You are about to transfer ownership of this organization. The new owner will receive an email to confirm the transfer. You will lose all owner privileges once the transfer is confirmed.
+            </p>
+          </div>
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-700">Select New Owner *</label>
+            {orgMembers.length === 0 ? (
+              <p className="text-sm text-slate-500">No members available to transfer ownership to.</p>
+            ) : (
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {orgMembers
+                  .filter(member => member.userId !== selectedOrgForTransfer?.ownerId)
+                  .map(member => (
+                    <label 
+                      key={member.userId} 
+                      className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                        selectedNewOwner?.userId === member.userId 
+                          ? 'border-brand-500 bg-brand-50' 
+                          : 'border-slate-200 hover:border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="newOwner"
+                        checked={selectedNewOwner?.userId === member.userId}
+                        onChange={() => setSelectedNewOwner(member)}
+                        className="text-brand-500 focus:ring-brand-500"
+                      />
+                      <div>
+                        <p className="font-medium text-slate-900">{member.userName}</p>
+                        <p className="text-xs text-slate-500">{member.email}</p>
+                        <p className="text-xs text-slate-600 mt-1">Role: {member.roleName}</p>
+                      </div>
+                    </label>
+                  ))}
+              </div>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 mt-4">
+            <button
+              type="button"
+              onClick={() => {
+                setIsTransferModalOpen(false);
+                setSelectedOrgForTransfer(null);
+                setSelectedNewOwner(null);
+                setOrgMembers([]);
+              }}
+              className="rounded-full px-6 py-2.5 text-sm font-medium text-slate-600 hover:bg-slate-100"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!selectedNewOwner}
+              className="rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Transfer Ownership
             </button>
           </div>
         </form>

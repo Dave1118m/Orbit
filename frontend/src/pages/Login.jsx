@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import GoogleSignIn from '../components/GoogleSignIn';
 
 export default function Login() {
@@ -8,6 +8,23 @@ export default function Login() {
   const [message, setMessage] = useState('');
   const [status, setStatus] = useState('');
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const errorParam = searchParams.get('error');
+    const msgParam = searchParams.get('message');
+    if (errorParam === 'user_not_found') {
+      setMessage('User not found.');
+      setStatus('error');
+    } else if (errorParam === 'email_confirm_failed') {
+      setMessage('Failed to confirm email.');
+      setStatus('error');
+    } else if (msgParam === 'email_confirmed') {
+      setMessage('Email confirmed successfully! You can now log in.');
+      setStatus('success');
+    }
+  }, [searchParams]);
+
 
   const handleSubmit = async (e) => {
     e.preventDefault();

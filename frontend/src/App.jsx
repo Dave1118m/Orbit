@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import Register from './pages/Register';
 import Login from './pages/Login';
+import AcceptInvite from './pages/AcceptInvite';
 import Dashboard from './pages/Dashboard';
 import Organizations from './pages/Organizations';
 import Projects from './pages/Projects';
@@ -9,6 +10,7 @@ import Tasks from './pages/Tasks';
 import Teams from './pages/Teams';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
+import Notifications from './pages/Notifications';
 import DashboardLayout from './components/DashboardLayout';
 
 function Home() {
@@ -117,6 +119,7 @@ function Content() {
         <Route path="/projects" element={<RequireAuth><DashboardLayout><Projects /></DashboardLayout></RequireAuth>} />
         <Route path="/tasks" element={<RequireAuth><DashboardLayout><Tasks /></DashboardLayout></RequireAuth>} />
         <Route path="/teams" element={<RequireAuth><DashboardLayout><Teams /></DashboardLayout></RequireAuth>} />
+        <Route path="/notifications" element={<RequireAuth><DashboardLayout><Notifications /></DashboardLayout></RequireAuth>} />
         <Route path="/reports" element={<RequireAuth><DashboardLayout><Reports /></DashboardLayout></RequireAuth>} />
         <Route path="/settings" element={<RequireAuth><DashboardLayout><Settings /></DashboardLayout></RequireAuth>} />
         <Route
@@ -135,6 +138,7 @@ function Content() {
             </AuthLayout>
           }
         />
+        <Route path="/org-invite/accept" element={<AcceptInvite />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </>

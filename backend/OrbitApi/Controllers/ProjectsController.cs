@@ -5,6 +5,7 @@ using OrbitApi.Authorization;
 using OrbitApi.DTOs;
 using OrbitApi.Hubs;
 using OrbitApi.Models;
+using OrbitApi.Services;
 using Microsoft.AspNetCore.SignalR;
 using DTOProjectStatus = OrbitApi.DTOs.ProjectStatus;
 using ModelProjectStatus = OrbitApi.Models.ProjectStatus;
@@ -19,12 +20,14 @@ namespace OrbitApi.Controllers
         private readonly OrbitDbContext _db;
         private readonly IAuthorizationService _authorizationService;
         private readonly IHubContext<OrbitHub> _hubContext;
+        private readonly INotificationService _notificationService;
 
-        public ProjectsController(OrbitDbContext db, IAuthorizationService authorizationService, IHubContext<OrbitHub> hubContext)
+        public ProjectsController(OrbitDbContext db, IAuthorizationService authorizationService, IHubContext<OrbitHub> hubContext, INotificationService notificationService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _hubContext = hubContext;
+            _notificationService = notificationService;
         }
 
         [HttpPost]
@@ -148,9 +151,28 @@ namespace OrbitApi.Controllers
 
             if (req.Title != null) project.Title = req.Title;
             if (req.Description != null) project.Description = req.Description;
-            if (req.Status.HasValue) project.Status = (OrbitApi.Models.ProjectStatus)req.Status.Value;
+            if (req.Status.HasValue && project.Status != (OrbitApi.Models.ProjectStatus)req.Status.Value)
+            {
+                var oldStatus = project.Status.ToString();
+                var newStatus = ((OrbitApi.Models.ProjectStatus)req.Status.Value).ToString();
+                project.Status = (OrbitApi.Models.ProjectStatus)req.Status.Value;
+
+                var notificationUserIds = await _db.ProjectTeams
+                    .Where(pt => pt.ProjectId == id)
+                    .Join(_db.TeamMembers, pt => pt.TeamId, tm => tm.TeamId, (pt, tm) => tm.UserId)
+                    .Distinct()
+                    .ToListAsync();
+
+                if (notificationUserIds.Any())
+                {
+                    await _notificationService.NotifyUsersAsync(notificationUserIds, $"Project '{project.Title}' status changed from {oldStatus} to {newStatus}.");
+                }
+            }
             if (req.StartDate.HasValue) project.StartDate = req.StartDate;
-            if (req.EndDate.HasValue) project.EndDate = req.EndDate;
+            if (req.EndDate.HasValue)
+            {
+                project.EndDate = req.EndDate;
+            }
             if (req.Budget.HasValue) project.Budget = req.Budget;
             if (req.DonorId.HasValue) project.DonorId = req.DonorId;
 
@@ -172,7 +194,7 @@ namespace OrbitApi.Controllers
         }
 
         [HttpPost("{id}/postpone")]
-        public async Task<ActionResult<ProjectPostponementDto>> Postpone(int id)
+        public async Task<ActionResult<ProjectPostponementDto>> Postpone(int id, [FromBody] PostponeProjectRequest req)
         {
             var project = await _db.Projects.FindAsync(id);
             if (project == null) return NotFound();
@@ -183,7 +205,46 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            return StatusCode(501);
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdStr, out var userId)) return Unauthorized();
+
+            var postponement = new ProjectPostponement
+            {
+                ProjectId = id,
+                OldEndDate = project.EndDate ?? DateTime.UtcNow,
+                NewEndDate = req.NewEndDate,
+                Reason = req.Reason,
+                RequestedByUserId = userId,
+                ApprovedByUserId = userId,
+                CreatedAt = DateTime.UtcNow
+            };
+
+            project.EndDate = req.NewEndDate;
+            _db.ProjectPostponements.Add(postponement);
+            await _db.SaveChangesAsync();
+
+            var notificationUserIds = await _db.ProjectTeams
+                .Where(pt => pt.ProjectId == id)
+                .Join(_db.TeamMembers, pt => pt.TeamId, tm => tm.TeamId, (pt, tm) => tm.UserId)
+                .Distinct()
+                .ToListAsync();
+
+            if (notificationUserIds.Any())
+            {
+                await _notificationService.NotifyUsersAsync(notificationUserIds, $"Project '{project.Title}' was postponed from {postponement.OldEndDate:yyyy-MM-dd} to {postponement.NewEndDate:yyyy-MM-dd}.");
+            }
+
+            return Ok(new ProjectPostponementDto
+            {
+                Id = postponement.Id,
+                ProjectId = postponement.ProjectId,
+                OldEndDate = postponement.OldEndDate,
+                NewEndDate = postponement.NewEndDate,
+                Reason = postponement.Reason,
+                RequestedByUserId = postponement.RequestedByUserId,
+                ApprovedByUserId = postponement.ApprovedByUserId,
+                CreatedAt = postponement.CreatedAt
+            });
         }
 
         [HttpDelete("{id}")]
@@ -338,9 +399,17 @@ namespace OrbitApi.Controllers
                         MimeType = a.MimeType,
                         FileSizeBytes = a.FileSizeBytes,
                         PreviewEnabled = a.PreviewEnabled,
+                        DownloadUrl = $"https://localhost:7065/api/v1/projects/attachments/{a.Id}/download",
+                        PreviewUrl = a.PreviewEnabled ? $"https://localhost:7065/api/v1/projects/attachments/{a.Id}/download" : null,
                         UserId = a.UserId
                     })
                     .ToListAsync();
+                
+                Console.WriteLine($"Project {id} attachments found: {attachments.Count}");
+                foreach (var att in attachments)
+                {
+                    Console.WriteLine($"  - {att.FileName} (ID: {att.Id}, EntityType: {att.EntityType}, EntityId: {att.EntityId})");
+                }
             }
             catch (Exception ex)
             {
@@ -371,8 +440,9 @@ namespace OrbitApi.Controllers
             var uploadsDir = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Projects", id.ToString());
             Directory.CreateDirectory(uploadsDir);
 
-            var uniqueName = $"{Guid.NewGuid()}_{file.FileName}";
-            var filePath = Path.Combine(uploadsDir, uniqueName);
+            var safeFileName = Path.GetFileName(file.FileName);
+            var uniqueName = $"{Guid.NewGuid()}_{safeFileName}";
+            var filePath = Path.GetFullPath(Path.Combine(uploadsDir, uniqueName));
 
             using (var stream = new FileStream(filePath, FileMode.Create))
             {
@@ -411,6 +481,8 @@ namespace OrbitApi.Controllers
                 MimeType = attachment.MimeType,
                 FileSizeBytes = attachment.FileSizeBytes,
                 PreviewEnabled = attachment.PreviewEnabled,
+                DownloadUrl = $"https://localhost:7065/api/v1/projects/attachments/{attachment.Id}/download",
+                PreviewUrl = attachment.PreviewEnabled ? $"https://localhost:7065/api/v1/projects/attachments/{attachment.Id}/download" : null,
                 UserId = attachment.UserId
             });
         }
@@ -431,7 +503,13 @@ namespace OrbitApi.Controllers
                 return NotFound("File not found on disk.");
 
             var stream = new FileStream(attachment.AbsoluteFilePath, FileMode.Open, FileAccess.Read);
-            return File(stream, attachment.MimeType, attachment.FileName);
+            
+            // Set Content-Disposition to inline for browser viewing, fallback to attachment for download
+            var contentDisposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("inline");
+            contentDisposition.FileName = attachment.FileName;
+            Response.Headers.Append("Content-Disposition", contentDisposition.ToString());
+            
+            return File(stream, attachment.MimeType);
         }
 
         [HttpDelete("attachments/{attachmentId}")]

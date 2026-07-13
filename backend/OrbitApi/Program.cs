@@ -7,6 +7,7 @@ using OrbitApi.Authorization;
 using OrbitApi.Hubs;
 using OrbitApi.Identity;
 using OrbitApi.Models;
+using OrbitApi.Services;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -126,6 +127,9 @@ builder.Services.AddHttpClient();
 
 // Email sender (SMTP) - registers a simple implementation below
 builder.Services.AddSingleton<OrbitApi.Services.IEmailSender, OrbitApi.Services.SmtpEmailSender>();
+
+// Notification service registration
+builder.Services.AddScoped<INotificationService, NotificationService>();
 
 builder.Services.AddHostedService<OrbitApi.Services.ComplianceReminderService>();
 

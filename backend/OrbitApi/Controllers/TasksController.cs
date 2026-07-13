@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using OrbitApi.Authorization;
 using OrbitApi.DTOs;
 using OrbitApi.Models;
+using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
 {
@@ -14,11 +15,13 @@ namespace OrbitApi.Controllers
     {
         private readonly OrbitDbContext _db;
         private readonly IAuthorizationService _authorizationService;
+        private readonly INotificationService _notificationService;
 
-        public TasksController(OrbitDbContext db, IAuthorizationService authorizationService)
+        public TasksController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService)
         {
             _db = db;
             _authorizationService = authorizationService;
+            _notificationService = notificationService;
         }
 
         [HttpPost]
@@ -120,6 +123,17 @@ namespace OrbitApi.Controllers
                         task.CompletedDate = null; // Reverted if moved back from Done
                     }
 
+                    var assignedUserIds = await _db.TaskMembers
+                        .Where(tm => tm.TaskId == id)
+                        .Select(tm => tm.UserId)
+                        .Distinct()
+                        .ToListAsync();
+
+                    if (assignedUserIds.Any())
+                    {
+                        await _notificationService.NotifyUsersAsync(assignedUserIds, $"Status for task '{task.Title}' changed from {oldStatus} to {newStatus}.");
+                    }
+
                     var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
                     if (int.TryParse(userIdStr, out var userId))
                     {
@@ -136,7 +150,30 @@ namespace OrbitApi.Controllers
                 }
             }
             if (req.Priority.HasValue) task.Priority = (OrbitApi.Models.PriorityLevel)req.Priority.Value;
-            if (req.Deadline.HasValue) task.Deadline = req.Deadline;
+            if (req.Deadline.HasValue)
+            {
+                var oldDeadlineText = task.Deadline.HasValue ? task.Deadline.Value.ToString("yyyy-MM-dd") : "No deadline";
+                var newDeadlineText = req.Deadline.Value.ToString("yyyy-MM-dd");
+                if (task.Deadline != req.Deadline)
+                {
+                    task.Deadline = req.Deadline;
+
+                    var assignedUserIds = await _db.TaskMembers
+                        .Where(tm => tm.TaskId == id)
+                        .Select(tm => tm.UserId)
+                        .Distinct()
+                        .ToListAsync();
+
+                    if (assignedUserIds.Any())
+                    {
+                        await _notificationService.NotifyUsersAsync(assignedUserIds, $"Deadline for task '{task.Title}' changed from {oldDeadlineText} to {newDeadlineText}.");
+                    }
+                }
+                else
+                {
+                    task.Deadline = req.Deadline;
+                }
+            }
             if (req.ParentTaskId.HasValue) task.ParentTaskId = req.ParentTaskId;
 
             await _db.SaveChangesAsync();
@@ -266,6 +303,13 @@ namespace OrbitApi.Controllers
             _db.TaskMembers.Add(member);
             await _db.SaveChangesAsync();
 
+            var assignedUser = await _db.Users.FindAsync(req.UserId);
+            if (assignedUser != null)
+            {
+                var message = $"You were assigned to task '{task.Title}'.";
+                await _notificationService.NotifyUserAsync(req.UserId, message);
+            }
+
             return Ok(new TaskMemberDto { Id = member.Id, TaskId = member.TaskId, UserId = member.UserId });
         }
 
@@ -342,6 +386,21 @@ namespace OrbitApi.Controllers
             _db.Comments.Add(comment);
             await _db.SaveChangesAsync();
 
+            var task = await _db.Tasks.FindAsync(id);
+            if (task != null)
+            {
+                var mentionedUserIds = ParseMentions(req.Content);
+                foreach (var mentionedUserId in mentionedUserIds)
+                {
+                    var mentionedUser = await _db.Users.FindAsync(mentionedUserId);
+                    if (mentionedUser != null)
+                    {
+                        var message = $"You were mentioned in a comment on task '{task.Title}'.";
+                        await _notificationService.NotifyUserAsync(mentionedUserId, message);
+                    }
+                }
+            }
+
             var user = await _db.Users.FindAsync(userId);
 
             return Ok(new CommentDto
@@ -355,6 +414,24 @@ namespace OrbitApi.Controllers
                 ParentCommentId = comment.ParentCommentId,
                 CreatedAt = comment.CreatedAt
             });
+        }
+
+        private List<int> ParseMentions(string content)
+        {
+            var mentionedIds = new List<int>();
+            if (string.IsNullOrWhiteSpace(content)) return mentionedIds;
+
+            var tokens = content.Split(new[] { ' ', '\n', '\r', '\t', ',', '.', '!', '?' }, StringSplitOptions.RemoveEmptyEntries);
+            foreach (var token in tokens)
+            {
+                if (!token.StartsWith("@")) continue;
+                if (int.TryParse(token.TrimStart('@'), out var userId))
+                {
+                    mentionedIds.Add(userId);
+                }
+            }
+
+            return mentionedIds.Distinct().ToList();
         }
 
         // --- Attachments ---
@@ -375,6 +452,8 @@ namespace OrbitApi.Controllers
                     MimeType = a.MimeType,
                     FileSizeBytes = a.FileSizeBytes,
                     PreviewEnabled = a.PreviewEnabled,
+                    DownloadUrl = $"https://localhost:7065/api/v1/tasks/attachments/{a.Id}/download",
+                    PreviewUrl = a.PreviewEnabled ? $"https://localhost:7065/api/v1/tasks/attachments/{a.Id}/download" : null,
                     UserId = a.UserId
                 })
                 .ToListAsync();
@@ -393,8 +472,9 @@ namespace OrbitApi.Controllers
             var uploadsDir = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Tasks", id.ToString());
             Directory.CreateDirectory(uploadsDir);
 
-            var uniqueName = $"{Guid.NewGuid()}_{file.FileName}";
-            var filePath = Path.Combine(uploadsDir, uniqueName);
+            var safeFileName = Path.GetFileName(file.FileName);
+            var uniqueName = $"{Guid.NewGuid()}_{safeFileName}";
+            var filePath = Path.GetFullPath(Path.Combine(uploadsDir, uniqueName));
 
             using (var stream = new FileStream(filePath, FileMode.Create))
             {
@@ -433,6 +513,8 @@ namespace OrbitApi.Controllers
                 MimeType = attachment.MimeType,
                 FileSizeBytes = attachment.FileSizeBytes,
                 PreviewEnabled = attachment.PreviewEnabled,
+                DownloadUrl = $"https://localhost:7065/api/v1/tasks/attachments/{attachment.Id}/download",
+                PreviewUrl = attachment.PreviewEnabled ? $"https://localhost:7065/api/v1/tasks/attachments/{attachment.Id}/download" : null,
                 UserId = attachment.UserId
             });
         }
@@ -447,7 +529,13 @@ namespace OrbitApi.Controllers
                 return NotFound("File not found on disk.");
 
             var stream = new FileStream(attachment.AbsoluteFilePath, FileMode.Open, FileAccess.Read);
-            return File(stream, attachment.MimeType, attachment.FileName);
+            
+            // Set Content-Disposition to inline for browser viewing, fallback to attachment for download
+            var contentDisposition = new Microsoft.Net.Http.Headers.ContentDispositionHeaderValue("inline");
+            contentDisposition.FileName = attachment.FileName;
+            Response.Headers.Append("Content-Disposition", contentDisposition.ToString());
+            
+            return File(stream, attachment.MimeType);
         }
 
         [HttpDelete("attachments/{attachmentId}")]

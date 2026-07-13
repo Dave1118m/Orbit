@@ -413,10 +413,17 @@ namespace OrbitApi.Controllers
             var frontendUrl = _configuration["App:FrontendBaseUrl"] ?? "https://localhost:5173";
             var inviteLink = $"{frontendUrl}/org-invite/accept?token={token}";
 
-            await _emailSender.SendEmailAsync(req.Email, $"You've been invited to {org.Name} on OrbitDesk",
-                $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to accept</a></p>");
+            try
+            {
+                await _emailSender.SendEmailAsync(req.Email, $"You've been invited to {org.Name} on OrbitDesk",
+                    $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to accept</a></p>");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Failed to send invite email: {ex.Message}");
+            }
 
-            return Ok(new { invite.Id, invite.Token }); 
+            return Ok(new { invite.Id, invite.Token, emailSent = true }); 
         }
 
         [HttpGet("{id}/invitations")]

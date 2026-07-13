@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Modal from './Modal';
 import GlobalSearchDropdown from './GlobalSearchDropdown';
+import { createOrGetConnection, onEvent, offEvent } from '../lib/signalrClient';
 
 export default function DashboardLayout({ children }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -15,9 +16,11 @@ export default function DashboardLayout({ children }) {
   const profilePhotoInputRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [unreadNotificationCount, setUnreadNotificationCount] = useState(0);
   const searchInputRef = useRef(null);
   const searchContainerRef = useRef(null);
   const location = useLocation();
+  const navigate = useNavigate();
   const pathName = location.pathname.split('/')[1] || 'Dashboard';
   const pageTitle = pathName.charAt(0).toUpperCase() + pathName.slice(1);
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
@@ -48,6 +51,41 @@ export default function DashboardLayout({ children }) {
     }
 
     loadUser();
+  }, []);
+
+  // ── Setup SignalR for notifications ──────────────────────────────────────
+  useEffect(() => {
+    async function setupNotifications() {
+      const token = localStorage.getItem('token');
+      if (!token) return;
+
+      try {
+        // Load unread count
+        const countResp = await fetch('https://localhost:7065/api/v1/notifications/unread-count', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (countResp.ok) {
+          const data = await countResp.json();
+          setUnreadNotificationCount(data.unreadCount);
+        }
+
+        // Setup SignalR listener
+        const conn = await createOrGetConnection(token);
+        const handleNotificationReceived = (notification) => {
+          setUnreadNotificationCount(prev => prev + 1);
+        };
+
+        onEvent(conn, 'NotificationReceived', handleNotificationReceived);
+
+        return () => {
+          offEvent(conn, 'NotificationReceived', handleNotificationReceived);
+        };
+      } catch (err) {
+        console.error('Failed to setup notifications', err);
+      }
+    }
+
+    setupNotifications();
   }, []);
 
   const handleLogout = () => {
@@ -221,15 +259,19 @@ export default function DashboardLayout({ children }) {
             </div>
             
             <div className="flex items-center gap-4 border-l border-slate-200 pl-6">
-              <button className="flex items-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 transition">
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-                New
-              </button>
-              <button className="rounded-full border border-slate-200 bg-white p-2.5 text-slate-400 hover:text-slate-600 transition shadow-sm">
+              <button 
+                onClick={() => navigate('/notifications')}
+                className="relative rounded-full border border-slate-200 bg-white p-2.5 text-slate-400 hover:text-slate-600 transition shadow-sm"
+              >
                 <span className="sr-only">View notifications</span>
                 <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
                 </svg>
+                {unreadNotificationCount > 0 && (
+                  <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-red-500 text-xs font-bold text-white">
+                    {unreadNotificationCount > 99 ? '99+' : unreadNotificationCount}
+                  </span>
+                )}
               </button>
               <div className="relative">
                 <button

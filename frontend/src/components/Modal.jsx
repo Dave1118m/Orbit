@@ -27,7 +27,7 @@ export default function Modal({ isOpen, onClose, title, children }) {
       ref={dialogRef}
       onClick={handleBackdropClick}
       onClose={onClose}
-      className="backdrop:bg-slate-950/70 p-0 rounded-2xl shadow-2xl open:animate-in open:fade-in open:zoom-in-95 m-auto w-full max-w-lg border border-slate-200 bg-white"
+      className="backdrop:bg-slate-950/70 p-0 rounded-2xl shadow-2xl m-auto w-[min(92vw,900px)] max-w-5xl border border-slate-200 bg-white"
     >
       <div className="flex items-center justify-between border-b border-slate-100 px-6 py-4">
         <h3 className="text-lg font-semibold text-slate-900">{title}</h3>
