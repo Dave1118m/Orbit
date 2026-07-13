@@ -472,10 +472,12 @@ public class OrganizationInvitation
     public DateTime ExpiresAt { get; set; }
     public InvitationStatus Status { get; set; } = InvitationStatus.Pending;
     public int InvitedByUserId { get; set; }
+    public int? UserId { get; set; } // Link to user account created for invitation
 
     public Organization? Organization { get; set; }
     public Role? PreAssignedRole { get; set; }
     public User? InvitedByUser { get; set; }
+    public User? User { get; set; }
 }
 
 public class OrganizationPartner

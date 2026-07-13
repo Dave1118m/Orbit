@@ -6,6 +6,8 @@ using OrbitApi.DTOs;
 using OrbitApi.Models;
 using OrbitApi.Services;
 using Microsoft.Extensions.Configuration;
+using Microsoft.AspNetCore.Identity;
+using OrbitApi.Identity;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -22,13 +24,15 @@ namespace OrbitApi.Controllers
         private readonly IAuthorizationService _authorizationService;
         private readonly IEmailSender _emailSender;
         private readonly IConfiguration _configuration;
+        private readonly UserManager<ApplicationUser> _userManager;
 
-        public OrganizationsController(OrbitDbContext db, IAuthorizationService authorizationService, IEmailSender emailSender, IConfiguration configuration)
+        public OrganizationsController(OrbitDbContext db, IAuthorizationService authorizationService, IEmailSender emailSender, IConfiguration configuration, UserManager<ApplicationUser> userManager)
         {
             _db = db;
             _authorizationService = authorizationService;
             _emailSender = emailSender;
             _configuration = configuration;
+            _userManager = userManager;
         }
 
         private int GetCurrentUserId() => int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
@@ -395,6 +399,37 @@ namespace OrbitApi.Controllers
             var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleEnum);
             if (role == null) return BadRequest("Role not found");
 
+            // Check if user already exists
+            var existingUser = await _userManager.FindByEmailAsync(req.Email);
+            int? userId = null;
+
+            if (existingUser == null)
+            {
+                // Create new user account with temporary password
+                var tempPassword = Guid.NewGuid().ToString("N") + "Temp!";
+                var newUser = new ApplicationUser
+                {
+                    UserName = req.Email,
+                    Email = req.Email,
+                    EmailConfirmed = false, // Will be confirmed when they set password
+                    FullName = req.Email.Split('@')[0] // Temporary name from email
+                };
+
+                var result = await _userManager.CreateAsync(newUser, tempPassword);
+                if (!result.Succeeded)
+                {
+                    return BadRequest($"Failed to create user: {string.Join(", ", result.Errors.Select(e => e.Description))}");
+                }
+
+                userId = newUser.Id;
+                Console.WriteLine($"Created new user account for {req.Email} with ID {userId}");
+            }
+            else
+            {
+                userId = existingUser.Id;
+                Console.WriteLine($"User already exists for {req.Email} with ID {userId}");
+            }
+
             var token = Guid.NewGuid().ToString("N");
             var invite = new OrganizationInvitation
             {
@@ -404,26 +439,30 @@ namespace OrbitApi.Controllers
                 Token = token,
                 ExpiresAt = DateTime.UtcNow.AddDays(7),
                 Status = InvitationStatus.Pending,
-                InvitedByUserId = GetCurrentUserId()
+                InvitedByUserId = GetCurrentUserId(),
+                UserId = userId // Link to user account
             };
 
             _db.OrganizationInvitations.Add(invite);
             await _db.SaveChangesAsync();
 
             var frontendUrl = _configuration["App:FrontendBaseUrl"] ?? "https://localhost:5173";
-            var inviteLink = $"{frontendUrl}/org-invite/accept?token={token}";
+            var inviteLink = $"{frontendUrl}/setup-password?token={token}";
 
             try
             {
-                await _emailSender.SendEmailAsync(req.Email, $"You've been invited to {org.Name} on OrbitDesk",
-                    $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to accept</a></p>");
+                var emailBody = existingUser == null 
+                    ? $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to set up your account and accept the invitation</a></p>"
+                    : $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to accept the invitation</a></p>";
+
+                await _emailSender.SendEmailAsync(req.Email, $"You've been invited to {org.Name} on OrbitDesk", emailBody);
             }
             catch (Exception ex)
             {
                 Console.WriteLine($"Failed to send invite email: {ex.Message}");
             }
 
-            return Ok(new { invite.Id, invite.Token, emailSent = true }); 
+            return Ok(new { invite.Id, invite.Token, emailSent = true, userCreated = existingUser == null }); 
         }
 
         [HttpGet("{id}/invitations")]
@@ -469,36 +508,8 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
-        [HttpPost("invite/accept")]
-        public async Task<ActionResult> AcceptInvitation([FromQuery] string token)
-        {
-            var invite = await _db.OrganizationInvitations.FirstOrDefaultAsync(i => i.Token == token);
-            if (invite == null || invite.Status != InvitationStatus.Pending || invite.ExpiresAt < DateTime.UtcNow)
-                return BadRequest("Invalid or expired invitation");
-
-            invite.Status = InvitationStatus.Accepted;
-
-            var userId = GetCurrentUserId();
-            var existingMember = await _db.OrganizationMembers.FirstOrDefaultAsync(m => m.OrganizationId == invite.OrganizationId && m.UserId == userId);
-            if (existingMember == null)
-            {
-                _db.OrganizationMembers.Add(new OrganizationMember
-                {
-                    OrganizationId = invite.OrganizationId,
-                    UserId = userId,
-                    RoleId = invite.PreAssignedRoleId,
-                    Status = OrgMemberStatus.Active,
-                    JoinedAt = DateTime.UtcNow
-                });
-            }
-            else
-            {
-                existingMember.Status = OrgMemberStatus.Active;
-            }
-
-            await _db.SaveChangesAsync();
-            return Ok();
-        }
+        // Old invitation acceptance endpoint removed - replaced by professional flow
+        // Users now set up their password via /api/v1/auth/setup-password endpoint
 
         [HttpDelete("{id}/members/{userId}")]
         public async Task<ActionResult> RemoveMember(int id, int userId)

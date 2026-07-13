@@ -8,6 +8,8 @@ using OrbitApi.Identity;
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
+using Microsoft.EntityFrameworkCore;
+using OrbitApi.Models;
 
 namespace OrbitApi.Controllers;
 
@@ -20,15 +22,17 @@ public class AuthController : ControllerBase
     private readonly IConfiguration _config;
     private readonly OrbitApi.Services.IEmailSender _emailSender;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly OrbitDbContext _db;
     private readonly string _googleRedirectUri;
 
-        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IConfiguration config, OrbitApi.Services.IEmailSender emailSender, IHttpClientFactory httpClientFactory)
+        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IConfiguration config, OrbitApi.Services.IEmailSender emailSender, IHttpClientFactory httpClientFactory, OrbitDbContext db)
         {
             _userManager = userManager;
             _signInManager = signInManager;
             _config = config;
             _emailSender = emailSender;
             _httpClientFactory = httpClientFactory;
+            _db = db;
             _googleRedirectUri = _config["Google:RedirectUri"] ?? "https://localhost:7065/api/v1/auth/google-callback";
         }
 
@@ -70,11 +74,10 @@ public class AuthController : ControllerBase
         var signRes = await _signInManager.CheckPasswordSignInAsync(user, req.Password, false);
         if (!signRes.Succeeded) return Unauthorized();
 
-        // Temporarily skip email confirmation for development while fixing email issues
-        // if (!user.EmailConfirmed)
-        // {
-        //     return Unauthorized("Email not confirmed");
-        // }
+        if (!user.EmailConfirmed)
+        {
+            return Unauthorized("Email not confirmed");
+        }
 
         var token = GenerateToken(user);
         return Ok(new { token });
@@ -179,19 +182,145 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ConfirmEmail([FromQuery] int userId, [FromQuery] string token)
     {
         var frontendUrl = _config["App:FrontendBaseUrl"] ?? "https://localhost:5173";
+        Console.WriteLine($"Email confirmation attempt: userId={userId}, token={token}");
+        
         var user = await _userManager.FindByIdAsync(userId.ToString());
-        if (user == null) return Redirect($"{frontendUrl}/login?error=user_not_found");
+        if (user == null)
+        {
+            Console.WriteLine($"User not found with userId={userId}");
+            return Redirect($"{frontendUrl}/login?error=user_not_found");
+        }
+
+        Console.WriteLine($"User found: {user.Email}, EmailConfirmed={user.EmailConfirmed}");
 
         var decoded = System.Net.WebUtility.UrlDecode(token);
+        Console.WriteLine($"Decoded token: {decoded}");
+        
         var res = await _userManager.ConfirmEmailAsync(user, decoded);
-        if (!res.Succeeded) return Redirect($"{frontendUrl}/login?error=email_confirm_failed");
+        if (!res.Succeeded)
+        {
+            Console.WriteLine($"Email confirmation failed for user {user.Email}");
+            foreach (var error in res.Errors)
+            {
+                Console.WriteLine($"Error: {error.Description}");
+            }
+            return Redirect($"{frontendUrl}/login?error=email_confirm_failed");
+        }
 
+        Console.WriteLine($"Email confirmation successful for user {user.Email}");
         return Redirect($"{frontendUrl}/login?message=email_confirmed");
     }
 
     public record IdTokenRequest(string IdToken);
 
     public record ResendConfirmationRequest(string Email);
+
+    public record SetupPasswordRequest(string Token, string Password, string FullName);
+
+    [HttpPost("setup-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SetupPassword([FromBody] SetupPasswordRequest req)
+    {
+        Console.WriteLine($"Password setup attempt with token: {req.Token}");
+        
+        // Find invitation by token
+        var invite = await _db.OrganizationInvitations
+            .Include(i => i.Organization)
+            .Include(i => i.PreAssignedRole)
+            .FirstOrDefaultAsync(i => i.Token == req.Token);
+        
+        if (invite == null)
+        {
+            Console.WriteLine("Invitation not found");
+            return BadRequest("Invalid invitation token");
+        }
+
+        if (invite.Status != InvitationStatus.Pending)
+        {
+            Console.WriteLine($"Invitation already processed: {invite.Status}");
+            return BadRequest("Invitation already processed");
+        }
+
+        if (invite.ExpiresAt < DateTime.UtcNow)
+        {
+            Console.WriteLine("Invitation expired");
+            return BadRequest("Invitation has expired");
+        }
+
+        if (!invite.UserId.HasValue)
+        {
+            Console.WriteLine("No user associated with invitation");
+            return BadRequest("No user account found for this invitation");
+        }
+
+        var user = await _userManager.FindByIdAsync(invite.UserId.Value.ToString());
+        if (user == null)
+        {
+            Console.WriteLine($"User not found with ID {invite.UserId.Value}");
+            return BadRequest("User account not found");
+        }
+
+        Console.WriteLine($"Setting password for user {user.Email}");
+
+        // Set the new password
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+        var result = await _userManager.ResetPasswordAsync(user, token, req.Password);
+        
+        if (!result.Succeeded)
+        {
+            Console.WriteLine($"Failed to set password: {string.Join(", ", result.Errors.Select(e => e.Description))}");
+            return BadRequest($"Failed to set password: {string.Join(", ", result.Errors.Select(e => e.Description))}");
+        }
+
+        // Update user full name if provided
+        if (!string.IsNullOrWhiteSpace(req.FullName))
+        {
+            user.FullName = req.FullName;
+            await _userManager.UpdateAsync(user);
+        }
+
+        // Confirm email
+        user.EmailConfirmed = true;
+        await _userManager.UpdateAsync(user);
+
+        Console.WriteLine($"Password set successfully for user {user.Email}");
+
+        // Add user to organization
+        var existingMember = await _db.OrganizationMembers
+            .FirstOrDefaultAsync(m => m.OrganizationId == invite.OrganizationId && m.UserId == user.Id);
+        
+        if (existingMember == null)
+        {
+            _db.OrganizationMembers.Add(new OrganizationMember
+            {
+                OrganizationId = invite.OrganizationId,
+                UserId = user.Id,
+                RoleId = invite.PreAssignedRoleId,
+                Status = OrgMemberStatus.Active,
+                JoinedAt = DateTime.UtcNow
+            });
+            Console.WriteLine($"Added user {user.Email} to organization {invite.OrganizationId} with role {invite.PreAssignedRole?.Name}");
+        }
+
+        // Update invitation status
+        invite.Status = InvitationStatus.Accepted;
+        await _db.SaveChangesAsync();
+
+        // Generate JWT token for auto-login
+        var jwtToken = GenerateToken(user);
+        
+        var frontendUrl = _config["App:FrontendBaseUrl"] ?? "https://localhost:5173";
+        var roleName = invite.PreAssignedRole?.Name.ToString() ?? "Member";
+        
+        Console.WriteLine($"Password setup complete. Redirecting to role-based dashboard for role: {roleName}");
+        
+        return Ok(new { 
+            token = jwtToken, 
+            redirectUrl = $"{frontendUrl}/dashboard?role={roleName}",
+            organizationName = invite.Organization?.Name,
+            roleName = roleName
+        });
+    }
 
     [HttpGet("google-client-id")]
     [AllowAnonymous]
@@ -264,7 +393,54 @@ public class AuthController : ControllerBase
 
         return Redirect(frontendRedirect);
     }
+
+    [HttpPost("forgot-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordRequest req)
+    {
+        var user = await _userManager.FindByEmailAsync(req.Email);
+        if (user == null || !(await _userManager.IsEmailConfirmedAsync(user)))
+        {
+            // Don't reveal that the user does not exist or is not confirmed
+            return Ok();
+        }
+
+        var token = await _userManager.GeneratePasswordResetTokenAsync(user);
+        var encodedToken = System.Net.WebUtility.UrlEncode(token);
+        
+        var frontendUrl = _config["App:FrontendBaseUrl"] ?? "https://localhost:5173";
+        var resetUrl = $"{frontendUrl}/reset-password?email={System.Net.WebUtility.UrlEncode(user.Email)}&token={encodedToken}";
+
+        var subject = "Reset your OrbitDesk Password";
+        var body = $"<p>Hi {user.FullName ?? user.Email},</p><p>Please reset your password by clicking <a href=\"{resetUrl}\">this link</a>.</p>";
+        
+        await _emailSender.SendEmailAsync(user.Email!, subject, body);
+
+        return Ok();
+    }
+
+    [HttpPost("reset-password")]
+    [AllowAnonymous]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest req)
+    {
+        var user = await _userManager.FindByEmailAsync(req.Email);
+        if (user == null)
+        {
+            // Don't reveal that the user does not exist
+            return Ok();
+        }
+
+        var result = await _userManager.ResetPasswordAsync(user, req.Token, req.NewPassword);
+        if (!result.Succeeded)
+        {
+            return BadRequest(result.Errors.Select(e => e.Description));
+        }
+
+        return Ok();
+    }
 }
 
 public record RegisterRequest(string Email, string Password, string? FullName);
 public record LoginRequest(string Email, string Password);
+public record ForgotPasswordRequest(string Email);
+public record ResetPasswordRequest(string Email, string Token, string NewPassword);
