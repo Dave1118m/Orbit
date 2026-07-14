@@ -12,6 +12,7 @@ import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
 import DashboardLayout from './components/DashboardLayout';
+import { UserProvider } from './contexts/UserContext';
 
 function Home() {
   const [health, setHealth] = useState(null);
@@ -147,9 +148,11 @@ function Content() {
 
 function App() {
   return (
-    <BrowserRouter>
-      <Content />
-    </BrowserRouter>
+    <UserProvider>
+      <BrowserRouter>
+        <Content />
+      </BrowserRouter>
+    </UserProvider>
   );
 }
 
