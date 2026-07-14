@@ -35,7 +35,6 @@ if (File.Exists(envFile))
         .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
     builder.Configuration.AddInMemoryCollection(envValues!);
     Console.WriteLine($"DEBUG: .env file found at {envFile}");
-    Console.WriteLine($"DEBUG: loaded Smtp:Host={envValues.GetValueOrDefault("Smtp:Host")}");
 }
 
 builder.Configuration
@@ -125,8 +124,8 @@ builder.Services.AddAuthentication(options =>
 // HTTP client for external token verification (Google)
 builder.Services.AddHttpClient();
 
-// Email sender (SMTP) - registers a simple implementation below
-builder.Services.AddSingleton<OrbitApi.Services.IEmailSender, OrbitApi.Services.SmtpEmailSender>();
+// Email sender (SendGrid)
+builder.Services.AddSingleton<OrbitApi.Services.IEmailSender, OrbitApi.Services.SendGridEmailSender>();
 
 // Notification service registration
 builder.Services.AddScoped<INotificationService, NotificationService>();
