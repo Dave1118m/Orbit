@@ -1,63 +1,80 @@
 import { useUser } from '../../contexts/UserContext';
+import { Link } from 'react-router-dom';
+import ProjectStatusChart from './ProjectStatusChart';
+import TaskStatusChart from './TaskStatusChart';
+import ActiveProjectsList from './ActiveProjectsList';
+import ActivityFeed from './ActivityFeed';
+import { FolderKanban, CheckCircle2, Users, Mail } from 'lucide-react';
 
-export default function OwnerDashboard() {
+export default function OwnerDashboard({ stats = {}, tasks = [], projects = [] }) {
   const { user } = useUser();
 
+  const StatCard = ({ title, value, icon, color, to }) => (
+    <Link to={to} className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm flex flex-col justify-between h-40 transition hover:shadow-md hover:border-indigo-300 group cursor-pointer">
+      <div className="flex justify-between items-start">
+        <div className={`h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center ${color} group-hover:scale-110 transition`}>
+          {icon}
+        </div>
+      </div>
+      <div className="mt-4">
+        <p className="text-3xl font-black text-slate-900 group-hover:text-indigo-600 transition">
+          {value !== null && value !== undefined ? value : 0}
+        </p>
+        <p className="text-sm font-semibold text-slate-500 mt-1">{title}</p>
+      </div>
+    </Link>
+  );
+
   return (
-    <div className="flex flex-col gap-6">
-      {/* System Overview */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-slate-900 mb-4">System Overview</h2>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="p-4 bg-slate-50 rounded-xl">
-            <p className="text-2xl font-bold text-slate-900">{user?.totalOrganizations || 0}</p>
-            <p className="text-sm text-slate-500">Total Organizations</p>
-          </div>
-          <div className="p-4 bg-slate-50 rounded-xl">
-            <p className="text-2xl font-bold text-slate-900">{user?.totalUsers || 0}</p>
-            <p className="text-sm text-slate-500">Total Users</p>
-          </div>
-          <div className="p-4 bg-slate-50 rounded-xl">
-            <p className="text-2xl font-bold text-slate-900">{user?.activeProjects || 0}</p>
-            <p className="text-sm text-slate-500">Active Projects</p>
-          </div>
-          <div className="p-4 bg-slate-50 rounded-xl">
-            <p className="text-2xl font-bold text-slate-900">{user?.systemHealth || 'Good'}</p>
-            <p className="text-sm text-slate-500">System Health</p>
-          </div>
-        </div>
+    <div className="flex flex-col gap-6 max-w-7xl mx-auto w-full pb-8">
+      {/* ── Header ── */}
+      <div className="mb-2">
+        <h1 className="text-2xl font-bold text-slate-900">Owner Command Center</h1>
+        <p className="text-slate-500">Overview of organization metrics, projects, and active tasks.</p>
       </div>
 
-      {/* User Management */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold text-slate-900">User Management</h2>
-          <button className="px-4 py-2 bg-brand-500 text-white rounded-lg hover:bg-brand-600">
-            Invite User
-          </button>
-        </div>
-        <div className="w-full h-[200px] flex items-center justify-center border-2 border-dashed border-slate-100 rounded-xl bg-slate-50/50">
-          <p className="text-slate-400">User management interface</p>
-        </div>
+      {/* ── Stat Summary Cards (4 Columns) ── */}
+      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+        <StatCard 
+          title="Total Projects" 
+          value={projects.length || stats.projectsCount} 
+          color="text-brand-500"
+          icon={<FolderKanban className="w-5 h-5" />}
+          to="/projects"
+        />
+        <StatCard 
+          title="Total Tasks" 
+          value={tasks.length || stats.tasksCount} 
+          color="text-emerald-500"
+          icon={<CheckCircle2 className="w-5 h-5" />}
+          to="/tasks"
+        />
+        <StatCard 
+          title="Teams" 
+          value={stats.teamsCount} 
+          color="text-indigo-500"
+          icon={<Users className="w-5 h-5" />}
+          to="/teams"
+        />
+        <StatCard 
+          title="Landing Inquiries" 
+          value="View" 
+          color="text-amber-500"
+          icon={<Mail className="w-5 h-5" />}
+          to="/settings"
+        />
       </div>
 
-      {/* System Settings */}
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-bold text-slate-900 mb-4">System Settings</h2>
-        <div className="space-y-3">
-          <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-            <span className="text-slate-700">Email Configuration</span>
-            <span className="text-green-500 text-sm">Active</span>
-          </div>
-          <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-            <span className="text-slate-700">Database Status</span>
-            <span className="text-green-500 text-sm">Connected</span>
-          </div>
-          <div className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
-            <span className="text-slate-700">API Rate Limiting</span>
-            <span className="text-green-500 text-sm">Enabled</span>
-          </div>
-        </div>
+      {/* ── Charts Section - Side by Side ── */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <ProjectStatusChart projects={projects} />
+        <TaskStatusChart tasks={tasks} />
+      </div>
+
+      {/* ── Active Tasks & Projects List + Activity Feed ── */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        <ActiveProjectsList projects={projects} tasks={tasks} />
+        <ActivityFeed />
       </div>
     </div>
   );

@@ -22,6 +22,26 @@ namespace OrbitApi.Migrations
 
             SqlServerModelBuilderExtensions.UseIdentityColumns(modelBuilder);
 
+            modelBuilder.Entity("OrbitApi.Models.AppPermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("Permissions");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Attachment", b =>
                 {
                     b.Property<int>("Id")
@@ -103,7 +123,7 @@ namespace OrbitApi.Migrations
                     b.ToTable("AuditLogs");
                 });
 
-            modelBuilder.Entity("OrbitApi.Models.BudgetRevision", b =>
+            modelBuilder.Entity("OrbitApi.Models.BankAccount", b =>
                 {
                     b.Property<int>("Id")
                         .ValueGeneratedOnAdd()
@@ -111,23 +131,155 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int?>("ApprovedByFinanceOfficerId")
+                    b.Property<string>("AccountName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("BankName")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<int>("OrganizationId")
                         .HasColumnType("int");
 
-                    b.Property<DateTime?>("ApprovedDate")
+                    b.Property<string>("SwiftCode")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.ToTable("BankAccounts");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.Budget", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("OrganizationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("TaskId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("TotalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("WorkspaceId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("WorkspaceId");
+
+                    b.ToTable("Budgets");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.BudgetLineItem", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("BudgetId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BudgetId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.ToTable("BudgetLineItems");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.BudgetRevisionLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("BudgetId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("DateApproved")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("ProjectId")
-                        .HasColumnType("int");
+                    b.Property<decimal>("NewAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<decimal>("PreviousAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("VersionNo")
                         .HasColumnType("int");
 
                     b.HasKey("Id");
 
-                    b.HasIndex("ProjectId");
+                    b.HasIndex("ApprovedByUserId");
 
-                    b.ToTable("BudgetRevisions");
+                    b.HasIndex("BudgetId");
+
+                    b.ToTable("BudgetRevisionLogs");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Comment", b =>
@@ -168,6 +320,53 @@ namespace OrbitApi.Migrations
                     b.ToTable("Comments");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.ContactInquiry", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AdminNotes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Email")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsResolved")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("RepliedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("RepliedByUserName")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ReplyMessage")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("ContactInquiries");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Donor", b =>
                 {
                     b.Property<int>("Id")
@@ -176,22 +375,124 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<string>("AllocatedProject")
+                    b.Property<string>("Country")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("Contribution")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("DonorType")
                         .HasColumnType("int");
+
+                    b.Property<string>("EmailAddress")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("PrimaryContact")
+                        .HasColumnType("nvarchar(max)");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("OrganizationId");
+
                     b.ToTable("Donors");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.DonorCommunication", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DonorId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("LoggedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Method")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Notes")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DonorId");
+
+                    b.HasIndex("LoggedByUserId");
+
+                    b.ToTable("DonorCommunications");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.DonorContribution", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AllocatedProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("AllocatedTaskId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("DonorId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AllocatedProjectId");
+
+                    b.HasIndex("AllocatedTaskId");
+
+                    b.HasIndex("BankAccountId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("DonorId");
+
+                    b.ToTable("DonorContributions");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Expense", b =>
@@ -211,6 +512,21 @@ namespace OrbitApi.Migrations
                     b.Property<int?>("ApprovedByFinanceOfficerId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("AttachmentId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Category")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
                     b.Property<string>("Currency")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -222,22 +538,225 @@ namespace OrbitApi.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("FinanceReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ManagerSignedOffAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("PaidAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("PaidByUserId")
+                        .HasColumnType("int");
+
                     b.Property<int?>("ProjectId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("ProjectId1")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RejectionReason")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<int?>("SignedOffByManagerId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("SubmittedByUserId")
                         .HasColumnType("int");
 
                     b.Property<int?>("TaskId")
                         .HasColumnType("int");
 
+                    b.Property<int?>("TaskItemId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("ApprovedByFinanceOfficerId");
+
+                    b.HasIndex("AttachmentId");
+
+                    b.HasIndex("BankAccountId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("PaidByUserId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("ProjectId1");
+
+                    b.HasIndex("SignedOffByManagerId");
+
+                    b.HasIndex("SubmittedByUserId");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("TaskItemId");
+
+                    b.ToTable("Expenses");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.FinancialCategory", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccountType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Code")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Color")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("HierarchyLevel")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Icon")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsSystem")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsUSAIDAllowable")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ParentCategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("RequiresReceiptThreshold")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("TargetBudgetLimit")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("ParentCategoryId");
+
+                    b.ToTable("FinancialCategories");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.FinancialTransaction", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("BankAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("BaseCurrencyAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("CreatedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("DonorContributionId")
+                        .HasColumnType("int");
+
+                    b.Property<decimal>("ExchangeRate")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int?>("ExpenseId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PayeeOrPayer")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReferenceNumber")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("TaskId")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("ToBankAccountId")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("TransactionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("TransactionNumber")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Type")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("BankAccountId");
+
+                    b.HasIndex("CategoryId");
+
+                    b.HasIndex("CreatedByUserId");
+
+                    b.HasIndex("DonorContributionId");
+
+                    b.HasIndex("ExpenseId");
+
+                    b.HasIndex("OrganizationId");
 
                     b.HasIndex("ProjectId");
 
                     b.HasIndex("TaskId");
 
-                    b.ToTable("Expenses");
+                    b.HasIndex("ToBankAccountId");
+
+                    b.ToTable("FinancialTransactions");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.GrantCondition", b =>
@@ -266,6 +785,41 @@ namespace OrbitApi.Migrations
                     b.ToTable("GrantConditions");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.GrantReportSchedule", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("DeadlineDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("DonorId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("ReportType")
+                        .HasColumnType("int");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("SubmittedDate")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DonorId");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("GrantReportSchedules");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Indicator", b =>
                 {
                     b.Property<int>("Id")
@@ -282,8 +836,18 @@ namespace OrbitApi.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("OutputId")
+                    b.Property<int>("EntityId")
                         .HasColumnType("int");
+
+                    b.Property<int>("Level")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("ProjectId")
                         .HasColumnType("int");
@@ -296,9 +860,117 @@ namespace OrbitApi.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
                     b.HasKey("Id");
 
                     b.ToTable("Indicators");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeActivity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int?>("LinkedTaskId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("OutputId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LinkedTaskId");
+
+                    b.HasIndex("OutputId");
+
+                    b.ToTable("LogframeActivities");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeGoal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.ToTable("LogframeGoals");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeOutcome", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("GoalId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("GoalId");
+
+                    b.ToTable("LogframeOutcomes");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeOutput", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("OutcomeId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OutcomeId");
+
+                    b.ToTable("LogframeOutputs");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Notification", b =>
@@ -343,9 +1015,6 @@ namespace OrbitApi.Migrations
 
                     b.Property<string>("BackupJson")
                         .HasColumnType("nvarchar(max)");
-
-                    b.Property<decimal?>("Budget")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Country")
                         .HasColumnType("nvarchar(max)");
@@ -451,6 +1120,9 @@ namespace OrbitApi.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
                     b.HasIndex("InvitedByUserId");
@@ -458,6 +1130,8 @@ namespace OrbitApi.Migrations
                     b.HasIndex("OrganizationId");
 
                     b.HasIndex("PreAssignedRoleId");
+
+                    b.HasIndex("UserId");
 
                     b.ToTable("OrganizationInvitations");
                 });
@@ -579,9 +1253,6 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<decimal?>("Budget")
-                        .HasColumnType("decimal(18,2)");
-
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
@@ -590,6 +1261,10 @@ namespace OrbitApi.Migrations
 
                     b.Property<DateTime?>("EndDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<string>("FundingType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -625,6 +1300,9 @@ namespace OrbitApi.Migrations
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
                     b.Property<decimal>("AllocatedAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("CoFundingPercentage")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("DonorId")
@@ -762,6 +1440,34 @@ namespace OrbitApi.Migrations
                     b.ToTable("ProjectTeamHistories");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.RevokedToken", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("ExpiresAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("RevokedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("TokenId")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("RevokedTokens");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.RiskIssue", b =>
                 {
                     b.Property<int>("Id")
@@ -770,12 +1476,28 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Description")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Impact")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("ImpactScore")
+                        .HasColumnType("int");
+
                     b.Property<string>("Likelihood")
                         .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("LikelihoodScore")
+                        .HasColumnType("int");
+
+                    b.Property<string>("MitigationPlan")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Owner")
@@ -783,6 +1505,15 @@ namespace OrbitApi.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("ProjectId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ResolutionNotes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ResolvedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int?>("ResolvedByUserId")
                         .HasColumnType("int");
 
                     b.Property<string>("Status")
@@ -793,6 +1524,10 @@ namespace OrbitApi.Migrations
                         .HasColumnType("int");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ProjectId");
+
+                    b.HasIndex("ResolvedByUserId");
 
                     b.ToTable("RisksIssues");
                 });
@@ -843,6 +1578,29 @@ namespace OrbitApi.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("RoleAssignments");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.RolePermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("PermissionId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("RoleId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("PermissionId");
+
+                    b.HasIndex("RoleId");
+
+                    b.ToTable("RolePermissions");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.SavedSearch", b =>
@@ -1022,6 +1780,32 @@ namespace OrbitApi.Migrations
                     b.ToTable("TaskStatusHistories");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.TaskVolunteer", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("AssignedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("VolunteerId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("VolunteerId");
+
+                    b.ToTable("TaskVolunteers");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Team", b =>
                 {
                     b.Property<int>("Id")
@@ -1159,20 +1943,78 @@ namespace OrbitApi.Migrations
                     b.Property<string>("Availability")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<string>("BackgroundCheckStatus")
-                        .IsRequired()
+                    b.Property<int>("BackgroundCheckStatus")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Email")
                         .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int>("OrganizationId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PhoneNumber")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("Skills")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<int?>("UserId")
+                        .HasColumnType("int");
+
                     b.HasKey("Id");
 
+                    b.HasIndex("OrganizationId");
+
+                    b.HasIndex("UserId");
+
                     b.ToTable("Volunteers");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.VolunteerHour", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ApprovalStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("Date")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("Hours")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("LoggedByUserId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("TaskId")
+                        .HasColumnType("int");
+
+                    b.Property<int>("VolunteerId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("LoggedByUserId");
+
+                    b.HasIndex("TaskId");
+
+                    b.HasIndex("VolunteerId");
+
+                    b.ToTable("VolunteerHours");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Workspace", b =>
@@ -1229,15 +2071,83 @@ namespace OrbitApi.Migrations
                     b.Navigation("PerformedByUser");
                 });
 
-            modelBuilder.Entity("OrbitApi.Models.BudgetRevision", b =>
+            modelBuilder.Entity("OrbitApi.Models.BankAccount", b =>
                 {
+                    b.HasOne("OrbitApi.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.Budget", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("OrbitApi.Models.Project", "Project")
-                        .WithMany("BudgetRevisions")
+                        .WithMany()
                         .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.TaskItem", "Task")
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.Workspace", "Workspace")
+                        .WithMany()
+                        .HasForeignKey("WorkspaceId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("Task");
+
+                    b.Navigation("Workspace");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.BudgetLineItem", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Budget", "Budget")
+                        .WithMany("LineItems")
+                        .HasForeignKey("BudgetId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.Navigation("Project");
+                    b.HasOne("OrbitApi.Models.FinancialCategory", "FinancialCategory")
+                        .WithMany("BudgetLineItems")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Budget");
+
+                    b.Navigation("FinancialCategory");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.BudgetRevisionLog", b =>
+                {
+                    b.HasOne("OrbitApi.Models.User", "ApprovedByUser")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.Budget", "Budget")
+                        .WithMany("Revisions")
+                        .HasForeignKey("BudgetId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("ApprovedByUser");
+
+                    b.Navigation("Budget");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Comment", b =>
@@ -1250,21 +2160,297 @@ namespace OrbitApi.Migrations
                     b.Navigation("ParentComment");
                 });
 
-            modelBuilder.Entity("OrbitApi.Models.Expense", b =>
+            modelBuilder.Entity("OrbitApi.Models.Donor", b =>
                 {
-                    b.HasOne("OrbitApi.Models.Project", "Project")
-                        .WithMany("Expenses")
-                        .HasForeignKey("ProjectId")
+                    b.HasOne("OrbitApi.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Organization");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.DonorCommunication", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Donor", "Donor")
+                        .WithMany("Communications")
+                        .HasForeignKey("DonorId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.User", "LoggedByUser")
+                        .WithMany()
+                        .HasForeignKey("LoggedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Donor");
+
+                    b.Navigation("LoggedByUser");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.DonorContribution", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Project", "AllocatedProject")
+                        .WithMany()
+                        .HasForeignKey("AllocatedProjectId")
                         .OnDelete(DeleteBehavior.SetNull);
 
-                    b.HasOne("OrbitApi.Models.TaskItem", "Task")
-                        .WithMany("Expenses")
-                        .HasForeignKey("TaskId")
+                    b.HasOne("OrbitApi.Models.TaskItem", "AllocatedTask")
+                        .WithMany()
+                        .HasForeignKey("AllocatedTaskId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("OrbitApi.Models.BankAccount", "BankAccount")
+                        .WithMany("Contributions")
+                        .HasForeignKey("BankAccountId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OrbitApi.Models.FinancialCategory", "FinancialCategory")
+                        .WithMany("DonorContributions")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OrbitApi.Models.Donor", "Donor")
+                        .WithMany("Contributions")
+                        .HasForeignKey("DonorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AllocatedProject");
+
+                    b.Navigation("AllocatedTask");
+
+                    b.Navigation("BankAccount");
+
+                    b.Navigation("Donor");
+
+                    b.Navigation("FinancialCategory");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.Expense", b =>
+                {
+                    b.HasOne("OrbitApi.Models.User", "ApprovedByFinanceOfficer")
+                        .WithMany()
+                        .HasForeignKey("ApprovedByFinanceOfficerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.Attachment", "Attachment")
+                        .WithMany()
+                        .HasForeignKey("AttachmentId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OrbitApi.Models.BankAccount", "BankAccount")
+                        .WithMany("Expenses")
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.FinancialCategory", "FinancialCategory")
+                        .WithMany("Expenses")
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OrbitApi.Models.User", "PaidByUser")
+                        .WithMany()
+                        .HasForeignKey("PaidByUserId");
+
+                    b.HasOne("OrbitApi.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.Project", null)
+                        .WithMany("Expenses")
+                        .HasForeignKey("ProjectId1");
+
+                    b.HasOne("OrbitApi.Models.User", "SignedOffByManager")
+                        .WithMany()
+                        .HasForeignKey("SignedOffByManagerId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.User", "SubmittedByUser")
+                        .WithMany()
+                        .HasForeignKey("SubmittedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.TaskItem", "Task")
+                        .WithMany()
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.TaskItem", null)
+                        .WithMany("Expenses")
+                        .HasForeignKey("TaskItemId");
+
+                    b.Navigation("ApprovedByFinanceOfficer");
+
+                    b.Navigation("Attachment");
+
+                    b.Navigation("BankAccount");
+
+                    b.Navigation("FinancialCategory");
+
+                    b.Navigation("PaidByUser");
+
+                    b.Navigation("Project");
+
+                    b.Navigation("SignedOffByManager");
+
+                    b.Navigation("SubmittedByUser");
+
+                    b.Navigation("Task");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.FinancialCategory", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Organization", "Organization")
+                        .WithMany("FinancialCategories")
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.FinancialCategory", "ParentCategory")
+                        .WithMany("SubCategories")
+                        .HasForeignKey("ParentCategoryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("ParentCategory");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.FinancialTransaction", b =>
+                {
+                    b.HasOne("OrbitApi.Models.BankAccount", "BankAccount")
+                        .WithMany()
+                        .HasForeignKey("BankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("OrbitApi.Models.FinancialCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.HasOne("OrbitApi.Models.User", "CreatedByUser")
+                        .WithMany()
+                        .HasForeignKey("CreatedByUserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.DonorContribution", "DonorContribution")
+                        .WithMany()
+                        .HasForeignKey("DonorContributionId");
+
+                    b.HasOne("OrbitApi.Models.Expense", "Expense")
+                        .WithMany()
+                        .HasForeignKey("ExpenseId");
+
+                    b.HasOne("OrbitApi.Models.Organization", "Organization")
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId");
+
+                    b.HasOne("OrbitApi.Models.TaskItem", "Task")
+                        .WithMany()
+                        .HasForeignKey("TaskId");
+
+                    b.HasOne("OrbitApi.Models.BankAccount", "ToBankAccount")
+                        .WithMany()
+                        .HasForeignKey("ToBankAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("BankAccount");
+
+                    b.Navigation("Category");
+
+                    b.Navigation("CreatedByUser");
+
+                    b.Navigation("DonorContribution");
+
+                    b.Navigation("Expense");
+
+                    b.Navigation("Organization");
 
                     b.Navigation("Project");
 
                     b.Navigation("Task");
+
+                    b.Navigation("ToBankAccount");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.GrantReportSchedule", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Donor", "Donor")
+                        .WithMany()
+                        .HasForeignKey("DonorId");
+
+                    b.HasOne("OrbitApi.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Donor");
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeActivity", b =>
+                {
+                    b.HasOne("OrbitApi.Models.TaskItem", "LinkedTask")
+                        .WithMany()
+                        .HasForeignKey("LinkedTaskId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
+                    b.HasOne("OrbitApi.Models.LogframeOutput", "Output")
+                        .WithMany("Activities")
+                        .HasForeignKey("OutputId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("LinkedTask");
+
+                    b.Navigation("Output");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeGoal", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Project");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeOutcome", b =>
+                {
+                    b.HasOne("OrbitApi.Models.LogframeGoal", "Goal")
+                        .WithMany("Outcomes")
+                        .HasForeignKey("GoalId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Goal");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeOutput", b =>
+                {
+                    b.HasOne("OrbitApi.Models.LogframeOutcome", "Outcome")
+                        .WithMany("Outputs")
+                        .HasForeignKey("OutcomeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Outcome");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.OrganizationCompliance", b =>
@@ -1298,11 +2484,17 @@ namespace OrbitApi.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("OrbitApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId");
+
                     b.Navigation("InvitedByUser");
 
                     b.Navigation("Organization");
 
                     b.Navigation("PreAssignedRole");
+
+                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.OrganizationMember", b =>
@@ -1388,18 +2580,15 @@ namespace OrbitApi.Migrations
 
             modelBuilder.Entity("OrbitApi.Models.Project", b =>
                 {
-                    b.HasOne("OrbitApi.Models.Donor", "Donor")
+                    b.HasOne("OrbitApi.Models.Donor", null)
                         .WithMany("Projects")
-                        .HasForeignKey("DonorId")
-                        .OnDelete(DeleteBehavior.SetNull);
+                        .HasForeignKey("DonorId");
 
                     b.HasOne("OrbitApi.Models.Workspace", "Workspace")
                         .WithMany("Projects")
                         .HasForeignKey("WorkspaceId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
-
-                    b.Navigation("Donor");
 
                     b.Navigation("Workspace");
                 });
@@ -1475,6 +2664,35 @@ namespace OrbitApi.Migrations
                     b.Navigation("Project");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.RevokedToken", b =>
+                {
+                    b.HasOne("OrbitApi.Models.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.RiskIssue", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Project", "Project")
+                        .WithMany()
+                        .HasForeignKey("ProjectId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.User", "ResolvedByUser")
+                        .WithMany()
+                        .HasForeignKey("ResolvedByUserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Project");
+
+                    b.Navigation("ResolvedByUser");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.RoleAssignment", b =>
                 {
                     b.HasOne("OrbitApi.Models.Role", "Role")
@@ -1492,6 +2710,25 @@ namespace OrbitApi.Migrations
                     b.Navigation("Role");
 
                     b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.RolePermission", b =>
+                {
+                    b.HasOne("OrbitApi.Models.AppPermission", "Permission")
+                        .WithMany("RolePermissions")
+                        .HasForeignKey("PermissionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.Role", "Role")
+                        .WithMany("RolePermissions")
+                        .HasForeignKey("RoleId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Permission");
+
+                    b.Navigation("Role");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.SavedSearch", b =>
@@ -1583,6 +2820,25 @@ namespace OrbitApi.Migrations
                     b.Navigation("Task");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.TaskVolunteer", b =>
+                {
+                    b.HasOne("OrbitApi.Models.TaskItem", "Task")
+                        .WithMany("TaskVolunteers")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.Volunteer", "Volunteer")
+                        .WithMany("TaskVolunteers")
+                        .HasForeignKey("VolunteerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Task");
+
+                    b.Navigation("Volunteer");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Team", b =>
                 {
                     b.HasOne("OrbitApi.Models.Workspace", "Workspace")
@@ -1632,6 +2888,51 @@ namespace OrbitApi.Migrations
                     b.Navigation("User");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.Volunteer", b =>
+                {
+                    b.HasOne("OrbitApi.Models.Organization", "Organization")
+                        .WithMany("Volunteers")
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.User", "User")
+                        .WithMany("LinkedVolunteers")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Organization");
+
+                    b.Navigation("User");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.VolunteerHour", b =>
+                {
+                    b.HasOne("OrbitApi.Models.User", "LoggedByUser")
+                        .WithMany()
+                        .HasForeignKey("LoggedByUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.TaskItem", "Task")
+                        .WithMany("VolunteerHours")
+                        .HasForeignKey("TaskId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("OrbitApi.Models.Volunteer", "Volunteer")
+                        .WithMany("VolunteerHours")
+                        .HasForeignKey("VolunteerId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("LoggedByUser");
+
+                    b.Navigation("Task");
+
+                    b.Navigation("Volunteer");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Workspace", b =>
                 {
                     b.HasOne("OrbitApi.Models.Organization", "Organization")
@@ -1643,6 +2944,25 @@ namespace OrbitApi.Migrations
                     b.Navigation("Organization");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.AppPermission", b =>
+                {
+                    b.Navigation("RolePermissions");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.BankAccount", b =>
+                {
+                    b.Navigation("Contributions");
+
+                    b.Navigation("Expenses");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.Budget", b =>
+                {
+                    b.Navigation("LineItems");
+
+                    b.Navigation("Revisions");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Comment", b =>
                 {
                     b.Navigation("Replies");
@@ -1650,14 +2970,46 @@ namespace OrbitApi.Migrations
 
             modelBuilder.Entity("OrbitApi.Models.Donor", b =>
                 {
+                    b.Navigation("Communications");
+
+                    b.Navigation("Contributions");
+
                     b.Navigation("ProjectDonors");
 
                     b.Navigation("Projects");
                 });
 
+            modelBuilder.Entity("OrbitApi.Models.FinancialCategory", b =>
+                {
+                    b.Navigation("BudgetLineItems");
+
+                    b.Navigation("DonorContributions");
+
+                    b.Navigation("Expenses");
+
+                    b.Navigation("SubCategories");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeGoal", b =>
+                {
+                    b.Navigation("Outcomes");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeOutcome", b =>
+                {
+                    b.Navigation("Outputs");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.LogframeOutput", b =>
+                {
+                    b.Navigation("Activities");
+                });
+
             modelBuilder.Entity("OrbitApi.Models.Organization", b =>
                 {
                     b.Navigation("Compliance");
+
+                    b.Navigation("FinancialCategories");
 
                     b.Navigation("Members");
 
@@ -1665,13 +3017,13 @@ namespace OrbitApi.Migrations
 
                     b.Navigation("PartnersReceived");
 
+                    b.Navigation("Volunteers");
+
                     b.Navigation("Workspaces");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Project", b =>
                 {
-                    b.Navigation("BudgetRevisions");
-
                     b.Navigation("Expenses");
 
                     b.Navigation("ProjectDonors");
@@ -1690,6 +3042,8 @@ namespace OrbitApi.Migrations
             modelBuilder.Entity("OrbitApi.Models.Role", b =>
                 {
                     b.Navigation("RoleAssignments");
+
+                    b.Navigation("RolePermissions");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.TaskItem", b =>
@@ -1707,6 +3061,10 @@ namespace OrbitApi.Migrations
                     b.Navigation("SubtasksChecklist");
 
                     b.Navigation("TaskMembers");
+
+                    b.Navigation("TaskVolunteers");
+
+                    b.Navigation("VolunteerHours");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Team", b =>
@@ -1722,6 +3080,8 @@ namespace OrbitApi.Migrations
 
                     b.Navigation("AuditLogs");
 
+                    b.Navigation("LinkedVolunteers");
+
                     b.Navigation("ReceivedInvitations");
 
                     b.Navigation("RoleAssignments");
@@ -1731,6 +3091,13 @@ namespace OrbitApi.Migrations
                     b.Navigation("TaskMembers");
 
                     b.Navigation("TeamMembers");
+                });
+
+            modelBuilder.Entity("OrbitApi.Models.Volunteer", b =>
+                {
+                    b.Navigation("TaskVolunteers");
+
+                    b.Navigation("VolunteerHours");
                 });
 
             modelBuilder.Entity("OrbitApi.Models.Workspace", b =>

@@ -1,13 +1,15 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 :root {
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: 'Plus Jakarta Sans', Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: #0f172a;
-  background: #f8fafc;
+  color: #111827;
+  background: #fafafa;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -18,6 +20,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  background: #fafafa;
 }
 
 * {
@@ -30,3 +33,263 @@ select,
 textarea {
   font: inherit;
 }
+
+.font-jetbrains {
+  font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace;
+}
+
+.shimmer-text {
+  background: linear-gradient(90deg, #007aff, #5b21b6, #af52de, #ff3b30);
+  background-size: 200% 200%;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: shimmer 6s linear infinite;
+}
+
+@keyframes shimmer {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 200% 50%; }
+}
+
+.animate-fade-up {
+  animation: fadeUp 0.45s ease-out both;
+}
+
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.brand-orbit-ring {
+  position: absolute;
+  border-radius: 9999px;
+  border-style: solid;
+  background: transparent;
+  pointer-events: none;
+}
+
+.brand-orbit-dot {
+  position: absolute;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  box-shadow: 0 0 12px currentColor, 0 0 24px currentColor;
+}
+
+.brand-orbit-dot-outer {
+  top: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.brand-orbit-dot-middle {
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.brand-orbit-dot-inner {
+  left: -7px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.orbit-slow {
+  animation: spin 20s linear infinite;
+}
+
+.orbit-medium {
+  animation: spin-reverse 14s linear infinite;
+}
+
+.orbit-fast {
+  animation: spin 8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+@keyframes spin-reverse {
+  from { transform: rotate(360deg); }
+  to { transform: rotate(0deg); }
+}
+
+.animate-float-1 {
+  animation: float1 9s ease-in-out infinite;
+}
+
+.animate-float-2 {
+  animation: float2 10s ease-in-out infinite;
+}
+
+.animate-float-3 {
+  animation: float3 11s ease-in-out infinite;
+}
+
+.animate-float-4 {
+  animation: float4 8.5s ease-in-out infinite;
+}
+
+@keyframes float1 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(12px, -14px); }
+}
+
+@keyframes float2 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-10px, 10px); }
+}
+
+@keyframes float3 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(8px, 12px); }
+}
+
+@keyframes float4 {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(-12px, 8px); }
+}
+
+.input-icon {
+  position: absolute;
+  left: 1rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1rem;
+}
+
+/* Landing Page Visual Effects */
+.glass-card {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.4);
+}
+
+.glass-card-dark {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.glass-card-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.glass-card-hover:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 20px 40px -15px rgba(59, 130, 246, 0.2);
+}
+
+.bg-mesh-gradient {
+  background-color: #0b0f19;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.25) 0px, transparent 50%),
+    radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.25) 0px, transparent 50%),
+    radial-gradient(at 50% 100%, rgba(236, 72, 153, 0.15) 0px, transparent 50%);
+}
+
+.glow-indigo {
+  box-shadow: 0 0 50px -10px rgba(99, 102, 241, 0.35);
+}
+
+.glow-emerald {
+  box-shadow: 0 0 50px -10px rgba(16, 185, 129, 0.35);
+}
+
+.animate-pulse-slow {
+  animation: pulse 4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.drag-hover-active {
+  border: 2px dashed #3b82f6 !important;
+  background-color: rgba(59, 130, 246, 0.05) !important;
+}
+
+/* Custom sleek scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(156, 163, 175, 0.4);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.7);
+}
+
+/* ==========================================================================
+   Printable Report & PDF Export Stylesheet
+   ========================================================================== */
+@media print {
+  /* Hide site navigation, headers, footers, sidebars, and control buttons */
+  nav, header, footer,
+  .no-print,
+  .print\:hidden,
+  .export-hero-banner,
+  .export-sidebar-container,
+  .preview-top-bar,
+  aside,
+  button {
+    display: none !important;
+  }
+
+  /* Reset document root to full width, white background */
+  body, html, #root {
+    background: #ffffff !important;
+    color: #000000 !important;
+    width: 100% !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Expand the printable document sheet container */
+  .printable-document-sheet {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 10mm 12mm !important;
+    box-shadow: none !important;
+    border: none !important;
+    background: #ffffff !important;
+  }
+
+  /* Clean table formatting for print output */
+  table {
+    width: 100% !important;
+    border-collapse: collapse !important;
+    page-break-inside: auto;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  /* Ensure colors and background accents print sharply */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
+
+

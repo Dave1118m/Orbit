@@ -1,43 +1,142 @@
+import React, { useState } from 'react';
+import TaskTeamAnalytics from '../components/reports/TaskTeamAnalytics';
+import FinancialDashboard from '../components/reports/FinancialDashboard';
+import FinancialReports from '../components/reports/FinancialReports';
+import ExportCapabilities from '../components/reports/ExportCapabilities';
+import ScheduledReports from '../components/reports/ScheduledReports';
+import {
+  BarChart3, DollarSign, Download, Clock, Filter, FileText
+} from 'lucide-react';
+
 export default function Reports() {
+  const [activeTab, setActiveTab] = useState('operational');
+  const [finSubTab, setFinSubTab] = useState('dashboard');
+  const [selectedCurrency, setSelectedCurrency] = useState('USD');
+
+  const tabs = [
+    {
+      id: 'operational',
+      label: 'Report Analysis & Team Performance',
+      icon: BarChart3,
+    },
+    {
+      id: 'financial',
+      label: 'NGO Financial Reports & Analytics',
+      icon: DollarSign,
+    },
+    {
+      id: 'export',
+      label: 'Export Capabilities Hub',
+      icon: Download,
+    },
+    {
+      id: 'scheduled',
+      label: 'Scheduled Reports',
+      icon: Clock,
+    },
+  ];
+
   return (
-    <div className="flex flex-col gap-6">
-      <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-sm uppercase tracking-[0.35em] text-brand-500 font-semibold">Reports</p>
-            <h1 className="mt-2 text-2xl font-bold text-slate-900">Data insights</h1>
-            <p className="mt-1 text-sm text-slate-500">Generate reports for project and financial performance.</p>
-          </div>
+    <div className="min-h-full bg-slate-50 flex flex-col font-sans pb-12">
+      {/* Sleek Hero Header */}
+      <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white px-6 py-6 shadow-xl relative overflow-hidden no-print">
+        <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
+          <BarChart3 className="w-64 h-64 text-indigo-300 animate-pulse" />
         </div>
 
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:shadow-md">
-            <div className="flex justify-between items-start">
-              <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-brand-500">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
-              </div>
+        <div className="max-w-7xl mx-auto space-y-5 relative z-10">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                Reports & Institutional Analytics
+              </h1>
             </div>
-            <p className="mt-4 text-3xl font-bold text-slate-900">12</p>
-            <p className="text-sm font-medium text-slate-500 mt-1">Project progress</p>
-          </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:shadow-md">
-            <div className="flex justify-between items-start">
-              <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-emerald-500">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6" /></svg>
+
+            {/* Quick Actions & Currency Selector */}
+            <div className="flex items-center gap-3 bg-white/10 p-2 rounded-2xl backdrop-blur-md border border-white/10 shrink-0">
+              <div className="flex items-center gap-1.5 text-xs text-indigo-200 font-bold px-2">
+                <Filter className="w-3.5 h-3.5" />
+                <span>Base:</span>
               </div>
+              <select
+                value={selectedCurrency}
+                onChange={(e) => setSelectedCurrency(e.target.value)}
+                className="bg-slate-900/80 text-white text-xs font-bold px-3 py-1.5 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+              >
+                <option value="USD">USD ($)</option>
+                <option value="ETB">ETB (Br)</option>
+              </select>
+
+              <button
+                onClick={() => setActiveTab('export')}
+                className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-extrabold px-4 py-2 rounded-xl shadow-lg shadow-indigo-600/30 transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Quick Export</span>
+              </button>
             </div>
-            <p className="mt-4 text-3xl font-bold text-slate-900">4</p>
-            <p className="text-sm font-medium text-slate-500 mt-1">Task trends</p>
           </div>
-          <div className="rounded-2xl border border-slate-200 bg-white p-5 transition hover:shadow-md">
-            <div className="flex justify-between items-start">
-              <div className="h-10 w-10 rounded-xl bg-slate-50 flex items-center justify-center text-amber-500">
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+
+          {/* Clean 4-Column Navigation Tabs - All 4 visible without scrolling */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-3 border-t border-white/10">
+            {tabs.map((t) => {
+              const isActive = activeTab === t.id;
+              const Icon = t.icon;
+              return (
+                <button
+                  key={t.id}
+                  onClick={() => setActiveTab(t.id)}
+                  className={`flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all duration-200 text-center ${
+                    isActive
+                      ? 'bg-white text-slate-900 shadow-xl shadow-indigo-950/50 scale-[1.01]'
+                      : 'text-slate-300 hover:text-white hover:bg-white/10'
+                  }`}
+                >
+                  <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <span className="truncate">{t.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Animated Content Container */}
+      <div className="max-w-7xl mx-auto px-6 pt-8 w-full flex-1">
+        <div className="transition-all duration-300">
+          {activeTab === 'operational' && <TaskTeamAnalytics />}
+          {activeTab === 'financial' && (
+            <div className="space-y-6">
+              <div className="flex items-center gap-2 bg-white p-2 rounded-xl border border-slate-200 shadow-xs w-fit">
+                <button
+                  onClick={() => setFinSubTab('dashboard')}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition ${
+                    finSubTab === 'dashboard'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <BarChart3 className="w-4 h-4" />
+                  Financial Analytics & Dashboard
+                </button>
+                <button
+                  onClick={() => setFinSubTab('statements')}
+                  className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-lg transition ${
+                    finSubTab === 'statements'
+                      ? 'bg-indigo-600 text-white shadow-sm'
+                      : 'text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <FileText className="w-4 h-4" />
+                  Statement of Activities & Grant Audit
+                </button>
               </div>
+
+              {finSubTab === 'dashboard' ? <FinancialDashboard /> : <FinancialReports />}
             </div>
-            <p className="mt-4 text-3xl font-bold text-slate-900">1</p>
-            <p className="text-sm font-medium text-slate-500 mt-1">Budget summary</p>
-          </div>
+          )}
+          {activeTab === 'export' && <ExportCapabilities />}
+          {activeTab === 'scheduled' && <ScheduledReports />}
         </div>
       </div>
     </div>

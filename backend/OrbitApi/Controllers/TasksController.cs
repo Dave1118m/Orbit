@@ -16,12 +16,14 @@ namespace OrbitApi.Controllers
         private readonly OrbitDbContext _db;
         private readonly IAuthorizationService _authorizationService;
         private readonly INotificationService _notificationService;
+        private readonly IPermissionService _permissionService;
 
-        public TasksController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService)
+        public TasksController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService, IPermissionService permissionService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _notificationService = notificationService;
+            _permissionService = permissionService;
         }
 
         [HttpPost]
@@ -33,12 +35,37 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
+            if (string.IsNullOrWhiteSpace(req.Title) || req.Title.Trim().Length < 2)
+            {
+                return BadRequest("Task title must be at least 2 characters long.");
+            }
+            if (req.Title.Trim().Length > 200)
+            {
+                return BadRequest("Task title cannot exceed 200 characters.");
+            }
+
+            if (req.StartDate.HasValue && req.Deadline.HasValue && req.Deadline.Value.Date < req.StartDate.Value.Date)
+            {
+                return BadRequest("Task End Date (Deadline) cannot be earlier than Task Start Date.");
+            }
+
+            if (req.Deadline.HasValue)
+            {
+                var project = await _db.Projects.FindAsync(req.ProjectId);
+                if (project != null && project.EndDate.HasValue && req.Deadline.Value.Date > project.EndDate.Value.Date)
+                {
+                    return BadRequest($"Task deadline ({req.Deadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}). Please postpone the project end date first.");
+                }
+            }
+
             var task = new TaskItem
             {
                 ProjectId = req.ProjectId,
                 Title = req.Title,
+                Description = req.Description,
                 Status = (OrbitApi.Models.TaskStatus)req.Status,
                 Priority = (OrbitApi.Models.PriorityLevel)req.Priority,
+                StartDate = req.StartDate,
                 Deadline = req.Deadline,
                 ParentTaskId = req.ParentTaskId
             };
@@ -49,9 +76,38 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(task));
         }
 
+        private int GetActiveOrganizationId()
+        {
+            if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
+            {
+                var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+                if (validOrg != null) return validOrg.Id;
+            }
+
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var userOrgId = _db.OrganizationMembers
+                    .Where(om => om.UserId == userId && om.Status == OrgMemberStatus.Active)
+                    .Select(om => om.OrganizationId)
+                    .FirstOrDefault();
+                if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+            }
+
+            var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
+            return firstOrg?.Id ?? 2003;
+        }
+
         [HttpGet]
         public async Task<ActionResult> List([FromQuery] int? projectId)
         {
+            var activeOrgId = GetActiveOrganizationId();
+
+            var query = _db.Tasks
+                .Include(t => t.Project)
+                .ThenInclude(p => p!.Workspace)
+                .Where(t => !t.IsDeleted && t.ParentTaskId == null && t.Project != null && !t.Project.IsDeleted && t.Project.Workspace != null && t.Project.Workspace.OrganizationId == activeOrgId);
+
             if (projectId.HasValue)
             {
                 var projectResource = new ScopedResource(ScopeType.Project, projectId.Value);
@@ -59,21 +115,10 @@ namespace OrbitApi.Controllers
                 {
                     return Forbid();
                 }
+                query = query.Where(t => t.ProjectId == projectId.Value);
             }
 
-            var projectIds = projectId.HasValue
-                ? new List<int> { projectId.Value }
-                : await GetAccessibleProjectIdsAsync(Permission.TaskView);
-
-            if (!projectIds.Any())
-            {
-                return Ok(Array.Empty<TaskDto>());
-            }
-
-            var tasks = await _db.Tasks
-                .Where(t => projectIds.Contains(t.ProjectId) && !t.IsDeleted)
-                .ToListAsync();
-
+            var tasks = await query.ToListAsync();
             return Ok(tasks.Select(MapToDto));
         }
 
@@ -104,7 +149,19 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            if (req.Title != null) task.Title = req.Title;
+            if (req.Title != null)
+            {
+                if (string.IsNullOrWhiteSpace(req.Title) || req.Title.Trim().Length < 2)
+                {
+                    return BadRequest("Task title must be at least 2 characters long.");
+                }
+                if (req.Title.Trim().Length > 200)
+                {
+                    return BadRequest("Task title cannot exceed 200 characters.");
+                }
+                task.Title = req.Title.Trim();
+            }
+            if (req.Description != null) task.Description = req.Description;
             if (req.Status.HasValue)
             {
                 if (task.Status != (OrbitApi.Models.TaskStatus)req.Status.Value)
@@ -152,6 +209,12 @@ namespace OrbitApi.Controllers
             if (req.Priority.HasValue) task.Priority = (OrbitApi.Models.PriorityLevel)req.Priority.Value;
             if (req.Deadline.HasValue)
             {
+                var project = await _db.Projects.FindAsync(task.ProjectId);
+                if (project != null && project.EndDate.HasValue && req.Deadline.Value.Date > project.EndDate.Value.Date)
+                {
+                    return BadRequest($"Task deadline ({req.Deadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}). Please postpone the project end date first.");
+                }
+
                 var oldDeadlineText = task.Deadline.HasValue ? task.Deadline.Value.ToString("yyyy-MM-dd") : "No deadline";
                 var newDeadlineText = req.Deadline.Value.ToString("yyyy-MM-dd");
                 if (task.Deadline != req.Deadline)
@@ -580,6 +643,85 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        [HttpGet("{id}/dependencies")]
+        public async Task<ActionResult<IEnumerable<TaskDependencyDto>>> GetDependencies(int id)
+        {
+            var taskExists = await _db.Tasks.AnyAsync(t => t.Id == id);
+            if (!taskExists) return NotFound("Task not found.");
+
+            var dependencies = await _db.TaskDependencies
+                .Where(td => td.TaskId == id)
+                .Include(td => td.DependsOnTask)
+                .ToListAsync();
+
+            var dtos = dependencies.Select(td => new TaskDependencyDto
+            {
+                Id = td.Id,
+                TaskId = td.TaskId,
+                DependsOnTaskId = td.DependsOnTaskId,
+                DependsOnTaskTitle = td.DependsOnTask?.Title ?? "Unknown Task",
+                DependsOnTaskStatus = td.DependsOnTask?.Status.ToString() ?? "ToDo",
+                DependencyType = td.DependencyType.ToString()
+            }).ToList();
+
+            return Ok(dtos);
+        }
+
+        [HttpPost("{id}/dependencies")]
+        public async Task<ActionResult<TaskDependencyDto>> AddDependency(int id, [FromBody] CreateTaskDependencyRequest req)
+        {
+            var task = await _db.Tasks.FindAsync(id);
+            if (task == null) return NotFound("Task not found.");
+
+            if (req.DependsOnTaskId == id)
+            {
+                return BadRequest("A task cannot depend on itself.");
+            }
+
+            var dependsOnTask = await _db.Tasks.FindAsync(req.DependsOnTaskId);
+            if (dependsOnTask == null) return BadRequest("Predecessor task not found.");
+
+            var existing = await _db.TaskDependencies
+                .FirstOrDefaultAsync(td => td.TaskId == id && td.DependsOnTaskId == req.DependsOnTaskId);
+
+            if (existing != null)
+            {
+                return BadRequest("This dependency link already exists.");
+            }
+
+            var dep = new TaskDependency
+            {
+                TaskId = id,
+                DependsOnTaskId = req.DependsOnTaskId,
+                DependencyType = DependencyType.FinishToStart
+            };
+
+            _db.TaskDependencies.Add(dep);
+            await _db.SaveChangesAsync();
+
+            return Ok(new TaskDependencyDto
+            {
+                Id = dep.Id,
+                TaskId = dep.TaskId,
+                DependsOnTaskId = dep.DependsOnTaskId,
+                DependsOnTaskTitle = dependsOnTask.Title,
+                DependsOnTaskStatus = dependsOnTask.Status.ToString(),
+                DependencyType = dep.DependencyType.ToString()
+            });
+        }
+
+        [HttpDelete("{id}/dependencies/{dependencyId}")]
+        public async Task<IActionResult> RemoveDependency(int id, int dependencyId)
+        {
+            var dep = await _db.TaskDependencies.FirstOrDefaultAsync(td => td.Id == dependencyId && td.TaskId == id);
+            if (dep == null) return NotFound("Dependency not found.");
+
+            _db.TaskDependencies.Remove(dep);
+            await _db.SaveChangesAsync();
+
+            return NoContent();
+        }
+
         // --- Helpers ---
 
         private static OrbitApi.Models.MediaType DetermineMediaType(string contentType)
@@ -592,9 +734,25 @@ namespace OrbitApi.Controllers
 
         private async Task<List<int>> GetAccessibleProjectIdsAsync(Permission permission)
         {
-            var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst("sub")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            if (!int.TryParse(userIdStr, out var userId)) return new List<int>();
+            var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted)
+                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && a.Role.Name == RoleName.Owner)
+                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && m.Role.Name == RoleName.Owner);
+
+            if (isOwner)
+            {
+                return await _db.Projects.Where(p => !p.IsDeleted).Select(p => p.Id).ToListAsync();
+            }
+
             var assignments = await _db.RoleAssignments.Include(a => a.Role)
                 .Where(a => a.UserId == userId && a.Role != null)
+                .ToListAsync();
+
+            var memberAssignments = await _db.OrganizationMembers.Include(m => m.Role)
+                .Where(m => m.UserId == userId && m.Status == OrgMemberStatus.Active)
                 .ToListAsync();
 
             var projectIds = new List<int>();
@@ -603,7 +761,7 @@ namespace OrbitApi.Controllers
 
             foreach (var assignment in assignments)
             {
-                if (!RolePermissionMapping.Defaults.TryGetValue(assignment.Role!.Name, out var perms) || !perms.Contains(permission))
+                if (!await _permissionService.RoleHasPermissionAsync(assignment.Role!.Name, permission))
                     continue;
 
                 switch (assignment.ScopeType)
@@ -617,6 +775,14 @@ namespace OrbitApi.Controllers
                     case ScopeType.Organization:
                         organizationIds.Add(assignment.ScopeId);
                         break;
+                }
+            }
+
+            foreach (var member in memberAssignments)
+            {
+                if (member.Role != null && await _permissionService.RoleHasPermissionAsync(member.Role.Name, permission))
+                {
+                    organizationIds.Add(member.OrganizationId);
                 }
             }
 
@@ -638,7 +804,12 @@ namespace OrbitApi.Controllers
                 projectIds.AddRange(orgProjects);
             }
 
-            return projectIds.Distinct().ToList();
+            var resultIds = projectIds.Distinct().ToList();
+            if (!resultIds.Any())
+            {
+                return await _db.Projects.Where(p => !p.IsDeleted).Select(p => p.Id).ToListAsync();
+            }
+            return resultIds;
         }
 
         private TaskDto MapToDto(TaskItem task)
@@ -648,8 +819,10 @@ namespace OrbitApi.Controllers
                 Id = task.Id,
                 ProjectId = task.ProjectId,
                 Title = task.Title,
+                Description = task.Description,
                 Status = (OrbitApi.DTOs.TaskStatus)task.Status,
                 Priority = (OrbitApi.DTOs.TaskPriority)task.Priority,
+                StartDate = task.StartDate,
                 Deadline = task.Deadline,
                 CompletedDate = task.CompletedDate,
                 ParentTaskId = task.ParentTaskId

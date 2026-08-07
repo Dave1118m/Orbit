@@ -1,704 +1,982 @@
-import { useEffect, useState, useRef } from 'react';
-import { useParams } from 'react-router-dom';
-import Modal from '../components/Modal';
-import MultiSelectMembers from '../components/MultiSelectMembers';
+import { useEffect, useState, useMemo } from 'react';
 import WorkloadChart from '../components/WorkloadChart';
+import MultiSelectMembers from '../components/MultiSelectMembers';
+import SearchSelect from '../components/SearchSelect';
+import { useUser } from '../contexts/UserContext';
 
-const API_BASE = 'https://localhost:7065/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL;
+
+// Generate avatar initials / color from name
+const AVATAR_COLORS = [
+  'bg-violet-500','bg-blue-500','bg-emerald-500','bg-rose-500',
+  'bg-amber-500','bg-cyan-500','bg-pink-500','bg-indigo-500',
+];
+function avatarColor(str = '') {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
+}
+function initials(name = '') {
+  return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?';
+}
 
 export default function Teams() {
-  const [teams, setTeams] = useState([]);
-  const [selectedTeam, setSelectedTeam] = useState(null);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(null);
-  const [workspaces, setWorkspaces] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [users, setUsers] = useState([]);
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
-  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [isRosterModalOpen, setIsRosterModalOpen] = useState(false);
-  const [isWorkloadModalOpen, setIsWorkloadModalOpen] = useState(false);
-  const [isCopyModalOpen, setIsCopyModalOpen] = useState(false);
-  const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
-  const [isReplaceModalOpen, setIsReplaceModalOpen] = useState(false);
-  const [userRole, setUserRole] = useState(null);
+  const token = localStorage.getItem('token');
+  const { user, hasPermission } = useUser();
 
-  const [createData, setCreateData] = useState({ name: '', description: '', teamLeadUserId: null, workspaceId: null });
-  const [editData, setEditData] = useState({ name: '', description: '', teamLeadUserId: null });
-  const [selectedMembers, setSelectedMembers] = useState([]);
+  // Granular permissions
+  const canCreateTeam = hasPermission('TeamCreate');
+  const canEditTeam = hasPermission('TeamEdit');
+  const canDeleteTeam = hasPermission('TeamDelete');
+  const canManageMembers = hasPermission('TeamManageMembers');
+  const canAssignProject = hasPermission('TeamAssignProject') || hasPermission('ProjectAssignTeam');
+
+  // ── Global State ──
+  const [workspaces, setWorkspaces] = useState([]);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState(null);
+  
+  // ── Teams State ──
+  const [teams, setTeams] = useState([]);
+  const [loadingTeams, setLoadingTeams] = useState(false);
+  const [teamSearch, setTeamSearch] = useState('');
+  
+  // ── Selected Team State ──
+  const [selectedTeam, setSelectedTeam] = useState(null);
+  const [activeTab, setActiveTab] = useState('overview'); // overview, roster, projects, history, settings
+  
+  // ── Team Data State ──
   const [rosterData, setRosterData] = useState([]);
   const [workloadData, setWorkloadData] = useState(null);
-  const [copyData, setCopyData] = useState({ newTeamName: '' });
-  const [replaceData, setReplaceData] = useState({ projectId: null, newTeamId: null });
-  const [teamProjects, setTeamProjects] = useState([]);
-  const [allTeams, setAllTeams] = useState([]);
+  const [historyData, setHistoryData] = useState([]);
+  const [allProjects, setAllProjects] = useState([]);
+  
+  // ── Users State (for adding members) ──
+  const [users, setUsers] = useState([]);
+  const [userSearch, setUserSearch] = useState('');
+  const [selectedNewMembers, setSelectedNewMembers] = useState([]);
 
-  const token = localStorage.getItem('token');
+  // ── Form State ──
+  const [isCreating, setIsCreating] = useState(false);
+  const [createData, setCreateData] = useState({ name: '', description: '', teamLeadUserId: '' });
+  const [editData, setEditData] = useState({ name: '', description: '', teamLeadUserId: '' });
+  const [isCopying, setIsCopying] = useState(false);
+  const [copyData, setCopyData] = useState({ name: '', description: '' });
 
+  // ── Modals State ──
+  const [isAssigning, setIsAssigning] = useState(false);
+  const [assignProjectId, setAssignProjectId] = useState('');
+  const [isReplacing, setIsReplacing] = useState(false);
+  const [replaceData, setReplaceData] = useState({ projectId: '', newTeamId: '', reason: '', newEndDate: '' });
+  const [isMoving, setIsMoving] = useState(false);
+  const [moveProjectId, setMoveProjectId] = useState('');
+
+  // ── Initialization ──
   useEffect(() => {
-    const orgId = localStorage.getItem('selectedOrganizationId');
-    console.log('Organization ID from localStorage:', orgId);
-    if (orgId) {
-      fetchWorkspaces(orgId);
-    } else {
-      console.error('No organization ID found in localStorage');
-    }
-    fetchUserRole();
-    loadUsers();
+    fetchWorkspaces();
+    fetchUsers();
   }, []);
 
   useEffect(() => {
-    if (selectedWorkspaceId) {
-      loadTeams();
-    }
+    fetchTeams(selectedWorkspaceId);
+    fetchAllProjects(selectedWorkspaceId);
   }, [selectedWorkspaceId]);
 
-  const fetchWorkspaces = async (orgId) => {
-    console.log('Fetching workspaces for orgId:', orgId);
+  useEffect(() => {
+    if (selectedTeam) {
+      fetchRoster(selectedTeam.id);
+      fetchWorkload(selectedTeam.id);
+      fetchHistory(selectedTeam.id);
+      setEditData({ name: selectedTeam.name, description: selectedTeam.description || '', teamLeadUserId: selectedTeam.teamLeadUserId || '' });
+    }
+  }, [selectedTeam?.id]);
+
+  // ── Fetchers ──
+  const getHeaders = () => {
+    const token = localStorage.getItem('token');
+    const storedOrgId = localStorage.getItem('selectedOrganizationId');
+    const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    if (storedOrgId && storedOrgId !== 'undefined' && storedOrgId !== 'null') {
+      h['X-Organization-Id'] = storedOrgId;
+    }
+    return h;
+  };
+
+  const fetchWorkspaces = async () => {
     try {
-      const resp = await fetch(`${API_BASE}/workspaces?orgId=${orgId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      console.log('Workspace fetch response status:', resp.status);
-      if (resp.ok) {
-        const data = await resp.json();
-        console.log('Fetched workspaces:', data);
+      const orgId = localStorage.getItem('selectedOrganizationId') || user?.organizationId || user?.primaryOrganizationId;
+      const query = orgId ? `?orgId=${orgId}` : '';
+      const res = await fetch(`${API_BASE}/workspaces${query}`, { headers: getHeaders() });
+      if (res.ok) {
+        const data = await res.json();
         setWorkspaces(data);
-        if (data.length > 0) {
-          setSelectedWorkspaceId(data[0].id);
-          console.log('Set selected workspace to:', data[0].id);
+      }
+    } catch (err) { console.error('Failed to fetch workspaces', err); }
+  };
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/users`, { headers: getHeaders() });
+      if (res.ok) setUsers(await res.json());
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchTeams = async (wsId = null) => {
+    setLoadingTeams(true);
+    try {
+      const query = wsId ? `?workspaceId=${wsId}` : '';
+      const res = await fetch(`${API_BASE}/teams${query}`, { headers: getHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setTeams(data);
+        if (selectedTeam) {
+          const updated = data.find(t => t.id === selectedTeam.id);
+          if (updated) setSelectedTeam(updated);
+          else setSelectedTeam(data[0] || null);
+        } else if (data.length > 0) {
+          setSelectedTeam(data[0]);
         } else {
-          console.log('No workspaces found for organization');
+          setSelectedTeam(null);
         }
-      } else {
-        const error = await resp.text();
-        console.error('Failed to fetch workspaces:', resp.status, error);
       }
     } catch (err) {
-      console.error('Failed to fetch workspaces', err);
-    }
-  };
-
-  const fetchUserRole = async () => {
-    try {
-      const resp = await fetch(`${API_BASE}/users/me`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        setUserRole(data.role);
-      }
-    } catch (err) {
-      console.error('Failed to fetch user role', err);
-    }
-  };
-
-  const loadUsers = async () => {
-    try {
-      const resp = await fetch(`${API_BASE}/users`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        setUsers(data);
-      }
-    } catch (err) {
-      console.error('Failed to load users', err);
-    }
-  };
-
-  const loadTeams = async () => {
-    try {
-      setLoading(true);
-      const resp = await fetch(`${API_BASE}/teams?workspaceId=${selectedWorkspaceId}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        setTeams(data.filter(t => !t.isArchived));
-        setAllTeams(data);
-      }
-    } catch (err) {
-      console.error('Failed to load teams', err);
+      console.error(err);
     } finally {
-      setLoading(false);
+      setLoadingTeams(false);
     }
   };
 
-  const handleOpenDetail = async (team) => {
-    setSelectedTeam(team);
-    setEditData({ name: team.name, description: team.description, teamLeadUserId: team.teamLeadUserId });
+  const fetchRoster = async (teamId) => {
     try {
-      const resp = await fetch(`${API_BASE}/teams/${team.id}`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (resp.ok) {
-        const data = await resp.json();
-        setSelectedTeam(data);
-      }
-    } catch (err) {
-      console.error('Failed to fetch team details', err);
-    }
-    setIsDetailModalOpen(true);
+      const res = await fetch(`${API_BASE}/teams/${teamId}/roster`, { headers: getHeaders() });
+      if (res.ok) setRosterData(await res.json());
+    } catch (err) { console.error(err); }
   };
 
+  const fetchWorkload = async (teamId) => {
+    try {
+      const res = await fetch(`${API_BASE}/teams/${teamId}/workload`, { headers: getHeaders() });
+      if (res.ok) setWorkloadData(await res.json());
+      else setWorkloadData(null);
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchHistory = async (teamId) => {
+    try {
+      const res = await fetch(`${API_BASE}/teams/${teamId}/history`, { headers: getHeaders() });
+      if (res.ok) setHistoryData(await res.json());
+      else setHistoryData([]);
+    } catch (err) { console.error(err); }
+  };
+
+  const fetchAllProjects = async (wsId = null) => {
+    try {
+      const query = wsId ? `?workspaceId=${wsId}` : '';
+      const res = await fetch(`${API_BASE}/projects${query}`, { headers: getHeaders() });
+      if (res.ok) setAllProjects(await res.json());
+    } catch (err) { console.error(err); }
+  };
+
+  // ── Actions ──
   const handleCreateTeam = async (e) => {
     e.preventDefault();
-    try {
-      const workspaceId = createData.workspaceId || selectedWorkspaceId;
-      if (!workspaceId) {
-        alert('Please select a workspace');
-        return;
-      }
-      
-      const resp = await fetch(`${API_BASE}/teams`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ workspaceId, name: createData.name, description: createData.description, teamLeadUserId: createData.teamLeadUserId })
-      });
-      if (resp.ok) {
-        setIsCreateModalOpen(false);
-        setCreateData({ name: '', description: '', teamLeadUserId: null, workspaceId: null });
-        loadTeams();
-      } else {
-        const error = await resp.text();
-        console.error('Failed to create team:', error);
-        alert('Failed to create team: ' + error);
-      }
-    } catch (err) {
-      console.error('Failed to create team', err);
-      alert('Failed to create team: ' + err.message);
+    const targetWsId = selectedWorkspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
+    if (!targetWsId) {
+      alert('Please select or create a workspace first.');
+      return;
     }
+    try {
+      const res = await fetch(`${API_BASE}/teams`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ ...createData, workspaceId: targetWsId })
+      });
+      if (res.ok) {
+        setCreateData({ name: '', description: '', teamLeadUserId: '' });
+        setIsCreating(false);
+        fetchTeams(selectedWorkspaceId);
+      } else {
+        const err = await res.json();
+        alert(err.title || err.message || 'Failed to create team.');
+      }
+    } catch (err) { console.error(err); }
   };
 
   const handleUpdateTeam = async (e) => {
     e.preventDefault();
     try {
-      const resp = await fetch(`${API_BASE}/teams/${selectedTeam.id}`, {
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: getHeaders(),
         body: JSON.stringify(editData)
       });
-      if (resp.ok) {
-        setIsEditModalOpen(false);
-        loadTeams();
-        setIsDetailModalOpen(false);
-      }
-    } catch (err) {
-      console.error('Failed to update team', err);
-    }
+      if (res.ok) fetchTeams(selectedWorkspaceId);
+    } catch (err) { console.error(err); }
   };
 
-  const handleArchiveTeam = async (teamId) => {
-    if (!window.confirm('Are you sure you want to archive this team?')) return;
+  const handleArchiveTeam = async () => {
+    if (!window.confirm(`Archive team "${selectedTeam.name}"? Historical project assignment records will be retained for audit.`)) return;
     try {
-      await fetch(`${API_BASE}/teams/${teamId}`, {
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}`, {
         method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
+        headers: getHeaders()
       });
-      loadTeams();
-      setIsDetailModalOpen(false);
-    } catch (err) {
-      console.error('Failed to archive team', err);
-    }
+      if (res.ok || res.status === 204) {
+        fetchTeams(selectedWorkspaceId);
+      }
+    } catch (err) { console.error(err); }
   };
 
-  const handleLoadRoster = async (teamId) => {
+  const handleBulkAddMembers = async () => {
+    if (selectedNewMembers.length === 0) return;
     try {
-      const resp = await fetch(`${API_BASE}/teams/${teamId}/roster`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const userIds = selectedNewMembers.map(m => m.id);
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}/members/bulk`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ userIds })
       });
-      if (resp.ok) {
-        const data = await resp.json();
-        setRosterData(data);
-        setIsRosterModalOpen(true);
+      if (res.ok) {
+        setSelectedNewMembers([]);
+        fetchRoster(selectedTeam.id);
+        fetchTeams(selectedWorkspaceId);
+        fetchWorkload(selectedTeam.id);
       }
-    } catch (err) {
-      console.error('Failed to load roster', err);
-    }
+    } catch (err) { console.error(err); }
   };
 
-  const handleLoadWorkload = async (teamId) => {
+  const handleRemoveMember = async (userId) => {
+    if (!window.confirm('Remove this member from team?')) return;
     try {
-      const resp = await fetch(`${API_BASE}/teams/${teamId}/workload`, {
-        headers: { Authorization: `Bearer ${token}` }
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}/members/${userId}`, {
+        method: 'DELETE',
+        headers: getHeaders()
       });
-      if (resp.ok) {
-        const data = await resp.json();
-        setWorkloadData(data);
-        setIsWorkloadModalOpen(true);
+      if (res.ok) {
+        fetchRoster(selectedTeam.id);
+        fetchTeams(selectedWorkspaceId);
+        fetchWorkload(selectedTeam.id);
       }
-    } catch (err) {
-      console.error('Failed to load workload', err);
-    }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleAssignProject = async (e) => {
+    e.preventDefault();
+    if (!assignProjectId) return;
+    try {
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}/assign-project`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ projectId: parseInt(assignProjectId) })
+      });
+      if (res.ok) {
+        setIsAssigning(false);
+        setAssignProjectId('');
+        fetchHistory(selectedTeam.id);
+        fetchTeams(selectedWorkspaceId);
+      } else {
+        const err = await res.json();
+        alert(err.title || err.message || 'Failed to assign team to project.');
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleReplaceTeam = async (e) => {
+    e.preventDefault();
+    if (!replaceData.projectId || !replaceData.newTeamId) return;
+    try {
+      const payload = {
+        projectId: parseInt(replaceData.projectId),
+        newTeamId: parseInt(replaceData.newTeamId),
+        reason: replaceData.reason || null,
+        newEndDate: replaceData.newEndDate ? new Date(replaceData.newEndDate).toISOString() : null
+      };
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}/replace-on-project`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        setIsReplacing(false);
+        setReplaceData({ projectId: '', newTeamId: '', reason: '', newEndDate: '' });
+        fetchHistory(selectedTeam.id);
+        fetchTeams(selectedWorkspaceId);
+      } else {
+        const err = await res.json();
+        alert(err.title || err.message || 'Failed to replace team.');
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleMoveTeam = async (e) => {
+    e.preventDefault();
+    if (!moveProjectId) return;
+    try {
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}/move-to-project`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ projectId: parseInt(moveProjectId) })
+      });
+      if (res.ok) {
+        setIsMoving(false);
+        setMoveProjectId('');
+        fetchHistory(selectedTeam.id);
+        fetchTeams(selectedWorkspaceId);
+      } else {
+        const err = await res.json();
+        alert(err.title || err.message || 'Failed to move team.');
+      }
+    } catch (err) { console.error(err); }
   };
 
   const handleCopyTeam = async (e) => {
     e.preventDefault();
     try {
-      const resp = await fetch(`${API_BASE}/teams/${selectedTeam.id}/copy`, {
+      const targetWsId = selectedWorkspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
+      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}/copy`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ newTeamName: copyData.newTeamName, workspaceId: selectedWorkspaceId })
+        headers: getHeaders(),
+        body: JSON.stringify({
+          workspaceId: targetWsId,
+          newTeamName: copyData.name,
+          newTeamDescription: copyData.description
+        })
       });
-      if (resp.ok) {
-        setIsCopyModalOpen(false);
-        setCopyData({ newTeamName: '' });
-        loadTeams();
+      if (res.ok) {
+        setIsCopying(false);
+        setCopyData({ name: '', description: '' });
+        fetchTeams(selectedWorkspaceId);
       }
-    } catch (err) {
-      console.error('Failed to copy team', err);
-    }
+    } catch (err) { console.error(err); }
   };
 
-  const handleReplaceTeam = async (e) => {
-    e.preventDefault();
-    try {
-      const resp = await fetch(`${API_BASE}/teams/${selectedTeam.id}/replace-on-project`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ projectId: replaceData.projectId, newTeamId: replaceData.newTeamId })
-      });
-      if (resp.ok) {
-        setIsReplaceModalOpen(false);
-        setReplaceData({ projectId: null, newTeamId: null });
-        alert('Team replaced successfully!');
-      }
-    } catch (err) {
-      console.error('Failed to replace team', err);
-    }
-  };
+  // ── Derived State ──
+  const filteredTeams = teams.filter(t => t.name.toLowerCase().includes(teamSearch.toLowerCase()));
+  
+  const availableUsers = useMemo(() => {
+    const rosterIds = new Set(rosterData.map(r => r.userId));
+    return users.filter(u => !rosterIds.has(u.id) && 
+      (u.name.toLowerCase().includes(userSearch.toLowerCase()) || u.email.toLowerCase().includes(userSearch.toLowerCase()))
+    );
+  }, [users, rosterData, userSearch]);
 
-  const handleAddMembers = async (e) => {
-    e.preventDefault();
-    try {
-      for (const member of selectedMembers) {
-        await fetch(`${API_BASE}/teams/${selectedTeam.id}/members`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ userId: member.id || member.userId })
-        });
-      }
-      setIsMembersModalOpen(false);
-      setSelectedMembers([]);
-      loadTeams();
-      handleOpenDetail(selectedTeam);
-    } catch (err) {
-      console.error('Failed to add members', err);
-    }
-  };
-
-  const handleRemoveMember = async (userId) => {
-    if (!window.confirm('Remove this member from the team?')) return;
-    try {
-      await fetch(`${API_BASE}/teams/${selectedTeam.id}/members/${userId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      await handleLoadRoster(selectedTeam.id);
-    } catch (err) {
-      console.error('Failed to remove member', err);
-    }
-  };
-
-  const canManageTeams = () => {
-    return ['Owner', 'Admin', 'Coordinator'].includes(userRole);
-  };
-
-  const canViewTeams = () => {
-    return userRole !== null;
-  };
+  const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500";
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold text-slate-900">👥 Teams</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Manage workspace teams and their project assignments
-          </p>
-        </div>
-        <button
-          onClick={() => setIsCreateModalOpen(true)}
-          className="rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 shadow-md hover:shadow-lg transition flex items-center gap-2"
-        >
-          <span>+</span> Create Team
-        </button>
-      </div>
-
-      {workspaces.length > 1 && (
-        <div className="flex gap-2">
-          {workspaces.map(ws => (
-            <button
-              key={ws.id}
-              onClick={() => setSelectedWorkspaceId(ws.id)}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition ${
-                selectedWorkspaceId === ws.id
-                  ? 'bg-brand-500 text-white'
-                  : 'border border-slate-200 text-slate-600 hover:border-slate-300'
-              }`}
-            >
-              {ws.name}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="text-center py-12 text-slate-500">Loading teams...</div>
-      ) : teams.length === 0 ? (
-        <div className="rounded-2xl border border-slate-200 bg-white p-12 text-center">
-          <p className="text-slate-500">No teams yet. {canManageTeams() ? 'Create one to get started.' : 'Teams will appear here.'}</p>
-        </div>
-      ) : (
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {teams.map(team => (
-            <div key={team.id} className="rounded-2xl border border-slate-200 bg-white p-5 hover:shadow-lg transition hover:border-brand-200 group">
-              <div className="flex items-start justify-between mb-3">
-                <div className="flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xl">👥</span>
-                    <h3 className="font-semibold text-slate-900 group-hover:text-brand-600">{team.name}</h3>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1 line-clamp-2">{team.description || 'No description'}</p>
-                </div>
-                {canManageTeams() && (
-                  <button
-                    onClick={() => handleOpenDetail(team)}
-                    className="text-slate-400 hover:text-brand-600 transition"
-                  >
-                    <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              <div className="space-y-2 text-sm border-t pt-3">
-                <div className="flex justify-between">
-                  <span className="text-slate-600">👤 Members:</span>
-                  <span className="font-medium text-slate-900">{team.members?.length || 0}</span>
-                </div>
-                <div className="flex justify-between">
-                  <span className="text-slate-600">📋 Projects:</span>
-                  <span className="font-medium text-slate-900">{team.projects?.length || 0}</span>
-                </div>
-              </div>
-
-              <div className="flex gap-2 mt-4">
-                <button
-                  onClick={() => handleLoadRoster(team.id)}
-                  className="flex-1 text-xs font-medium text-brand-600 hover:text-brand-700 px-2 py-1.5 rounded border border-brand-200 hover:bg-brand-50 transition"
-                  title="View team members"
-                >
-                  Roster
-                </button>
-                <button
-                  onClick={() => handleLoadWorkload(team.id)}
-                  className="flex-1 text-xs font-medium text-emerald-600 hover:text-emerald-700 px-2 py-1.5 rounded border border-emerald-200 hover:bg-emerald-50 transition"
-                  title="View workload"
-                >
-                  Workload
-                </button>
-                {canManageTeams() && (
-                  <button
-                    onClick={() => handleOpenDetail(team)}
-                    className="flex-1 text-xs font-medium text-purple-600 hover:text-purple-700 px-2 py-1.5 rounded border border-purple-200 hover:bg-purple-50 transition"
-                    title="Manage team"
-                  >
-                    Manage
-                  </button>
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* Create Team Modal */}
-      <Modal isOpen={isCreateModalOpen} onClose={() => setIsCreateModalOpen(false)} title="🆕 Create New Team">
-        <form onSubmit={handleCreateTeam} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Workspace *</label>
-            <select
-              required
-              value={createData.workspaceId || selectedWorkspaceId || ''}
-              onChange={(e) => setCreateData({ ...createData, workspaceId: parseInt(e.target.value) })}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            >
-              <option value="">Select a workspace</option>
-              {workspaces.map(ws => (
-                <option key={ws.id} value={ws.id}>{ws.name}</option>
-              ))}
-            </select>
+    <div className="flex h-[calc(100vh-6rem)] gap-6 pb-4">
+      {/* ── Left Panel: Master Team List ── */}
+      <div className="flex w-1/3 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden flex-shrink-0">
+        
+        {/* Workspace Context & Header */}
+        <div className="border-b border-slate-200 bg-slate-50 p-4 shrink-0">
+          <div className="mb-4">
+            <h1 className="text-xl font-bold text-slate-900">Teams</h1>
+            <p className="text-xs text-slate-500">Reusable workspace groups & project assignment units</p>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Team Name *</label>
+          
+          <div className="mb-3">
+            <SearchSelect
+              options={[{ value: '', label: 'All Workspaces' }, ...workspaces.map(ws => ({ value: ws.id, label: ws.name }))]}
+              value={selectedWorkspaceId ?? ''}
+              onChange={val => setSelectedWorkspaceId(val || null)}
+              placeholder="All Workspaces"
+              isClearable={false}
+            />
+          </div>
+
+          <div className="relative">
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
             <input
-              required
-              value={createData.name}
-              onChange={(e) => setCreateData({ ...createData, name: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              placeholder="e.g., Product Development"
+              type="text"
+              placeholder="Search teams..."
+              value={teamSearch}
+              onChange={e => setTeamSearch(e.target.value)}
+              className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-sm focus:border-brand-500 focus:outline-none bg-white"
             />
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-            <textarea
-              value={createData.description || ''}
-              onChange={(e) => setCreateData({ ...createData, description: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              placeholder="What is this team responsible for?"
-              rows="3"
-            />
-          </div>
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-            <p className="text-xs text-blue-700">💡 You can add members after creating the team using the roster management feature.</p>
-          </div>
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => setIsCreateModalOpen(false)}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-full transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-full transition shadow-md hover:shadow-lg"
-            >
-              Create Team
-            </button>
-          </div>
-        </form>
-      </Modal>
+        </div>
 
-      {/* Team Detail Modal */}
-      <Modal isOpen={isDetailModalOpen} onClose={() => setIsDetailModalOpen(false)} title={selectedTeam?.name}>
-        {selectedTeam && (
-          <div className="space-y-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-brand-500 font-semibold">Description</p>
-              <p className="mt-1 text-sm text-slate-600">{selectedTeam.description || 'No description'}</p>
-            </div>
-
-            <div className="grid grid-cols-3 gap-4 py-3 border-t border-b">
-              <div>
-                <p className="text-xs text-slate-500 font-medium">Members</p>
-                <p className="text-lg font-bold text-slate-900">{selectedTeam.members?.length || 0}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 font-medium">Projects</p>
-                <p className="text-lg font-bold text-slate-900">{selectedTeam.projects?.length || 0}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 font-medium">Status</p>
-                <p className="text-lg font-bold text-emerald-600">Active</p>
-              </div>
-            </div>
-
-            <div className="flex gap-2 flex-wrap">
-              {canManageTeams() && (
-                <>
-                  <button
-                    onClick={() => { setIsDetailModalOpen(false); setIsEditModalOpen(true); }}
-                    className="text-sm font-medium text-brand-600 hover:text-brand-700 px-3 py-1.5 rounded border border-brand-200 hover:bg-brand-50 transition"
-                  >
-                    ✏️ Edit
-                  </button>
-                  <button
-                    onClick={() => { setIsDetailModalOpen(false); setIsRosterModalOpen(true); handleLoadRoster(selectedTeam.id); }}
-                    className="text-sm font-medium text-emerald-600 hover:text-emerald-700 px-3 py-1.5 rounded border border-emerald-200 hover:bg-emerald-50 transition"
-                  >
-                    👥 Members
-                  </button>
-                </>
-              )}
-              <button
-                onClick={() => { setIsDetailModalOpen(false); handleLoadWorkload(selectedTeam.id); }}
-                className="text-sm font-medium text-amber-600 hover:text-amber-700 px-3 py-1.5 rounded border border-amber-200 hover:bg-amber-50 transition"
-              >
-                📊 Workload
-              </button>
-              {canManageTeams() && (
-                <>
-                  <button
-                    onClick={() => { setIsDetailModalOpen(false); setIsCopyModalOpen(true); }}
-                    className="text-sm font-medium text-purple-600 hover:text-purple-700 px-3 py-1.5 rounded border border-purple-200 hover:bg-purple-50 transition"
-                  >
-                    📋 Copy
-                  </button>
-                  <button
-                    onClick={() => handleArchiveTeam(selectedTeam.id)}
-                    className="text-sm font-medium text-red-600 hover:text-red-700 px-3 py-1.5 rounded border border-red-200 hover:bg-red-50 transition"
-                  >
-                    🗑️ Archive
-                  </button>
-                </>
-              )}
-            </div>
-          </div>
-        )}
-      </Modal>
-
-      {/* Edit Team Modal */}
-      <Modal isOpen={isEditModalOpen} onClose={() => setIsEditModalOpen(false)} title="✏️ Edit Team">
-        <form onSubmit={handleUpdateTeam} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Team Name</label>
-            <input
-              value={editData.name}
-              onChange={(e) => setEditData({ ...editData, name: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              placeholder="Team name"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
-            <textarea
-              value={editData.description || ''}
-              onChange={(e) => setEditData({ ...editData, description: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              placeholder="Team description"
-              rows="3"
-            />
-          </div>
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => setIsEditModalOpen(false)}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-full transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-full transition shadow-md hover:shadow-lg"
-            >
-              Save Changes
-            </button>
-          </div>
-        </form>
-      </Modal>
-
-      {/* Roster Modal */}
-      <Modal isOpen={isRosterModalOpen} onClose={() => setIsRosterModalOpen(false)} title="Team Roster">
-        <div className="space-y-3 max-h-96 overflow-y-auto">
-          {rosterData.length === 0 ? (
-            <p className="text-sm text-slate-500">No members in this team</p>
+        {/* Team List */}
+        <div className="flex-1 overflow-y-auto p-2">
+          {loadingTeams ? (
+            <div className="p-8 text-center text-sm text-slate-500">Loading teams...</div>
+          ) : filteredTeams.length === 0 ? (
+            <div className="p-8 text-center text-sm text-slate-500">No teams found in this workspace.</div>
           ) : (
-            rosterData.map(member => (
-              <div key={member.id} className="flex items-center justify-between p-3 border border-slate-200 rounded-lg hover:bg-slate-50">
-                <div className="flex-1">
-                  <p className="font-medium text-sm text-slate-900">{member.userName}</p>
-                  <p className="text-xs text-slate-500">{member.userEmail}</p>
-                  <div className="flex gap-4 mt-2 text-xs text-slate-600">
-                    <span>📋 {member.openTaskCount} open</span>
-                    <span>⏰ {member.overdueTaskCount} overdue</span>
-                    <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${member.currentRole === 'Team Lead' ? 'bg-brand-100 text-brand-700' : 'bg-slate-100 text-slate-700'}`}>
-                      {member.currentRole}
-                    </span>
+            <div className="space-y-1">
+              {filteredTeams.map(team => (
+                <button
+                  key={team.id}
+                  onClick={() => setSelectedTeam(team)}
+                  className={`w-full flex items-center gap-3 rounded-xl p-3 text-left transition-colors ${
+                    selectedTeam?.id === team.id ? 'bg-brand-50 border border-brand-200' : 'hover:bg-slate-50 border border-transparent'
+                  }`}
+                >
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-white font-bold text-sm ${avatarColor(team.name)}`}>
+                    {initials(team.name)}
                   </div>
-                </div>
-                {canManageTeams() && (
-                  <button
-                    onClick={() => handleRemoveMember(member.userId)}
-                    className="ml-2 text-red-600 hover:text-red-700 text-sm font-medium px-2 py-1 rounded hover:bg-red-50"
-                  >
-                    ✕
-                  </button>
-                )}
-              </div>
-            ))
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <p className={`truncate font-semibold text-sm ${selectedTeam?.id === team.id ? 'text-brand-700' : 'text-slate-900'}`}>
+                        {team.name}
+                      </p>
+                      {team.isArchived && (
+                        <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded font-medium">Archived</span>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-slate-500 mt-0.5">
+                      {team.members?.length || 0} members · {team.projects?.length || 0} projects
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
           )}
         </div>
-        {canManageTeams() && (
-          <div className="mt-4 pt-4 border-t">
-            <button
-              onClick={() => { setIsRosterModalOpen(false); setIsMembersModalOpen(true); }}
-              className="w-full text-sm font-medium text-brand-600 hover:text-brand-700 px-3 py-2 rounded border border-brand-200 hover:bg-brand-50 transition"
-            >
-              + Add Members
-            </button>
+
+        {/* Create Team Button */}
+        {canCreateTeam && (
+          <div className="border-t border-slate-200 p-4 shrink-0 bg-white">
+            {isCreating ? (
+              <form onSubmit={handleCreateTeam} className="space-y-3">
+                <input required autoFocus placeholder="Team name (e.g. Infrastructure Squad)" value={createData.name} onChange={e => setCreateData({...createData, name: e.target.value})} className={inputClass} />
+                <textarea rows={2} placeholder="Description / Purpose" value={createData.description} onChange={e => setCreateData({...createData, description: e.target.value})} className={inputClass} />
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-700">Designated Team Lead</label>
+                  <SearchSelect
+                    options={users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
+                    value={createData.teamLeadUserId}
+                    onChange={val => setCreateData({...createData, teamLeadUserId: val || ''})}
+                    placeholder="Select Designated Team Lead..."
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button type="button" onClick={() => setIsCreating(false)} className="flex-1 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
+                  <button type="submit" className="flex-1 rounded-xl bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600">Save Team</button>
+                </div>
+              </form>
+            ) : (
+              <button onClick={() => setIsCreating(true)} className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 px-4 py-2.5 text-sm font-semibold text-brand-600 hover:border-brand-300 hover:bg-brand-50 transition">
+                + Create New Team
+              </button>
+            )}
           </div>
         )}
-      </Modal>
+      </div>
 
-      {/* Workload Modal */}
-      <Modal isOpen={isWorkloadModalOpen} onClose={() => setIsWorkloadModalOpen(false)} title="Team Workload Analysis">
-        {workloadData && (
-          <WorkloadChart workloadData={workloadData} />
+      {/* ── Right Panel: Detail View ── */}
+      <div className="flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        {!selectedTeam ? (
+          <div className="flex h-full flex-col items-center justify-center text-center p-8">
+            <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center text-3xl mb-4 text-slate-400">👥</div>
+            <h2 className="text-lg font-bold text-slate-700">Select a Team</h2>
+            <p className="text-sm text-slate-500 max-w-sm mt-1">Choose a team from the left sidebar to view roster workload, assign projects, or manage members.</p>
+          </div>
+        ) : (
+          <>
+            {/* Detail Header */}
+            <div className="border-b border-slate-200 bg-slate-50 px-8 py-6 shrink-0">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-4">
+                  <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-white font-bold text-2xl shadow-sm ${avatarColor(selectedTeam.name)}`}>
+                    {initials(selectedTeam.name)}
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-3">
+                      <h2 className="text-2xl font-bold text-slate-900">{selectedTeam.name}</h2>
+                      <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${selectedTeam.isArchived ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
+                        {selectedTeam.isArchived ? 'Archived' : 'Active'}
+                      </span>
+                    </div>
+                    <p className="text-sm text-slate-500 mt-1 max-w-md line-clamp-2">
+                      {selectedTeam.description || 'No description provided for this team.'}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {canCreateTeam && (
+                    <button onClick={() => setIsCopying(true)} className="rounded-full bg-white border border-slate-300 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm">
+                      Copy Team
+                    </button>
+                  )}
+                  {canDeleteTeam && !selectedTeam.isArchived && (
+                    <button onClick={handleArchiveTeam} className="rounded-full bg-rose-50 border border-rose-200 px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition shadow-sm">
+                      Archive Team
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Tabs */}
+            <div className="flex gap-6 border-b border-slate-200 px-8 bg-white shrink-0 overflow-x-auto">
+              {['overview', 'roster', 'projects', 'history', 'settings'].map(tab => {
+                if (tab === 'settings' && !canEditTeam) return null;
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`flex-shrink-0 border-b-2 py-4 text-sm font-semibold capitalize transition-colors ${
+                      activeTab === tab ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+                    }`}
+                  >
+                    {tab === 'history' ? '📋 History' : tab}
+                    {tab === 'history' && historyData.length > 0 && (
+                      <span className="ml-1.5 rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-bold text-slate-600">{historyData.length}</span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Tab Content Area */}
+            <div className="flex-1 overflow-y-auto bg-slate-50/50 p-8">
+              
+              {/* ── OVERVIEW TAB ── */}
+              {activeTab === 'overview' && (
+                <div className="space-y-6 max-w-4xl">
+                  {workloadData ? (
+                    <WorkloadChart workloadData={workloadData} />
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
+                      No workload statistics available for this team.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── ROSTER TAB ── */}
+              {activeTab === 'roster' && (
+                <div className="flex h-full gap-6">
+                  {/* Current Members */}
+                  <div className="flex-1 rounded-xl border border-slate-200 bg-white flex flex-col overflow-hidden shadow-sm">
+                    <div className="border-b border-slate-100 px-5 py-4 shrink-0 flex items-center justify-between">
+                      <h3 className="font-semibold text-slate-800">Team Roster ({rosterData.length} Members)</h3>
+                    </div>
+                    <div className="flex-1 overflow-y-auto">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50/80 sticky top-0 border-b border-slate-100 z-10">
+                          <tr>
+                            <th className="px-5 py-3 font-semibold text-slate-500 text-xs uppercase">Member</th>
+                            <th className="px-5 py-3 font-semibold text-slate-500 text-xs uppercase">Team Role</th>
+                            <th className="px-5 py-3 font-semibold text-slate-500 text-xs uppercase">Workload</th>
+                            {canManageMembers && <th className="px-5 py-3 font-semibold text-slate-500 text-xs uppercase text-right">Actions</th>}
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {rosterData.length === 0 ? (
+                            <tr><td colSpan="4" className="p-8 text-center text-slate-500">No members assigned to this team yet.</td></tr>
+                          ) : rosterData.map(member => (
+                            <tr key={member.id} className="hover:bg-slate-50 transition-colors">
+                              <td className="px-5 py-3">
+                                <div className="flex items-center gap-3">
+                                  {member.userPhotoUrl ? (
+                                    <img src={member.userPhotoUrl} alt="" className="h-8 w-8 rounded-full object-cover" />
+                                  ) : (
+                                    <div className={`flex h-8 w-8 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor(member.userName)}`}>
+                                      {initials(member.userName)}
+                                    </div>
+                                  )}
+                                  <div>
+                                    <p className="font-medium text-slate-900">{member.userName}</p>
+                                    <p className="text-xs text-slate-500">{member.userEmail}</p>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="px-5 py-3">
+                                <span className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${member.currentRole === 'Team Lead' ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-600'}`}>
+                                  {member.currentRole || 'Member'}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3">
+                                <div className="text-xs">
+                                  <span className="font-semibold text-slate-700">{member.openTaskCount}</span> open tasks
+                                  {member.overdueTaskCount > 0 && <span className="text-red-500 ml-1 font-semibold">({member.overdueTaskCount} overdue)</span>}
+                                </div>
+                              </td>
+                              {canManageMembers && (
+                                <td className="px-5 py-3 text-right">
+                                  <button onClick={() => handleRemoveMember(member.userId)} className="text-xs font-semibold text-red-500 hover:text-red-700 hover:underline">
+                                    Remove
+                                  </button>
+                                </td>
+                              )}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Add Members (Multi-Select) */}
+                  {canManageMembers && (
+                    <div className="w-80 shrink-0 rounded-xl border border-slate-200 bg-white flex flex-col shadow-sm h-fit">
+                      <div className="border-b border-slate-100 px-5 py-4 shrink-0 bg-slate-50/50">
+                        <h3 className="font-semibold text-slate-800 mb-4">Add Members to Team</h3>
+                        <MultiSelectMembers
+                          availableMembers={availableUsers}
+                          selectedMembers={selectedNewMembers}
+                          onSelectionChange={setSelectedNewMembers}
+                        />
+                        <button
+                          onClick={handleBulkAddMembers}
+                          disabled={selectedNewMembers.length === 0}
+                          className="mt-4 w-full rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white transition hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          Add Selected Members ({selectedNewMembers.length})
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── PROJECTS TAB ── */}
+              {activeTab === 'projects' && (
+                <div className="max-w-4xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-slate-800">Assigned Projects</h3>
+                      <p className="text-xs text-slate-500">Team members participate as a unit in these projects.</p>
+                    </div>
+                    {canAssignProject && (
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setIsAssigning(true)}
+                          className="rounded-lg bg-brand-500 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-600 transition shadow-sm"
+                        >
+                          + Assign to Project
+                        </button>
+                        <button
+                          onClick={() => setIsMoving(true)}
+                          className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
+                        >
+                          🔀 Move Team
+                        </button>
+                        <button
+                          onClick={() => setIsReplacing(true)}
+                          className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 hover:bg-amber-100 transition shadow-sm"
+                        >
+                          🔄 Replace Team
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {selectedTeam.projects && selectedTeam.projects.length > 0 ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {selectedTeam.projects.map(proj => {
+                        const projInfo = allProjects.find(p => p.id === proj.projectId);
+                        return (
+                          <div key={proj.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm flex items-start justify-between">
+                            <div>
+                              <p className="font-semibold text-slate-900">{projInfo ? projInfo.title : `Project #${proj.projectId}`}</p>
+                              <p className="text-xs text-slate-500 mt-0.5">Assigned Date: {new Date(proj.assignedAt).toLocaleDateString()}</p>
+                            </div>
+                            <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Active Assignment</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 bg-white">
+                      This team is not currently assigned to any active projects.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── HISTORY TAB ── */}
+              {activeTab === 'history' && (
+                <div className="max-w-4xl space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h3 className="font-semibold text-slate-800">Project Assignment & Replacement History</h3>
+                      <p className="text-xs text-slate-500 mt-0.5">Complete audit trail of all project assignments, removals, and replacements.</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-500 bg-slate-100 rounded-full px-3 py-1">{historyData.length} records</span>
+                  </div>
+
+                  {historyData.length === 0 ? (
+                    <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center text-sm text-slate-500 bg-white">
+                      No historical project assignments found for this team.
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                      <table className="w-full text-left text-sm">
+                        <thead className="bg-slate-50 border-b border-slate-100">
+                          <tr>
+                            <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Project</th>
+                            <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Assigned</th>
+                            <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Removed</th>
+                            <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Replaced By</th>
+                            <th className="px-5 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {historyData.map(record => {
+                            const projInfo = allProjects.find(p => p.id === record.projectId);
+                            const replacedByTeam = record.replacedByTeamId ? teams.find(t => t.id === record.replacedByTeamId) : null;
+                            const isActive = !record.removedAt;
+                            return (
+                              <tr key={record.id} className="hover:bg-slate-50 transition-colors">
+                                <td className="px-5 py-3">
+                                  <span className="font-medium text-slate-900">
+                                    {projInfo ? projInfo.title : `Project #${record.projectId}`}
+                                  </span>
+                                </td>
+                                <td className="px-5 py-3 text-slate-600 text-xs">
+                                  {new Date(record.assignedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}
+                                </td>
+                                <td className="px-5 py-3 text-slate-600 text-xs">
+                                  {record.removedAt
+                                    ? new Date(record.removedAt).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })
+                                    : <span className="text-slate-400 italic">Active</span>}
+                                </td>
+                                <td className="px-5 py-3 text-xs">
+                                  {replacedByTeam
+                                    ? <span className="rounded-full bg-blue-100 text-blue-700 px-2 py-0.5 font-medium">{replacedByTeam.name}</span>
+                                    : <span className="text-slate-400">—</span>}
+                                </td>
+                                <td className="px-5 py-3">
+                                  <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    isActive ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-200 text-slate-600'
+                                  }`}>
+                                    {isActive ? 'Active' : 'Ended'}
+                                  </span>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── SETTINGS TAB ── */}
+              {activeTab === 'settings' && canEditTeam && (
+                <div className="max-w-2xl">
+                  <form onSubmit={handleUpdateTeam} className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm space-y-5">
+                    <h3 className="font-semibold text-slate-900 border-b border-slate-100 pb-3">Edit Team Metadata</h3>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Team Name</label>
+                      <input required value={editData.name} onChange={e => setEditData({...editData, name: e.target.value})} className={inputClass} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
+                      <textarea rows={3} value={editData.description} onChange={e => setEditData({...editData, description: e.target.value})} className={inputClass} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-slate-700">Designated Team Lead</label>
+                      <SearchSelect
+                        options={users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
+                        value={editData.teamLeadUserId}
+                        onChange={val => setEditData({...editData, teamLeadUserId: val})}
+                        placeholder="Select Designated Team Lead..."
+                      />
+                    </div>
+                    <div className="flex justify-end pt-2">
+                      <button type="submit" className="rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600">Save Team Settings</button>
+                    </div>
+                  </form>
+                </div>
+              )}
+            </div>
+          </>
         )}
-      </Modal>
+      </div>
 
-      {/* Members Management Modal */}
-      <Modal isOpen={isMembersModalOpen} onClose={() => setIsMembersModalOpen(false)} title="Add Team Members">
-        <form onSubmit={handleAddMembers} className="space-y-4">
-          <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Select Members to Add</label>
-            <MultiSelectMembers
-              selectedMembers={selectedMembers}
-              onSelectionChange={setSelectedMembers}
-              availableMembers={users.filter(u => !rosterData.some(r => r.userId === u.id))}
-            />
+      {/* ── Assign Team to Project Modal ── */}
+      {isAssigning && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <div className="mb-5">
+              <h3 className="text-lg font-bold text-slate-900">Assign Team to Project</h3>
+              <p className="text-sm text-slate-500 mt-1">Assign <strong>{selectedTeam?.name}</strong> as a unit to a project.</p>
+            </div>
+            <form onSubmit={handleAssignProject} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">Select Project</label>
+                <SearchSelect
+                  options={allProjects.map(p => ({ value: p.id, label: p.title }))}
+                  value={assignProjectId ? parseInt(assignProjectId) : null}
+                  onChange={val => setAssignProjectId(val || '')}
+                  placeholder="Choose a project..."
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => { setIsAssigning(false); setAssignProjectId(''); }} className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">Cancel</button>
+                <button type="submit" className="flex-1 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 transition">Assign Team</button>
+              </div>
+            </form>
           </div>
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => { setIsMembersModalOpen(false); setSelectedMembers([]); }}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-full"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-full disabled:opacity-50"
-              disabled={selectedMembers.length === 0}
-            >
-              Add Members ({selectedMembers.length})
-            </button>
+        </div>
+      )}
+      
+      {/* ── Copy Team Modal ── */}
+      {isCopying && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-slate-900 mb-4">Copy Team "{selectedTeam?.name}"</h3>
+            <form onSubmit={handleCopyTeam} className="space-y-4">
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">New Team Name</label>
+                <input required autoFocus value={copyData.name} onChange={e => setCopyData({...copyData, name: e.target.value})} className={inputClass} />
+              </div>
+              <div>
+                <label className="mb-1 block text-sm font-medium text-slate-700">New Team Description</label>
+                <textarea rows={3} value={copyData.description} onChange={e => setCopyData({...copyData, description: e.target.value})} className={inputClass} />
+              </div>
+              <div className="flex gap-3 pt-4">
+                <button type="button" onClick={() => setIsCopying(false)} className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition">Cancel</button>
+                <button type="submit" className="flex-1 rounded-xl bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600 transition">Copy Team</button>
+              </div>
+            </form>
           </div>
-        </form>
-      </Modal>
+        </div>
+      )}
 
-      {/* Copy Team Modal */}
-      <Modal isOpen={isCopyModalOpen} onClose={() => setIsCopyModalOpen(false)} title="📋 Copy Team">
-        <form onSubmit={handleCopyTeam} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">New Team Name *</label>
-            <input
-              required
-              value={copyData.newTeamName}
-              onChange={(e) => setCopyData({ ...copyData, newTeamName: e.target.value })}
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              placeholder="e.g., Product Development - Copy"
-            />
+      {/* ── Replace Team on Project Modal ── */}
+      {isReplacing && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <span>🔄</span> Replace Team
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Replacing <span className="font-semibold text-slate-800">{selectedTeam?.name}</span> on project
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setIsReplacing(false); setReplaceData({ projectId: '', newTeamId: '', reason: '', newEndDate: '' }); }}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleReplaceTeam} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Target Project *</label>
+                <SearchSelect
+                  options={allProjects.map(p => ({ value: p.id, label: p.title }))}
+                  value={replaceData.projectId ? parseInt(replaceData.projectId) : null}
+                  onChange={val => setReplaceData({...replaceData, projectId: val || ''})}
+                  placeholder="Select project..."
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Replacement Team *</label>
+                <SearchSelect
+                  options={teams.filter(t => t.id !== selectedTeam?.id && !t.isArchived).map(t => ({ value: t.id, label: t.name }))}
+                  value={replaceData.newTeamId ? parseInt(replaceData.newTeamId) : null}
+                  onChange={val => setReplaceData({...replaceData, newTeamId: val || ''})}
+                  placeholder="Select replacement team..."
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Extension End Date</label>
+                  <input
+                    type="date"
+                    value={replaceData.newEndDate}
+                    onChange={e => setReplaceData({...replaceData, newEndDate: e.target.value})}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Reason / Notes</label>
+                  <input
+                    type="text"
+                    placeholder="Reason for team swap..."
+                    value={replaceData.reason}
+                    onChange={e => setReplaceData({...replaceData, reason: e.target.value})}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 mt-5">
+                <button
+                  type="button"
+                  onClick={() => { setIsReplacing(false); setReplaceData({ projectId: '', newTeamId: '', reason: '', newEndDate: '' }); }}
+                  className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!replaceData.projectId || !replaceData.newTeamId}
+                  className="px-6 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
+                >
+                  Confirm Replace
+                </button>
+              </div>
+            </form>
           </div>
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-3 space-y-2">
-            <p className="text-sm font-medium text-emerald-900">✅ This will copy:</p>
-            <ul className="text-xs text-emerald-700 space-y-1 ml-3">
-              <li>✓ All team members</li>
-              <li>✓ Team structure and metadata</li>
-              <li>✗ NOT project assignments</li>
-            </ul>
+        </div>
+      )}
+
+      {/* ── Move Team to Project Modal ── */}
+      {isMoving && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <span>🔀</span> Move Team
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Reassign <span className="font-semibold text-slate-800">{selectedTeam?.name}</span> to a new project destination
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setIsMoving(false); setMoveProjectId(''); }}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleMoveTeam} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Destination Project *</label>
+                <SearchSelect
+                  options={allProjects.map(p => ({ value: p.id, label: p.title }))}
+                  value={moveProjectId ? parseInt(moveProjectId) : null}
+                  onChange={val => setMoveProjectId(val || '')}
+                  placeholder="Select destination project..."
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 mt-5">
+                <button
+                  type="button"
+                  onClick={() => { setIsMoving(false); setMoveProjectId(''); }}
+                  className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={!moveProjectId}
+                  className="px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
+                >
+                  Confirm Move
+                </button>
+              </div>
+            </form>
           </div>
-          <div className="flex justify-end gap-3 mt-6">
-            <button
-              type="button"
-              onClick={() => setIsCopyModalOpen(false)}
-              className="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100 rounded-full transition"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              className="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-full transition shadow-md hover:shadow-lg"
-            >
-              Copy Team
-            </button>
-          </div>
-        </form>
-      </Modal>
+        </div>
+      )}
     </div>
   );
 }

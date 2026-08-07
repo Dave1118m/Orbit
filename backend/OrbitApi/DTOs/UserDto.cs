@@ -13,5 +13,14 @@ namespace OrbitApi.DTOs
         public string? PreferredLanguage { get; set; }
         public string? PhoneNumber { get; set; }
         public byte[]? RowVersion { get; set; }
+        public List<RoleInfoDto> Roles { get; set; } = new();
+        public List<string> Permissions { get; set; } = new();
+    }
+
+    public class RoleInfoDto
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? ScopeType { get; set; }
+        public int? ScopeId { get; set; }
     }
 }

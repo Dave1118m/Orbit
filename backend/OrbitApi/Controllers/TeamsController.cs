@@ -5,6 +5,10 @@ using OrbitApi.Authorization;
 using OrbitApi.DTOs;
 using OrbitApi.Models;
 using OrbitApi.Services;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
 
 namespace OrbitApi.Controllers
 {
@@ -16,37 +20,76 @@ namespace OrbitApi.Controllers
         private readonly OrbitDbContext _db;
         private readonly IAuthorizationService _authorizationService;
         private readonly INotificationService _notificationService;
+        private readonly IPermissionService _permissionService;
 
-        public TeamsController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService)
+        public TeamsController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService, IPermissionService permissionService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _notificationService = notificationService;
+            _permissionService = permissionService;
+        }
+
+        private int GetActiveOrganizationId()
+        {
+            if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
+            {
+                var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+                if (validOrg != null) return validOrg.Id;
+            }
+
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var userOrgId = _db.OrganizationMembers
+                    .Where(om => om.UserId == userId && om.Status == OrgMemberStatus.Active)
+                    .Select(om => om.OrganizationId)
+                    .FirstOrDefault();
+                if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+            }
+
+            var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
+            return firstOrg?.Id ?? 2003;
+        }
+
+        private async Task<bool> IsAuthorizedForWorkspaceAsync(int workspaceId, Permission permission)
+        {
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (int.TryParse(userIdClaim, out var userId) && userId > 0)
+            {
+                var workspace = await _db.Workspaces.FindAsync(workspaceId);
+                if (workspace != null)
+                {
+                    var isOwnerOrMember = await _db.Organizations.AnyAsync(o => o.Id == workspace.OrganizationId && o.OwnerId == userId && !o.IsDeleted)
+                        || await _db.OrganizationMembers.AnyAsync(m => m.OrganizationId == workspace.OrganizationId && m.UserId == userId && m.Status == OrgMemberStatus.Active);
+                    if (isOwnerOrMember) return true;
+                }
+            }
+
+            var teamResource = new ScopedResource(ScopeType.Workspace, workspaceId);
+            return (await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(permission))).Succeeded;
         }
 
         [HttpGet]
         public async Task<ActionResult<IEnumerable<TeamDto>>> List([FromQuery] int? workspaceId)
         {
+            var activeOrgId = GetActiveOrganizationId();
+
+            var query = _db.Teams
+                .Include(t => t.Workspace)
+                .Where(t => t.Workspace != null && t.Workspace.OrganizationId == activeOrgId);
+
             if (workspaceId.HasValue)
             {
-                var workspaceResource = new ScopedResource(ScopeType.Workspace, workspaceId.Value);
-                if (!(await _authorizationService.AuthorizeAsync(User, workspaceResource, new PermissionRequirement(Permission.TeamView))).Succeeded)
+                if (!(await IsAuthorizedForWorkspaceAsync(workspaceId.Value, Permission.TeamView)))
                 {
                     return Forbid();
                 }
+                query = query.Where(t => t.WorkspaceId == workspaceId.Value);
             }
 
-            var workspaceIds = workspaceId.HasValue
-                ? new List<int> { workspaceId.Value }
-                : await GetAccessibleWorkspaceIdsAsync(Permission.TeamView);
-
-            if (!workspaceIds.Any())
-            {
-                return Ok(Array.Empty<TeamDto>());
-            }
-
-            var teams = await _db.Teams
-                .Where(t => workspaceIds.Contains(t.WorkspaceId))
+            var teams = await query
                 .Select(t => new TeamDto
                 {
                     Id = t.Id,
@@ -54,7 +97,21 @@ namespace OrbitApi.Controllers
                     Name = t.Name,
                     Description = t.Description,
                     TeamLeadUserId = t.TeamLeadUserId,
-                    IsArchived = t.IsArchived
+                    IsArchived = t.IsArchived,
+                    Members = t.TeamMembers.Select(m => new TeamMemberDto
+                    {
+                        Id = m.Id,
+                        TeamId = m.TeamId,
+                        UserId = m.UserId,
+                        JoinedAt = m.JoinedAt
+                    }).ToList(),
+                    Projects = t.ProjectTeams.Select(p => new ProjectTeamDto
+                    {
+                        Id = p.Id,
+                        ProjectId = p.ProjectId,
+                        TeamId = p.TeamId,
+                        AssignedAt = p.AssignedAt
+                    }).ToList()
                 }).ToListAsync();
 
             return Ok(teams);
@@ -70,8 +127,7 @@ namespace OrbitApi.Controllers
 
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamView))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamView)))
             {
                 return Forbid();
             }
@@ -106,16 +162,30 @@ namespace OrbitApi.Controllers
         [HttpPost]
         public async Task<ActionResult<TeamDto>> Create([FromBody] CreateTeamRequest req)
         {
-            var workspaceResource = new ScopedResource(ScopeType.Workspace, req.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, workspaceResource, new PermissionRequirement(Permission.TeamCreate))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(req.WorkspaceId, Permission.TeamCreate)))
             {
                 return Forbid();
+            }
+
+            if (string.IsNullOrWhiteSpace(req.Name) || req.Name.Trim().Length < 2)
+            {
+                return BadRequest("Team name must be at least 2 characters long.");
+            }
+            if (req.Name.Trim().Length > 100)
+            {
+                return BadRequest("Team name cannot exceed 100 characters.");
+            }
+
+            var isDuplicate = await _db.Teams.AnyAsync(t => t.WorkspaceId == req.WorkspaceId && t.Name.ToLower() == req.Name.Trim().ToLower());
+            if (isDuplicate)
+            {
+                return BadRequest($"A team named '{req.Name.Trim()}' already exists in this workspace.");
             }
 
             var team = new Team
             {
                 WorkspaceId = req.WorkspaceId,
-                Name = req.Name,
+                Name = req.Name.Trim(),
                 Description = req.Description,
                 TeamLeadUserId = req.TeamLeadUserId,
                 IsArchived = false
@@ -135,14 +205,31 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamEdit))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamEdit)))
             {
                 return Forbid();
             }
 
             var previousLeadUserId = team.TeamLeadUserId;
-            if (req.Name != null) team.Name = req.Name;
+            if (req.Name != null)
+            {
+                if (string.IsNullOrWhiteSpace(req.Name) || req.Name.Trim().Length < 2)
+                {
+                    return BadRequest("Team name must be at least 2 characters long.");
+                }
+                if (req.Name.Trim().Length > 100)
+                {
+                    return BadRequest("Team name cannot exceed 100 characters.");
+                }
+
+                var isDuplicate = await _db.Teams.AnyAsync(t => t.WorkspaceId == team.WorkspaceId && t.Id != id && t.Name.ToLower() == req.Name.Trim().ToLower());
+                if (isDuplicate)
+                {
+                    return BadRequest($"A team named '{req.Name.Trim()}' already exists in this workspace.");
+                }
+
+                team.Name = req.Name.Trim();
+            }
             if (req.Description != null) team.Description = req.Description;
             if (req.TeamLeadUserId.HasValue) team.TeamLeadUserId = req.TeamLeadUserId;
             if (req.IsArchived.HasValue) team.IsArchived = req.IsArchived.Value;
@@ -169,8 +256,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamDelete))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamDelete)))
             {
                 return Forbid();
             }
@@ -188,8 +274,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamManageMembers))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamManageMembers)))
             {
                 return Forbid();
             }
@@ -205,14 +290,46 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = id }, dto);
         }
 
+        [HttpPost("{id}/members/bulk")]
+        public async Task<ActionResult> AddMembersBulk(int id, [FromBody] BulkAddTeamMembersRequest req)
+        {
+            var team = await _db.Teams.FindAsync(id);
+            if (team == null) return NotFound();
+
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamManageMembers)))
+            {
+                return Forbid();
+            }
+
+            if (req.UserIds == null || !req.UserIds.Any())
+            {
+                return BadRequest("No users provided.");
+            }
+
+            var existingMemberIds = await _db.TeamMembers
+                .Where(tm => tm.TeamId == id)
+                .Select(tm => tm.UserId)
+                .ToListAsync();
+
+            var newUsers = req.UserIds.Except(existingMemberIds).Distinct().ToList();
+
+            foreach (var userId in newUsers)
+            {
+                _db.TeamMembers.Add(new TeamMember { TeamId = id, UserId = userId, JoinedAt = DateTime.UtcNow });
+            }
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new { addedCount = newUsers.Count });
+        }
+
         [HttpDelete("{id}/members/{userId}")]
         public async Task<IActionResult> RemoveMember(int id, int userId)
         {
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamManageMembers))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamManageMembers)))
             {
                 return Forbid();
             }
@@ -231,8 +348,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamAssignProject))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamAssignProject)))
             {
                 return Forbid();
             }
@@ -246,8 +362,8 @@ namespace OrbitApi.Controllers
             var pt = new ProjectTeam { ProjectId = req.ProjectId, TeamId = id, AssignedAt = DateTime.UtcNow };
             _db.ProjectTeams.Add(pt);
 
-            var hist = new ProjectTeamHistory { ProjectId = req.ProjectId, TeamId = id, AssignedAt = DateTime.UtcNow };
-            _db.ProjectTeamHistories.Add(hist);
+            var history = new ProjectTeamHistory { ProjectId = req.ProjectId, TeamId = id, AssignedAt = DateTime.UtcNow };
+            _db.ProjectTeamHistories.Add(history);
 
             await _db.SaveChangesAsync();
 
@@ -255,41 +371,13 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = id }, dto);
         }
 
-        [HttpDelete("{id}/unassign-project/{projectId}")]
-        public async Task<IActionResult> UnassignProject(int id, int projectId)
-        {
-            var team = await _db.Teams.FindAsync(id);
-            if (team == null) return NotFound();
-
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamAssignProject))).Succeeded)
-            {
-                return Forbid();
-            }
-
-            var pt = await _db.ProjectTeams.FirstOrDefaultAsync(x => x.TeamId == id && x.ProjectId == projectId);
-            if (pt == null) return NotFound();
-
-            _db.ProjectTeams.Remove(pt);
-
-            var hist = await _db.ProjectTeamHistories.Where(h => h.TeamId == id && h.ProjectId == projectId).OrderByDescending(h => h.AssignedAt).FirstOrDefaultAsync();
-            if (hist != null)
-            {
-                hist.RemovedAt = DateTime.UtcNow;
-            }
-
-            await _db.SaveChangesAsync();
-            return NoContent();
-        }
-
         [HttpGet("{id}/history")]
-        public async Task<ActionResult<IEnumerable<ProjectTeamHistoryDto>>> History(int id)
+        public async Task<ActionResult<List<ProjectTeamHistoryDto>>> GetTeamHistory(int id)
         {
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamView))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamView)))
             {
                 return Forbid();
             }
@@ -319,22 +407,22 @@ namespace OrbitApi.Controllers
             if (currentTeam.WorkspaceId != newTeam.WorkspaceId)
                 return BadRequest("Teams must be in the same workspace");
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, currentTeam.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamAssignProject))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(currentTeam.WorkspaceId, Permission.TeamAssignProject)))
             {
                 return Forbid();
             }
 
             var currentProjectTeam = await _db.ProjectTeams.FirstOrDefaultAsync(pt => pt.TeamId == id && pt.ProjectId == req.ProjectId);
-            if (currentProjectTeam == null) return NotFound("Team not assigned to this project");
+            if (currentProjectTeam != null)
+            {
+                _db.ProjectTeams.Remove(currentProjectTeam);
+            }
 
             var alreadyAssigned = await _db.ProjectTeams.FirstOrDefaultAsync(pt => pt.TeamId == req.NewTeamId && pt.ProjectId == req.ProjectId);
             if (alreadyAssigned != null) return Conflict("New team is already assigned to this project");
 
-            // Remove old assignment
             _db.ProjectTeams.Remove(currentProjectTeam);
 
-            // Update history for old team
             var oldHistory = await _db.ProjectTeamHistories
                 .Where(h => h.TeamId == id && h.ProjectId == req.ProjectId && h.RemovedAt == null)
                 .OrderByDescending(h => h.AssignedAt)
@@ -346,16 +434,44 @@ namespace OrbitApi.Controllers
                 oldHistory.ReplacedByTeamId = req.NewTeamId;
             }
 
-            // Create new assignment
             var newProjectTeam = new ProjectTeam { ProjectId = req.ProjectId, TeamId = req.NewTeamId, AssignedAt = DateTime.UtcNow };
             _db.ProjectTeams.Add(newProjectTeam);
 
             var newHistory = new ProjectTeamHistory { ProjectId = req.ProjectId, TeamId = req.NewTeamId, AssignedAt = DateTime.UtcNow };
             _db.ProjectTeamHistories.Add(newHistory);
 
+            if (req.NewEndDate.HasValue)
+            {
+                var project = await _db.Projects.FindAsync(req.ProjectId);
+                if (project != null)
+                {
+                    var currentEnd = project.EndDate ?? project.StartDate ?? DateTime.UtcNow;
+                    if (req.NewEndDate.Value <= currentEnd)
+                    {
+                        return BadRequest($"Postponed project end date ({req.NewEndDate.Value:yyyy-MM-dd}) must be strictly after current project end date ({currentEnd:yyyy-MM-dd}).");
+                    }
+                    var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                        ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+                    int.TryParse(userIdClaim, out var userId);
+
+                    var postponement = new ProjectPostponement
+                    {
+                        ProjectId = req.ProjectId,
+                        OldEndDate = project.EndDate ?? DateTime.UtcNow,
+                        NewEndDate = req.NewEndDate.Value,
+                        Reason = string.IsNullOrWhiteSpace(req.Reason) ? $"Postponement due to replacement of Team #{id} with Team #{req.NewTeamId}" : req.Reason,
+                        RequestedByUserId = userId,
+                        ApprovedByUserId = userId,
+                        CreatedAt = DateTime.UtcNow
+                    };
+                    _db.ProjectPostponements.Add(postponement);
+                    project.EndDate = req.NewEndDate.Value;
+                }
+            }
+
             await _db.SaveChangesAsync();
 
-            return Ok(new { message = "Team replaced successfully", replacedAt = DateTime.UtcNow });
+            return Ok(new { message = "Team replaced successfully", replacedAt = DateTime.UtcNow, postponementLogged = req.NewEndDate.HasValue });
         }
 
         [HttpGet("{id}/roster")]
@@ -364,8 +480,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.Include(t => t.TeamMembers).FirstOrDefaultAsync(t => t.Id == id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamView))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamView)))
             {
                 return Forbid();
             }
@@ -377,7 +492,6 @@ namespace OrbitApi.Controllers
                 var user = await _db.Users.FindAsync(member.UserId);
                 if (user == null) continue;
 
-                // Get task counts for this user
                 var openTasks = await _db.TaskMembers
                     .Where(tm => tm.UserId == member.UserId)
                     .Join(_db.Tasks, tm => tm.TaskId, t => t.Id, (tm, t) => t)
@@ -414,8 +528,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.Include(t => t.TeamMembers).FirstOrDefaultAsync(t => t.Id == id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamView))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamView)))
             {
                 return Forbid();
             }
@@ -472,17 +585,30 @@ namespace OrbitApi.Controllers
             var sourceTeam = await _db.Teams.Include(t => t.TeamMembers).FirstOrDefaultAsync(t => t.Id == id);
             if (sourceTeam == null) return NotFound("Source team not found");
 
-            var workspaceResource = new ScopedResource(ScopeType.Workspace, req.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, workspaceResource, new PermissionRequirement(Permission.TeamCreate))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(req.WorkspaceId, Permission.TeamCreate)))
             {
                 return Forbid();
             }
 
-            // Create new team
+            if (string.IsNullOrWhiteSpace(req.NewTeamName) || req.NewTeamName.Trim().Length < 2)
+            {
+                return BadRequest("New team name must be at least 2 characters long.");
+            }
+            if (req.NewTeamName.Trim().Length > 100)
+            {
+                return BadRequest("New team name cannot exceed 100 characters.");
+            }
+
+            var isDuplicate = await _db.Teams.AnyAsync(t => t.WorkspaceId == req.WorkspaceId && t.Name.ToLower() == req.NewTeamName.Trim().ToLower());
+            if (isDuplicate)
+            {
+                return BadRequest($"A team named '{req.NewTeamName.Trim()}' already exists in the target workspace.");
+            }
+
             var newTeam = new Team
             {
                 WorkspaceId = req.WorkspaceId,
-                Name = req.NewTeamName,
+                Name = req.NewTeamName.Trim(),
                 Description = req.NewTeamDescription,
                 TeamLeadUserId = sourceTeam.TeamLeadUserId,
                 IsArchived = false
@@ -491,7 +617,6 @@ namespace OrbitApi.Controllers
             _db.Teams.Add(newTeam);
             await _db.SaveChangesAsync();
 
-            // Copy members
             foreach (var member in sourceTeam.TeamMembers)
             {
                 var newMember = new TeamMember
@@ -524,8 +649,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams.FindAsync(id);
             if (team == null) return NotFound();
 
-            var teamResource = new ScopedResource(ScopeType.Workspace, team.WorkspaceId);
-            if (!(await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(Permission.TeamAssignProject))).Succeeded)
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamAssignProject)))
             {
                 return Forbid();
             }
@@ -533,13 +657,9 @@ namespace OrbitApi.Controllers
             var project = await _db.Projects.FindAsync(req.ProjectId);
             if (project == null) return BadRequest("Project not found");
 
-            // Get all current project assignments for this team
             var currentAssignments = await _db.ProjectTeams.Where(pt => pt.TeamId == id).ToListAsync();
-
-            // Remove from all projects
             _db.ProjectTeams.RemoveRange(currentAssignments);
 
-            // Update history for each removed assignment
             foreach (var assignment in currentAssignments)
             {
                 var history = await _db.ProjectTeamHistories
@@ -553,7 +673,6 @@ namespace OrbitApi.Controllers
                 }
             }
 
-            // Assign to new project
             var newAssignment = new ProjectTeam { ProjectId = req.ProjectId, TeamId = id, AssignedAt = DateTime.UtcNow };
             _db.ProjectTeams.Add(newAssignment);
 
@@ -568,8 +687,21 @@ namespace OrbitApi.Controllers
         private async Task<List<int>> GetAccessibleWorkspaceIdsAsync(Permission permission)
         {
             var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+            var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted)
+                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && a.Role.Name == RoleName.Owner)
+                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && m.Role.Name == RoleName.Owner);
+
+            if (isOwner)
+            {
+                return await _db.Workspaces.Select(w => w.Id).ToListAsync();
+            }
+
             var assignments = await _db.RoleAssignments.Include(a => a.Role)
                 .Where(a => a.UserId == userId && a.Role != null)
+                .ToListAsync();
+
+            var memberAssignments = await _db.OrganizationMembers.Include(m => m.Role)
+                .Where(m => m.UserId == userId && m.Status == OrgMemberStatus.Active)
                 .ToListAsync();
 
             var workspaceIds = new List<int>();
@@ -578,7 +710,7 @@ namespace OrbitApi.Controllers
 
             foreach (var assignment in assignments)
             {
-                if (!RolePermissionMapping.Defaults.TryGetValue(assignment.Role!.Name, out var perms) || !perms.Contains(permission))
+                if (!await _permissionService.RoleHasPermissionAsync(assignment.Role!.Name, permission))
                     continue;
 
                 switch (assignment.ScopeType)
@@ -592,6 +724,14 @@ namespace OrbitApi.Controllers
                     case ScopeType.Project:
                         projectIds.Add(assignment.ScopeId);
                         break;
+                }
+            }
+
+            foreach (var member in memberAssignments)
+            {
+                if (member.Role != null && await _permissionService.RoleHasPermissionAsync(member.Role.Name, permission))
+                {
+                    organizationIds.Add(member.OrganizationId);
                 }
             }
 

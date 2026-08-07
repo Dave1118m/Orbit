@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 
-const API_BASE = 'https://localhost:7065/api/v1';
+const API_BASE = import.meta.env.VITE_API_URL;
 
-function SetupPassword() {
+export default function SetupPassword() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
@@ -19,7 +19,7 @@ function SetupPassword() {
 
   useEffect(() => {
     if (!token) {
-      setError('Invalid invitation link. Missing token.');
+      setError('Invalid or expired invitation link. Missing token.');
     }
   }, [token]);
 
@@ -40,12 +40,12 @@ function SetupPassword() {
     }
 
     if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
+      setError('Passwords do not match.');
       return;
     }
 
     if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
+      setError('Password must be at least 6 characters long.');
       return;
     }
 
@@ -67,19 +67,17 @@ function SetupPassword() {
       const data = await response.json();
 
       if (response.ok) {
-        // Store the JWT token
         localStorage.setItem('token', data.token);
         setSuccess(true);
         
-        // Redirect to role-based dashboard after a short delay
         setTimeout(() => {
           navigate(data.redirectUrl || '/dashboard');
         }, 2000);
       } else {
-        setError(data.message || data || 'Failed to set up password');
+        setError(data.message || data || 'Failed to set up password.');
       }
     } catch (err) {
-      setError('Network error. Please try again.');
+      setError('Network connection error. Please try again.');
       console.error('Password setup error:', err);
     } finally {
       setLoading(false);
@@ -88,178 +86,130 @@ function SetupPassword() {
 
   if (success) {
     return (
-      <div style={{ 
-        minHeight: '100vh', 
-        display: 'flex', 
-        alignItems: 'center', 
-        justifyContent: 'center',
-        background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-      }}>
-        <div style={{ 
-          background: 'white', 
-          padding: '2rem', 
-          borderRadius: '8px', 
-          textAlign: 'center',
-          maxWidth: '400px'
-        }}>
-          <h2 style={{ color: '#10b981', marginBottom: '1rem' }}>✓ Account Setup Complete!</h2>
-          <p style={{ color: '#666' }}>Redirecting to your dashboard...</p>
+      <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 sm:p-6 lg:p-8">
+        <div className="w-full max-w-md bg-slate-900/90 border border-slate-800 rounded-3xl p-8 sm:p-10 text-center shadow-2xl backdrop-blur-xl space-y-6">
+          <div className="h-20 w-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto text-4xl border border-emerald-500/30 shadow-inner">
+            ✓
+          </div>
+          <div className="space-y-2">
+            <h2 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Account Setup Complete!</h2>
+            <p className="text-slate-400 text-sm">
+              Your credentials have been configured. Launching your OrbitDesk dashboard...
+            </p>
+          </div>
+          <div className="flex justify-center pt-2">
+            <div className="h-2 w-24 bg-slate-800 rounded-full overflow-hidden">
+              <div className="h-full bg-brand-500 animate-pulse rounded-full w-full"></div>
+            </div>
+          </div>
         </div>
       </div>
     );
   }
 
   return (
-    <div style={{ 
-      minHeight: '100vh', 
-      display: 'flex', 
-      alignItems: 'center', 
-      justifyContent: 'center',
-      background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-      padding: '1rem'
-    }}>
-      <div style={{ 
-        background: 'white', 
-        padding: '2rem', 
-        borderRadius: '8px', 
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
-        maxWidth: '400px',
-        width: '100%'
-      }}>
-        <h2 style={{ 
-          textAlign: 'center', 
-          marginBottom: '1.5rem',
-          color: '#333'
-        }}>
-          Set Up Your Account
-        </h2>
-        
-        {error && (
-          <div style={{ 
-            background: '#fee', 
-            color: '#c33', 
-            padding: '0.75rem', 
-            borderRadius: '4px', 
-            marginBottom: '1rem',
-            fontSize: '0.875rem'
-          }}>
-            {error}
+    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6 lg:p-8 selection:bg-brand-500 selection:text-white">
+      {/* Header */}
+      <header className="max-w-4xl mx-auto w-full flex justify-between items-center py-4">
+        <div className="flex items-center gap-3">
+          <div className="h-10 w-10 rounded-2xl bg-gradient-to-tr from-brand-500 to-indigo-600 flex items-center justify-center font-black text-xl text-white shadow-lg shadow-brand-500/30">
+            O
           </div>
-        )}
+          <div>
+            <span className="font-bold text-lg text-white tracking-tight">OrbitDesk</span>
+            <span className="text-xs text-slate-400 block -mt-1">Credential Setup Portal</span>
+          </div>
+        </div>
+        <Link to="/login" className="text-xs font-semibold text-slate-400 hover:text-white transition">
+          Back to Login &rarr;
+        </Link>
+      </header>
 
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '0.5rem', 
-              color: '#333',
-              fontWeight: '500'
-            }}>
-              Full Name
-            </label>
-            <input
-              type="text"
-              name="fullName"
-              value={formData.fullName}
-              onChange={handleChange}
-              placeholder="Enter your full name"
-              required
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-                boxSizing: 'border-box'
-              }}
-            />
+      {/* Form Card */}
+      <main className="max-w-md mx-auto w-full my-auto py-8">
+        <div className="bg-slate-900/80 border border-slate-800 rounded-3xl p-6 sm:p-10 backdrop-blur-xl shadow-2xl space-y-6">
+          <div className="space-y-2 text-center sm:text-left">
+            <span className="inline-block px-3 py-1 bg-brand-500/20 text-brand-400 rounded-full text-xs font-semibold">
+              Invitation Activation
+            </span>
+            <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight">Set Up Your Account</h1>
+            <p className="text-slate-400 text-xs sm:text-sm">
+              Create your account credentials to join your organization and access project workflows.
+            </p>
           </div>
 
-          <div style={{ marginBottom: '1rem' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '0.5rem', 
-              color: '#333',
-              fontWeight: '500'
-            }}>
-              Password
-            </label>
-            <input
-              type="password"
-              name="password"
-              value={formData.password}
-              onChange={handleChange}
-              placeholder="Create a password"
-              required
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
+          {error && (
+            <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center gap-3">
+              <span className="text-lg shrink-0">⚠️</span>
+              <span>{error}</span>
+            </div>
+          )}
 
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label style={{ 
-              display: 'block', 
-              marginBottom: '0.5rem', 
-              color: '#333',
-              fontWeight: '500'
-            }}>
-              Confirm Password
-            </label>
-            <input
-              type="password"
-              name="confirmPassword"
-              value={formData.confirmPassword}
-              onChange={handleChange}
-              placeholder="Confirm your password"
-              required
-              style={{
-                width: '100%',
-                padding: '0.75rem',
-                border: '1px solid #ddd',
-                borderRadius: '4px',
-                fontSize: '1rem',
-                boxSizing: 'border-box'
-              }}
-            />
-          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Full Name *
+              </label>
+              <input
+                type="text"
+                name="fullName"
+                value={formData.fullName}
+                onChange={handleChange}
+                placeholder="Enter your full name"
+                required
+                className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition shadow-inner"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%',
-              padding: '0.75rem',
-              background: loading ? '#999' : '#667eea',
-              color: 'white',
-              border: 'none',
-              borderRadius: '4px',
-              fontSize: '1rem',
-              fontWeight: '500',
-              cursor: loading ? 'not-allowed' : 'pointer',
-              transition: 'background 0.2s'
-            }}
-          >
-            {loading ? 'Setting up...' : 'Complete Setup'}
-          </button>
-        </form>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Create Password *
+              </label>
+              <input
+                type="password"
+                name="password"
+                value={formData.password}
+                onChange={handleChange}
+                placeholder="Minimum 6 characters"
+                required
+                className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition shadow-inner"
+              />
+            </div>
 
-        <p style={{ 
-          textAlign: 'center', 
-          marginTop: '1rem', 
-          color: '#666',
-          fontSize: '0.875rem'
-        }}>
-          By setting up your account, you'll be added to the organization and can start using OrbitDesk.
-        </p>
-      </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                Confirm Password *
+              </label>
+              <input
+                type="password"
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                placeholder="Repeat your password"
+                required
+                className="w-full rounded-xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 transition shadow-inner"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !token}
+              className="w-full py-3 px-4 rounded-xl bg-gradient-to-r from-brand-500 to-indigo-600 hover:from-brand-600 hover:to-indigo-700 text-white font-bold text-sm shadow-lg shadow-brand-500/25 transition disabled:opacity-50 disabled:cursor-not-allowed mt-2"
+            >
+              {loading ? 'Activating Account...' : 'Complete Setup & Sign In'}
+            </button>
+          </form>
+
+          <p className="text-center text-xs text-slate-500 pt-2">
+            By setting up your account, you agree to OrbitDesk's security policies and terms of service.
+          </p>
+        </div>
+      </main>
+
+      {/* Footer */}
+      <footer className="max-w-4xl mx-auto w-full text-center text-xs text-slate-600 py-4">
+        &copy; {new Date().getFullYear()} OrbitDesk Project Governance Platform. All rights reserved.
+      </footer>
     </div>
   );
 }
-
-export default SetupPassword;

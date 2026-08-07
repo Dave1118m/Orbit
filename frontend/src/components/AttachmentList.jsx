@@ -9,7 +9,7 @@ export default function AttachmentList({ entityType, entityId }) {
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
 
-  const API_URL = `https://localhost:7065/api/v1/${entityType}/${entityId}/attachments`;
+  const API_URL = `${import.meta.env.VITE_API_URL}/${entityType}/${entityId}/attachments`;
 
   const getAuthHeaders = useCallback(() => {
     const token = localStorage.getItem('token');
@@ -47,7 +47,7 @@ export default function AttachmentList({ entityType, entityId }) {
     }
   }, [API_URL, getAuthHeaders, entityType, entityId]);
 
-  const getDownloadUrl = useCallback((attachment) => `https://localhost:7065/api/v1/${entityType}/attachments/${attachment.id}/download`, [entityType]);
+  const getDownloadUrl = useCallback((attachment) => `${import.meta.env.VITE_API_URL}/${entityType}/attachments/${attachment.id}/download`, [entityType]);
 
   // Manual refresh function
   const handleRefresh = useCallback(() => {

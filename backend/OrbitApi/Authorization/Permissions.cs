@@ -48,5 +48,14 @@ public enum Permission
     UserInvite,
 
     // Reports
-    ViewReports
+    ViewReports,
+
+    // Volunteers
+    VolunteerManage,
+    VolunteerView,
+
+    // Risk & Issue Register
+    RiskLogView,
+    RiskLogEdit,
+    IssueCreate
 }

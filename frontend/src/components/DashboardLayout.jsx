@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Modal from './Modal';
 import GlobalSearchDropdown from './GlobalSearchDropdown';
+import RoleSwitcherBar from './RoleSwitcherBar';
 import { createOrGetConnection, onEvent, offEvent } from '../lib/signalrClient';
 
 export default function DashboardLayout({ children }) {
@@ -30,7 +31,7 @@ export default function DashboardLayout({ children }) {
       const token = localStorage.getItem('token');
       if (!token) return;
       try {
-        const resp = await fetch('https://localhost:7065/api/v1/users/me', {
+        const resp = await fetch(`${import.meta.env.VITE_API_URL}/users/me`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         if (!resp.ok) return;
@@ -51,24 +52,41 @@ export default function DashboardLayout({ children }) {
     }
 
     loadUser();
+
+    window.addEventListener('personaChanged', loadUser);
+    return () => window.removeEventListener('personaChanged', loadUser);
   }, []);
 
-  // ── Setup SignalR for notifications ──────────────────────────────────────
+  // ── Setup SignalR and sync for notifications ──────────────────────────────
+  const fetchUnreadNotificationCount = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const countResp = await fetch(`${import.meta.env.VITE_API_URL}/notifications/unread-count`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (countResp.ok) {
+        const data = await countResp.json();
+        setUnreadNotificationCount(data.unreadCount || 0);
+      }
+    } catch (err) {
+      console.error('Failed to load unread notification count', err);
+    }
+  };
+
+  useEffect(() => {
+    fetchUnreadNotificationCount();
+
+    window.addEventListener('notificationsUpdated', fetchUnreadNotificationCount);
+    return () => window.removeEventListener('notificationsUpdated', fetchUnreadNotificationCount);
+  }, [location.pathname]);
+
   useEffect(() => {
     async function setupNotifications() {
       const token = localStorage.getItem('token');
       if (!token) return;
 
       try {
-        // Load unread count
-        const countResp = await fetch('https://localhost:7065/api/v1/notifications/unread-count', {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (countResp.ok) {
-          const data = await countResp.json();
-          setUnreadNotificationCount(data.unreadCount);
-        }
-
         // Setup SignalR listener
         const conn = await createOrGetConnection(token);
         const handleNotificationReceived = (notification) => {
@@ -81,7 +99,7 @@ export default function DashboardLayout({ children }) {
           offEvent(conn, 'NotificationReceived', handleNotificationReceived);
         };
       } catch (err) {
-        console.error('Failed to setup notifications', err);
+        Console.error('Failed to setup SignalR notifications', err);
       }
     }
 
@@ -158,7 +176,7 @@ export default function DashboardLayout({ children }) {
     try {
       const token = localStorage.getItem('token');
       const photoUrl = profilePhotoFile ? await readFileAsDataUrl(profilePhotoFile) : profileForm.photoUrl;
-      const response = await fetch(`https://localhost:7065/api/v1/users/${user.id}`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/users/${user.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -197,10 +215,18 @@ export default function DashboardLayout({ children }) {
     }
   };
 
+  const getPhotoSrc = (url) => {
+    if (!url) return null;
+    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+      return url;
+    }
+    return `${import.meta.env.VITE_API_URL.replace('/api/v1', '')}${url}`;
+  };
+
   const userInitials = user?.name ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'JK';
 
   return (
-    <div className="flex h-screen overflow-hidden bg-slate-50 font-sans">
+    <div className="flex h-screen overflow-hidden bg-slate-100 font-sans">
       {/* Sidebar - fixed left */}
       <Sidebar isMobileMenuOpen={isMobileMenuOpen} setIsMobileMenuOpen={setIsMobileMenuOpen} />
 
@@ -259,6 +285,8 @@ export default function DashboardLayout({ children }) {
             </div>
             
             <div className="flex items-center gap-4 border-l border-slate-200 pl-6">
+              <RoleSwitcherBar />
+
               <button 
                 onClick={() => navigate('/notifications')}
                 className="relative rounded-full border border-slate-200 bg-white p-2.5 text-slate-400 hover:text-slate-600 transition shadow-sm"
@@ -280,7 +308,7 @@ export default function DashboardLayout({ children }) {
                   className="h-10 w-10 overflow-hidden rounded-full bg-slate-800 text-sm font-bold text-white shadow-sm"
                 >
                   {user?.photoUrl ? (
-                    <img src={user.photoUrl} alt={user.name} className="h-full w-full object-cover" />
+                    <img src={getPhotoSrc(user.photoUrl)} alt={user.name} className="h-full w-full object-cover" />
                   ) : (
                     <span className="flex h-full w-full items-center justify-center bg-slate-800 text-sm text-white">
                       {userInitials}
@@ -293,7 +321,7 @@ export default function DashboardLayout({ children }) {
                       <div className="flex items-center gap-3">
                         <div className="h-12 w-12 overflow-hidden rounded-2xl bg-slate-100">
                           {user?.photoUrl ? (
-                            <img src={user.photoUrl} alt={user.name} className="h-full w-full object-cover" />
+                            <img src={getPhotoSrc(user.photoUrl)} alt={user.name} className="h-full w-full object-cover" />
                           ) : (
                             <div className="flex h-full w-full items-center justify-center text-lg font-semibold text-slate-700">
                               {userInitials}

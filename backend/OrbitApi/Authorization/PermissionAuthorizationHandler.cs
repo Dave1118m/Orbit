@@ -3,16 +3,19 @@ using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using OrbitApi.Models;
+using OrbitApi.Services;
 
 namespace OrbitApi.Authorization;
 
 public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionRequirement, object>
 {
     private readonly OrbitDbContext _db;
+    private readonly IPermissionService _permissionService;
 
-    public PermissionAuthorizationHandler(OrbitDbContext db)
+    public PermissionAuthorizationHandler(OrbitDbContext db, IPermissionService permissionService)
     {
         _db = db;
+        _permissionService = permissionService;
     }
 
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, PermissionRequirement requirement, object resource)
@@ -24,10 +27,48 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             return;
         }
 
+        // 1. Direct Organization Owner bypass: Owners have absolute full permission
+        var isDirectOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId.Value && !o.IsDeleted);
+        if (isDirectOrgOwner)
+        {
+            context.Succeed(requirement);
+            return;
+        }
+
         var assignments = await _db.RoleAssignments.Include(r => r.Role).Where(r => r.UserId == userId.Value).ToListAsync();
+
+        var memberAssignments = await _db.OrganizationMembers.Include(m => m.Role)
+            .Where(m => m.UserId == userId.Value && m.Status == OrgMemberStatus.Active)
+            .ToListAsync();
+
+        foreach (var member in memberAssignments)
+        {
+            if (member.Role != null && !assignments.Any(a => a.ScopeType == ScopeType.Organization && a.ScopeId == member.OrganizationId && a.RoleId == member.RoleId))
+            {
+                assignments.Add(new RoleAssignment
+                {
+                    UserId = member.UserId,
+                    RoleId = member.RoleId,
+                    Role = member.Role,
+                    ScopeType = ScopeType.Organization,
+                    ScopeId = member.OrganizationId
+                });
+            }
+        }
+
+        // 2. Owner role bypass: Any user assigned RoleName.Owner automatically gets full permission
+        if (assignments.Any(a => a.Role != null && a.Role.Name == RoleName.Owner))
+        {
+            context.Succeed(requirement);
+            return;
+        }
+
         foreach (var assignment in assignments)
         {
-            if (assignment.Role == null || !RoleHasPermission(assignment.Role.Name, requirement.Permission))
+            if (assignment.Role == null) continue;
+
+            // Use IPermissionService (DB-driven) instead of static mapping
+            if (!await _permissionService.RoleHasPermissionAsync(assignment.Role.Name, requirement.Permission))
                 continue;
 
             if (resource is ScopedResource scopedResource)
@@ -98,10 +139,5 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             ScopeType.Project => Task.FromResult(resource.ScopeId == projectId),
             _ => Task.FromResult(false)
         };
-    }
-
-    private bool RoleHasPermission(RoleName role, Permission permission)
-    {
-        return RolePermissionMapping.Defaults.TryGetValue(role, out var perms) && perms.Contains(permission);
     }
 }

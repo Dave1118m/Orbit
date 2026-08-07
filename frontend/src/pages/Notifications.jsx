@@ -9,34 +9,36 @@ export default function Notifications() {
   const [connection, setConnection] = useState(null);
 
   const token = localStorage.getItem('token');
-  const API_BASE = 'https://localhost:7065/api/v1';
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://localhost:7065/api/v1';
 
   useEffect(() => {
     async function init() {
       if (!token) return;
 
       // Initialize SignalR
-      const conn = await createOrGetConnection(token);
-      setConnection(conn);
+      try {
+        const conn = await createOrGetConnection(token);
+        setConnection(conn);
 
-      // Listen for new notifications
-      const handleNotificationReceived = (notification) => {
-        setNotifications(prev => [notification, ...prev]);
-        setUnreadCount(prev => prev + 1);
-      };
+        // Listen for new notifications
+        const handleNotificationReceived = (notification) => {
+          setNotifications(prev => [notification, ...prev]);
+          setUnreadCount(prev => prev + 1);
+        };
 
-      onEvent(conn, 'NotificationReceived', handleNotificationReceived);
+        onEvent(conn, 'NotificationReceived', handleNotificationReceived);
 
-      // Load notifications
-      await loadNotifications();
-      await loadUnreadCount();
-
-      return () => {
-        offEvent(conn, 'NotificationReceived', handleNotificationReceived);
-      };
+        return () => {
+          offEvent(conn, 'NotificationReceived', handleNotificationReceived);
+        };
+      } catch (err) {
+        console.warn('SignalR notification connection warning:', err);
+      }
     }
 
     init();
+    loadNotifications();
+    loadUnreadCount();
   }, [token]);
 
   const loadNotifications = async () => {
@@ -56,6 +58,10 @@ export default function Notifications() {
     }
   };
 
+  const notifyGlobalBadgeUpdate = () => {
+    window.dispatchEvent(new CustomEvent('notificationsUpdated'));
+  };
+
   const loadUnreadCount = async () => {
     try {
       const resp = await fetch(`${API_BASE}/notifications/unread-count`, {
@@ -63,7 +69,8 @@ export default function Notifications() {
       });
       if (resp.ok) {
         const data = await resp.json();
-        setUnreadCount(data.unreadCount);
+        setUnreadCount(data.unreadCount || 0);
+        notifyGlobalBadgeUpdate();
       }
     } catch (err) {
       console.error('Failed to load unread count', err);
@@ -80,6 +87,27 @@ export default function Notifications() {
     setSelectedNotifications(newSelected);
   };
 
+  const handleSingleMarkAsRead = async (notificationId) => {
+    try {
+      await fetch(`${API_BASE}/notifications/mark-read`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ notificationIds: [notificationId] })
+      });
+
+      setNotifications(prev =>
+        prev.map(n => ((n.id ?? n.Id) === notificationId ? { ...n, isRead: true, IsRead: true } : n))
+      );
+      await loadUnreadCount();
+      notifyGlobalBadgeUpdate();
+    } catch (err) {
+      console.error('Failed to mark notification as read', err);
+    }
+  };
+
   const handleMarkAsRead = async () => {
     try {
       const notificationIds = Array.from(selectedNotifications);
@@ -94,10 +122,14 @@ export default function Notifications() {
 
       // Update UI
       setNotifications(prev =>
-        prev.map(n => selectedNotifications.has(n.Id) ? { ...n, IsRead: true } : n)
+        prev.map(n => {
+          const nid = n.id ?? n.Id;
+          return selectedNotifications.has(nid) ? { ...n, isRead: true, IsRead: true } : n;
+        })
       );
       setSelectedNotifications(new Set());
       await loadUnreadCount();
+      notifyGlobalBadgeUpdate();
     } catch (err) {
       console.error('Failed to mark as read', err);
     }
@@ -114,8 +146,9 @@ export default function Notifications() {
         body: JSON.stringify({ markAllAsRead: true })
       });
 
-      setNotifications(prev => prev.map(n => ({ ...n, IsRead: true })));
+      setNotifications(prev => prev.map(n => ({ ...n, isRead: true, IsRead: true })));
       setUnreadCount(0);
+      notifyGlobalBadgeUpdate();
     } catch (err) {
       console.error('Failed to mark all as read', err);
     }
@@ -128,12 +161,26 @@ export default function Notifications() {
         headers: { Authorization: `Bearer ${token}` }
       });
 
-      setNotifications(prev => prev.filter(n => n.Id !== notificationId));
-      if (!notifications.find(n => n.Id === notificationId)?.IsRead) {
-        setUnreadCount(prev => Math.max(0, prev - 1));
-      }
+      setNotifications(prev => prev.filter(n => (n.id ?? n.Id) !== notificationId));
+      await loadUnreadCount();
+      notifyGlobalBadgeUpdate();
     } catch (err) {
       console.error('Failed to delete notification', err);
+    }
+  };
+
+  const handleClearAll = async () => {
+    try {
+      await fetch(`${API_BASE}/notifications/clear-all`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      setNotifications([]);
+      setUnreadCount(0);
+      setSelectedNotifications(new Set());
+      notifyGlobalBadgeUpdate();
+    } catch (err) {
+      console.error('Failed to clear all notifications', err);
     }
   };
 
@@ -164,61 +211,87 @@ export default function Notifications() {
               Mark All as Read
             </button>
           )}
+          {notifications.length > 0 && (
+            <button
+              onClick={handleClearAll}
+              className="rounded-full border border-rose-200 bg-rose-50 text-rose-700 px-4 py-2 text-sm font-semibold hover:bg-rose-100 transition"
+            >
+              Clear All
+            </button>
+          )}
         </div>
       </div>
 
       {loading ? (
-        <div className="text-center text-slate-500">Loading notifications...</div>
+        <div className="text-center text-slate-500 py-12">Loading notifications...</div>
       ) : notifications.length === 0 ? (
-        <div className="text-center text-slate-500">No notifications yet</div>
+        <div className="text-center text-slate-500 py-12">No notifications yet</div>
       ) : (
         <div className="space-y-2">
-          {notifications.map(notif => (
-            <div
-              key={notif.Id}
-              className={`flex items-center gap-3 rounded-xl border p-4 transition ${
-                notif.IsRead
-                  ? 'border-slate-200 bg-white'
-                  : 'border-blue-300 bg-blue-50'
-              }`}
-            >
-              <input
-                type="checkbox"
-                checked={selectedNotifications.has(notif.Id)}
-                onChange={() => handleToggleSelect(notif.Id)}
-                className="h-5 w-5 cursor-pointer"
-              />
+          {notifications.map(notif => {
+            const id = notif.id ?? notif.Id;
+            const message = notif.message ?? notif.Message ?? 'System Alert';
+            const isRead = notif.isRead ?? notif.IsRead ?? false;
+            const rawDate = notif.createdAt ?? notif.CreatedAt;
+            const formattedDate = rawDate ? new Date(rawDate).toLocaleString() : 'Just now';
+            const link = notif.link ?? notif.Link;
 
-              <div className="flex-1 min-w-0">
-                <p className={`text-sm ${notif.IsRead ? 'text-slate-600' : 'font-semibold text-slate-900'}`}>
-                  {notif.Message}
-                </p>
-                <p className="text-xs text-slate-500 mt-1">
-                  {new Date(notif.CreatedAt).toLocaleString()}
-                </p>
-              </div>
+            return (
+              <div
+                key={id}
+                onClick={() => {
+                  if (!isRead) handleSingleMarkAsRead(id);
+                }}
+                className={`flex items-center gap-3 rounded-xl border p-4 transition ${
+                  isRead
+                    ? 'border-slate-200 bg-white'
+                    : 'border-blue-300 bg-blue-50/80 shadow-xs cursor-pointer'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedNotifications.has(id)}
+                  onChange={(e) => {
+                    e.stopPropagation();
+                    handleToggleSelect(id);
+                  }}
+                  className="h-5 w-5 cursor-pointer rounded border-slate-300"
+                />
 
-              <div className="flex items-center gap-2 flex-shrink-0">
-                {notif.Link && (
-                  <a
-                    href={notif.Link}
-                    className="text-xs font-medium text-blue-600 hover:text-blue-700"
+                <div className="flex-1 min-w-0">
+                  <p className={`text-sm ${isRead ? 'text-slate-600' : 'font-semibold text-slate-900'}`}>
+                    {message}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1 font-mono">
+                    {formattedDate}
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
+                  {link && (
+                    <a
+                      href={link}
+                      onClick={() => {
+                        if (!isRead) handleSingleMarkAsRead(id);
+                      }}
+                      className="text-xs font-semibold px-3 py-1 bg-blue-100 text-blue-700 hover:bg-blue-200 rounded-lg transition"
+                    >
+                      View
+                    </a>
+                  )}
+                  <button
+                    onClick={() => handleDelete(id)}
+                    className="text-slate-400 hover:text-rose-600 p-1.5 rounded-lg transition"
+                    title="Delete Notification"
                   >
-                    View
-                  </a>
-                )}
-                <button
-                  onClick={() => handleDelete(notif.Id)}
-                  className="text-slate-400 hover:text-slate-600"
-                  title="Delete"
-                >
-                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                  </svg>
-                </button>
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                    </svg>
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

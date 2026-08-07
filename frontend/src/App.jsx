@@ -11,60 +11,26 @@ import Teams from './pages/Teams';
 import Reports from './pages/Reports';
 import Settings from './pages/Settings';
 import Notifications from './pages/Notifications';
+import Finance from './pages/Finance';
+import LogframeView from './pages/LogframeView';
+import Volunteers from './pages/Volunteers';
+import VolunteerPublicApply from './pages/VolunteerPublicApply';
+import Landing from './pages/Landing';
 import DashboardLayout from './components/DashboardLayout';
 import { UserProvider } from './contexts/UserContext';
 
-function Home() {
-  const [health, setHealth] = useState(null);
-  const [error, setError] = useState('');
-
-  useEffect(() => {
-    fetch('https://localhost:7065/api/health')
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error('Backend unavailable');
-        }
-        return response.json();
-      })
-      .then((data) => setHealth(data))
-      .catch((err) => setError(err.message));
-  }, []);
-
-  return (
-    <main className="app-shell">
-      <section className="card">
-        <p className="eyebrow">OrbitDesk MVP</p>
-        <h1>Project management for NGOs</h1>
-        <p>
-          This starter app connects the React frontend to an ASP.NET Core API and is ready for the next implementation phase.
-        </p>
-
-        <div className="cta-buttons">
-          <Link className="button" to="/register">Register</Link>
-          <Link className="button button-secondary" to="/login">Login</Link>
-        </div>
-
-        {health ? (
-          <div className="status-box">
-            <strong>Status:</strong> {health.status}
-            <br />
-            <strong>App:</strong> {health.app}
-          </div>
-        ) : (
-          <div className="status-box">
-            {error ? `Connection error: ${error}` : 'Loading API health check...'}
-          </div>
-        )}
-      </section>
-    </main>
-  );
-}
-
 function AuthLayout({ children }) {
   return (
-    <main className="min-h-screen bg-slate-100 px-4 py-12 text-slate-900">
-      <div className="mx-auto w-full max-w-xl">{children}</div>
-    </main>
+    <div className="min-h-screen bg-slate-100 px-4 py-12 text-slate-900">
+      <div className="mx-auto w-full max-w-full">
+        <div className="mb-6 mx-auto max-w-md flex items-center justify-between">
+          <Link to="/" className="inline-flex items-center gap-1.5 text-xs font-bold text-indigo-600 hover:text-indigo-800 transition">
+            ← Back to Orbit Landing Page
+          </Link>
+        </div>
+        {children}
+      </div>
+    </div>
   );
 }
 
@@ -94,35 +60,24 @@ function RequireAuth({ children }) {
 
 function Content() {
   const location = useLocation();
-  const showNav = location.pathname === '/';
 
   return (
     <>
-      {showNav && (
-        <nav className="topbar bg-slate-950/80 backdrop-blur-lg border-b border-slate-800">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 text-slate-100">
-            <div className="flex items-center gap-4 text-sm font-semibold uppercase tracking-[0.2em] text-slate-300">
-              <span>OrbitDesk</span>
-            </div>
-            <div className="flex items-center gap-3">
-              <Link className="rounded-full border border-slate-600 bg-slate-900/80 px-4 py-2 text-sm hover:border-slate-400 hover:text-white" to="/">Home</Link>
-              <Link className="rounded-full bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400" to="/register">Register</Link>
-              <Link className="rounded-full border border-slate-600 px-4 py-2 text-sm hover:border-slate-400" to="/login">Login</Link>
-            </div>
-          </div>
-        </nav>
-      )}
-
       <Routes>
-        <Route path="/" element={<Home />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/landing" element={<Landing />} />
         <Route path="/dashboard" element={<RequireAuth><DashboardLayout><Dashboard /></DashboardLayout></RequireAuth>} />
-        <Route path="/organizations" element={<RequireAuth><DashboardLayout><Organizations /></DashboardLayout></RequireAuth>} />
+        <Route path="/organizations" element={<Navigate to="/settings" replace />} />
         <Route path="/projects" element={<RequireAuth><DashboardLayout><Projects /></DashboardLayout></RequireAuth>} />
+        <Route path="/projects/:projectId/logframe" element={<RequireAuth><LogframeView /></RequireAuth>} />
         <Route path="/tasks" element={<RequireAuth><DashboardLayout><Tasks /></DashboardLayout></RequireAuth>} />
         <Route path="/teams" element={<RequireAuth><DashboardLayout><Teams /></DashboardLayout></RequireAuth>} />
         <Route path="/notifications" element={<RequireAuth><DashboardLayout><Notifications /></DashboardLayout></RequireAuth>} />
         <Route path="/reports" element={<RequireAuth><DashboardLayout><Reports /></DashboardLayout></RequireAuth>} />
+        <Route path="/finance" element={<RequireAuth><DashboardLayout><Finance /></DashboardLayout></RequireAuth>} />
         <Route path="/settings" element={<RequireAuth><DashboardLayout><Settings /></DashboardLayout></RequireAuth>} />
+        <Route path="/volunteers" element={<RequireAuth><DashboardLayout><Volunteers /></DashboardLayout></RequireAuth>} />
+        <Route path="/apply-volunteer" element={<VolunteerPublicApply />} />
         <Route
           path="/register"
           element={
@@ -140,7 +95,7 @@ function Content() {
           }
         />
         <Route path="/setup-password" element={<SetupPassword />} />
-        <Route path="*" element={<Navigate to="/dashboard" replace />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </>
   );
@@ -149,7 +104,7 @@ function Content() {
 function App() {
   return (
     <UserProvider>
-      <BrowserRouter>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
         <Content />
       </BrowserRouter>
     </UserProvider>

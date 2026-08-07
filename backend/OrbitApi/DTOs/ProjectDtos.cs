@@ -16,6 +16,7 @@ namespace OrbitApi.DTOs
         public DateTime? EndDate { get; set; }
         public decimal? Budget { get; set; }
         public int? DonorId { get; set; }
+        public string FundingType { get; set; } = "SingleDonor";
         public List<int>? TeamIds { get; set; }
         public int TaskCount { get; set; }
         public byte[]? RowVersion { get; set; }
@@ -31,6 +32,8 @@ namespace OrbitApi.DTOs
         public DateTime? EndDate { get; set; }
         public decimal? Budget { get; set; }
         public int? DonorId { get; set; }
+        public List<int>? DonorIds { get; set; }
+        public string FundingType { get; set; } = "SingleDonor";
     }
 
     public class UpdateProjectRequest
@@ -42,6 +45,7 @@ namespace OrbitApi.DTOs
         public DateTime? EndDate { get; set; }
         public decimal? Budget { get; set; }
         public int? DonorId { get; set; }
+        public string? FundingType { get; set; }
         public byte[]? RowVersion { get; set; }
     }
 
@@ -61,5 +65,20 @@ namespace OrbitApi.DTOs
         public int RequestedByUserId { get; set; }
         public int? ApprovedByUserId { get; set; }
         public DateTime CreatedAt { get; set; }
+    }
+
+    public class ProjectLeadHistoryDto
+    {
+        public int Id { get; set; }
+        public int ProjectId { get; set; }
+        public int UserId { get; set; }
+        public string UserName { get; set; } = null!;
+        public DateTime StartDate { get; set; }
+        public DateTime? EndDate { get; set; }
+    }
+
+    public class AssignProjectLeadRequest
+    {
+        public int UserId { get; set; }
     }
 }

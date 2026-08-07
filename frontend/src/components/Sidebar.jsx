@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useNavigate, Link } from 'react-router-dom';
 import Modal from './Modal';
 
-const BACKEND_ORGANIZATIONS_URL = 'https://localhost:7065/api/v1/organizations';
-const BACKEND_WORKSPACES_URL = 'https://localhost:7065/api/v1/workspaces';
+const BACKEND_ORGANIZATIONS_URL = `${import.meta.env.VITE_API_URL}/organizations`;
+const BACKEND_WORKSPACES_URL = `${import.meta.env.VITE_API_URL}/workspaces`;
 
 const fallbackLinks = [
   { id: 'dashboard', label: 'Dashboard', to: '/dashboard', icon: 'dashboard' },
@@ -54,24 +54,74 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
               try {
                 const parsed = JSON.parse(storedOrg);
                 const found = orgs.find((org) => org.id === parsed.id);
-                setSelectedOrganization(found || orgs[0] || null);
+                const target = found || orgs[0] || null;
+                setSelectedOrganization(target);
+                if (target) localStorage.setItem('selectedOrganizationId', String(target.id));
               } catch {
                 setSelectedOrganization(orgs[0] || null);
+                if (orgs[0]) localStorage.setItem('selectedOrganizationId', String(orgs[0].id));
               }
             } else if (orgs.length > 0) {
               setSelectedOrganization(orgs[0]);
+              localStorage.setItem('selectedOrganization', JSON.stringify(orgs[0]));
+              localStorage.setItem('selectedOrganizationId', String(orgs[0].id));
             }
           }
         }
-
-
 
       } catch (err) {
         console.error('Failed to load organizations', err);
       }
     }
 
+    async function loadNavigation() {
+      try {
+        const token = localStorage.getItem('token');
+        if (!token) return;
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/navigation`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const navItems = await res.json();
+          if (Array.isArray(navItems) && navItems.length > 0) {
+            const iconMap = {
+              dashboard: 'dashboard',
+              organizations: 'users',
+              projects: 'folder',
+              tasks: 'check',
+              teams: 'users',
+              notifications: 'bell',
+              finance: 'dollar',
+              volunteers: 'heart',
+              reports: 'chart'
+            };
+            const mapped = navItems
+              .filter(item => item.id !== 'organizations' && item.route !== '/organizations' && item.to !== '/organizations')
+              .map(item => ({
+                id: item.id,
+                label: item.title || item.label,
+                to: item.route || item.to,
+                icon: iconMap[item.id] || 'folder'
+              }));
+            const merged = [...mapped];
+            fallbackLinks.forEach(fl => {
+              if (!merged.some(m => m.to === fl.to || m.id === fl.id)) {
+                merged.push(fl);
+              }
+            });
+            setLinks(merged);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load dynamic navigation', err);
+      }
+    }
+
     loadOrganizations();
+    loadNavigation();
+
+    window.addEventListener('personaChanged', loadOrganizations);
+    return () => window.removeEventListener('personaChanged', loadOrganizations);
   }, []);
 
   const handleLogout = () => {
@@ -193,12 +243,12 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
         
         {/* Logo */}
         <div className="flex h-20 items-center px-6 mb-2">
-          <div className="flex items-center gap-3">
-            <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500 text-xl font-bold text-white shadow-lg shadow-brand-500/30">
+          <Link to="/" className="flex items-center gap-3 group" title="Return to Orbit Landing Page">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-brand-500 text-xl font-bold text-white shadow-lg shadow-brand-500/30 group-hover:scale-105 transition">
               <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
             </div>
-            <span className="text-xl font-bold text-white tracking-wide">OrbitDesk</span>
-          </div>
+            <span className="text-xl font-bold text-white tracking-wide group-hover:text-cyan-400 transition">OrbitDesk</span>
+          </Link>
         </div>
 
         {/* Organization Switcher */}

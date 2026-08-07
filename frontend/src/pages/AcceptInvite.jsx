@@ -27,7 +27,7 @@ export default function AcceptInvite() {
           return;
         }
 
-        const res = await fetch(`https://localhost:7065/api/v1/organizations/invite/accept?token=${encodeURIComponent(token)}`, {
+        const res = await fetch(`${import.meta.env.VITE_API_URL}/organizations/invite/accept?token=${encodeURIComponent(token)}`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${authToken}`

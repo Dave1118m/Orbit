@@ -33,11 +33,25 @@ public class SearchController : ControllerBase
     /// </summary>
     private async Task<RoleName?> GetUserHighestRole(int userId)
     {
+        var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted)
+            || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && a.Role.Name == RoleName.Owner)
+            || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && m.Role.Name == RoleName.Owner);
+
+        if (isOwner) return RoleName.Owner;
+
         var roles = await _db.RoleAssignments
-            .Where(ra => ra.UserId == userId)
+            .Where(ra => ra.UserId == userId && ra.Role != null)
             .Include(ra => ra.Role)
             .Select(ra => ra.Role!.Name)
             .ToListAsync();
+
+        var memberRoles = await _db.OrganizationMembers
+            .Where(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null)
+            .Include(m => m.Role)
+            .Select(m => m.Role!.Name)
+            .ToListAsync();
+
+        roles.AddRange(memberRoles);
 
         if (!roles.Any()) return null;
 
@@ -221,7 +235,7 @@ public class SearchController : ControllerBase
         };
         _db.SavedSearches.Add(saved);
         await _db.SaveChangesAsync();
-        return CreatedAtAction(nameof(GetSavedSearches), new { id = saved.Id }, new { saved.Id, saved.Name, saved.QueryJson, saved.CreatedAt });
+        return Ok(new { saved.Id, saved.Name, saved.QueryJson, saved.CreatedAt });
     }
 
     // ─────────────────────────────────────────────────────────────────────────

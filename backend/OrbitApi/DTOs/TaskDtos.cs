@@ -14,6 +14,7 @@ namespace OrbitApi.DTOs
         public string? Description { get; set; }
         public TaskStatus Status { get; set; }
         public TaskPriority Priority { get; set; }
+        public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public DateTime? CompletedDate { get; set; }
         public int? ParentTaskId { get; set; }
@@ -29,6 +30,7 @@ namespace OrbitApi.DTOs
         public string? Description { get; set; }
         public TaskStatus Status { get; set; }
         public TaskPriority Priority { get; set; }
+        public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public int? ParentTaskId { get; set; }
         public List<int>? AssignedUserIds { get; set; }
@@ -40,6 +42,7 @@ namespace OrbitApi.DTOs
         public string? Description { get; set; }
         public TaskStatus? Status { get; set; }
         public TaskPriority? Priority { get; set; }
+        public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public int? ParentTaskId { get; set; }
         public List<int>? AssignedUserIds { get; set; }
@@ -65,7 +68,15 @@ namespace OrbitApi.DTOs
         public int Id { get; set; }
         public int TaskId { get; set; }
         public int DependsOnTaskId { get; set; }
+        public string? DependsOnTaskTitle { get; set; }
+        public string? DependsOnTaskStatus { get; set; }
         public string? DependencyType { get; set; }
+    }
+
+    public class CreateTaskDependencyRequest
+    {
+        public int DependsOnTaskId { get; set; }
+        public string? DependencyType { get; set; } = "FinishToStart";
     }
 
     public class CommentDto

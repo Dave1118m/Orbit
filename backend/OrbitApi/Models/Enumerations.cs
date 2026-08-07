@@ -75,11 +75,58 @@ public enum DonorType
     Corporate
 }
 
+public enum ContributionType
+{
+    Cash,
+    InKind,
+    Equipment,
+    Services
+}
+
+public enum ContributionStatus
+{
+    Pledged,
+    Received
+}
+
 public enum ApprovalStatus
 {
     Pending,
+    FinanceReviewed,
     Approved,
-    Rejected
+    Rejected,
+    Paid
+}
+
+public enum FinancialCategoryType
+{
+    Expense,
+    Income,
+    Both
+}
+
+public enum ExpenseCategory
+{
+    Personnel,
+    Equipment,
+    Operations,
+    Training,
+    Supplies,
+    Travel
+}
+
+public enum ReportType
+{
+    Financial,
+    Narrative,
+    Audit
+}
+
+public enum ReportStatus
+{
+    Pending,
+    Submitted,
+    Overdue
 }
 
 public enum NotificationChannel
@@ -128,4 +175,39 @@ public enum TaxExemptStatus
     Pending,
     Approved,
     Expired
+}
+
+public enum BudgetLevel
+{
+    Organization,
+    Workspace,
+    Project,
+    Task
+}
+
+public enum BudgetCategory
+{
+    Personnel,
+    Travel,
+    Supplies,
+    Overhead,
+    Equipment,
+    Other
+}
+
+public enum BudgetStatus
+{
+    Draft,
+    PendingApproval,
+    Approved,
+    Active,
+    Closed
+}
+
+public enum BackgroundCheckStatus
+{
+    Pending,
+    Passed,
+    Failed,
+    NotRequired
 }

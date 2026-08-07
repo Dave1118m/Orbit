@@ -44,6 +44,11 @@ namespace OrbitApi.DTOs
         public int UserId { get; set; }
     }
 
+    public class BulkAddTeamMembersRequest
+    {
+        public List<int> UserIds { get; set; } = new List<int>();
+    }
+
     public class ProjectTeamDto
     {
         public int Id { get; set; }
@@ -105,6 +110,7 @@ namespace OrbitApi.DTOs
         public int ProjectId { get; set; }
         public int NewTeamId { get; set; }
         public string? Reason { get; set; }
+        public DateTime? NewEndDate { get; set; }
     }
 
     public class CopyTeamRequest

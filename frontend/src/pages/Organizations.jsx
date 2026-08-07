@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
+import OrgRiskRollup from '../components/OrgRiskRollup';
 
-const API_URL = 'https://localhost:7065/api/v1/organizations';
+const API_URL = `${import.meta.env.VITE_API_URL}/organizations`;
 
 export default function Organizations() {
   const fileInputRef = useRef(null);
@@ -23,6 +24,13 @@ export default function Organizations() {
   const [logoPreview, setLogoPreview] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
   const [currentUser, setCurrentUser] = useState(null);
+
+  const [isPartnersModalOpen, setIsPartnersModalOpen] = useState(false);
+  const [selectedOrgForPartners, setSelectedOrgForPartners] = useState(null);
+  const [partners, setPartners] = useState([]);
+  const [partnerOrgIdInput, setPartnerOrgIdInput] = useState('');
+  const [partnerNotesInput, setPartnerNotesInput] = useState('');
+  const [loadingPartners, setLoadingPartners] = useState(false);
 
   const fetchOrganizations = async () => {
     try {
@@ -49,7 +57,7 @@ export default function Organizations() {
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
-      const response = await fetch('https://localhost:7065/api/v1/users/me', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL}/users/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
@@ -148,7 +156,7 @@ export default function Organizations() {
           budget: formData.budget ? parseFloat(formData.budget) : null
         })
       });
-      
+
       if (response.ok) {
         const newOrg = await response.json();
 
@@ -254,6 +262,79 @@ export default function Organizations() {
     setIsTransferModalOpen(true);
   };
 
+  const fetchPartners = async (orgId) => {
+    try {
+      setLoadingPartners(true);
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/${orgId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setPartners(data.partners || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch partners', err);
+    } finally {
+      setLoadingPartners(false);
+    }
+  };
+
+  const openPartnersModal = async (org) => {
+    setSelectedOrgForPartners(org);
+    setPartnerOrgIdInput('');
+    setPartnerNotesInput('');
+    await fetchPartners(org.id);
+    setIsPartnersModalOpen(true);
+  };
+
+  const handleAddPartner = async (e) => {
+    e.preventDefault();
+    if (!partnerOrgIdInput || !selectedOrgForPartners) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/${selectedOrgForPartners.id}/partners`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          partnerOrgId: parseInt(partnerOrgIdInput),
+          notes: partnerNotesInput
+        })
+      });
+      if (res.ok) {
+        setPartnerOrgIdInput('');
+        setPartnerNotesInput('');
+        fetchPartners(selectedOrgForPartners.id);
+        fetchOrganizations();
+      } else {
+        const errText = await res.text();
+        alert(`Failed to add partner: ${errText}`);
+      }
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  const handleUnlinkPartner = async (partnerOrgId) => {
+    if (!selectedOrgForPartners || !window.confirm('Remove this partner link?')) return;
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/${selectedOrgForPartners.id}/partners/${partnerOrgId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        fetchPartners(selectedOrgForPartners.id);
+        fetchOrganizations();
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   return (
     <div className="flex flex-col gap-6">
       <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
@@ -290,7 +371,7 @@ export default function Organizations() {
                 </div>
                 <p className="mt-4 line-clamp-2 text-sm text-slate-600">{org.description || 'No description provided.'}</p>
               </div>
-              
+
               <div className="mt-6 flex items-center justify-between border-t border-slate-100 pt-4">
                 <div className="flex gap-2">
                   {org.hasCompliance && (
@@ -298,6 +379,12 @@ export default function Organizations() {
                   )}
                 </div>
                 <div className="flex gap-2">
+                  <button
+                    onClick={() => openPartnersModal(org)}
+                    className="text-sm font-medium text-slate-700 hover:text-brand-600 transition flex items-center gap-1"
+                  >
+                    🤝 Partners ({org.partnerCount || 0})
+                  </button>
                   {currentUser && org.ownerId === currentUser.id && (
                     <button
                       onClick={() => openTransferModal(org)}
@@ -323,6 +410,15 @@ export default function Organizations() {
           )}
         </div>
       </div>
+
+      {/* Organization Risk & Issue Register Roll-up */}
+      {organizations.length > 0 && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
+          <OrgRiskRollup
+            orgId={localStorage.getItem('selectedOrganizationId') ? parseInt(localStorage.getItem('selectedOrganizationId'), 10) : organizations[0].id}
+          />
+        </div>
+      )}
 
       <Modal isOpen={isModalOpen} onClose={() => { setIsModalOpen(false); resetForm(); }} title="Create Organization">
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -365,19 +461,7 @@ export default function Organizations() {
               />
             </div>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Budget</label>
-              <input
-                type="number"
-                name="budget"
-                value={formData.budget}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div />
-          </div>
+
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Logo URL</label>
             <input
@@ -457,14 +541,14 @@ export default function Organizations() {
       </Modal>
 
       {/* Transfer Ownership Modal */}
-      <Modal 
-        isOpen={isTransferModalOpen} 
+      <Modal
+        isOpen={isTransferModalOpen}
         onClose={() => {
           setIsTransferModalOpen(false);
           setSelectedOrgForTransfer(null);
           setSelectedNewOwner(null);
           setOrgMembers([]);
-        }} 
+        }}
         title={`Transfer Ownership: ${selectedOrgForTransfer?.name}`}
       >
         <form onSubmit={handleTransferOwnership} className="flex flex-col gap-4">
@@ -475,12 +559,12 @@ export default function Organizations() {
           </div>
           <div>
             <label className="mb-2 block text-sm font-medium text-slate-700">Select New Owner *</label>
-            {orgMembers.length === 0 ? (
-              <p className="text-sm text-slate-500">No members available to transfer ownership to.</p>
+            {orgMembers.filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo')).length === 0 ? (
+              <p className="text-sm text-slate-500">No real members available to transfer ownership to.</p>
             ) : (
               <div className="space-y-2 max-h-60 overflow-y-auto">
                 {orgMembers
-                  .filter(member => member.userId !== selectedOrgForTransfer?.ownerId)
+                  .filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo'))
                   .map(member => (
                     <label 
                       key={member.userId} 
@@ -529,6 +613,79 @@ export default function Organizations() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      {/* Consortium Partners Modal */}
+      <Modal
+        isOpen={isPartnersModalOpen}
+        onClose={() => setIsPartnersModalOpen(false)}
+        title={`Consortium Partnerships: ${selectedOrgForPartners?.name || ''}`}
+      >
+        <div className="space-y-6">
+          <form onSubmit={handleAddPartner} className="space-y-3 bg-slate-50 p-4 rounded-xl border border-slate-200">
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700">Link External Consortium Partner</h4>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <select
+                required
+                value={partnerOrgIdInput}
+                onChange={(e) => setPartnerOrgIdInput(e.target.value)}
+                className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+              >
+                <option value="">Select Partner Organization...</option>
+                {organizations
+                  .filter(o => o.id !== selectedOrgForPartners?.id && !partners.some(p => p.partnerOrgId === o.id))
+                  .map(o => (
+                    <option key={o.id} value={o.id}>
+                      {o.name} ({o.country || 'Global'})
+                    </option>
+                  ))}
+              </select>
+              <input
+                type="text"
+                value={partnerNotesInput}
+                onChange={(e) => setPartnerNotesInput(e.target.value)}
+                placeholder="Partnership notes / scope..."
+                className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-xs bg-white focus:outline-none focus:ring-1 focus:ring-brand-500"
+              />
+              <button
+                type="submit"
+                disabled={!partnerOrgIdInput}
+                className="rounded-xl bg-[#5A45FF] px-4 py-2 text-xs font-semibold text-white hover:bg-indigo-600 transition disabled:opacity-50"
+              >
+                + Link Partner
+              </button>
+            </div>
+          </form>
+
+          <div>
+            <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 mb-3">Linked Partner Network</h4>
+            {loadingPartners ? (
+              <p className="text-xs text-slate-500 text-center py-6">Loading partners...</p>
+            ) : partners.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-500">
+                No active consortium partners linked yet. Select an organization above to establish a joint partnership link.
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {partners.map((p) => (
+                  <div key={p.partnerOrgId} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white">
+                    <div>
+                      <h5 className="font-bold text-sm text-slate-900">{p.partnerName}</h5>
+                      {p.notes && <p className="text-xs text-slate-500">{p.notes}</p>}
+                      <span className="text-[10px] text-slate-400">Linked: {new Date(p.linkedAt).toLocaleDateString()}</span>
+                    </div>
+                    <button
+                      onClick={() => handleUnlinkPartner(p.partnerOrgId)}
+                      className="text-xs font-semibold text-rose-600 hover:text-rose-800 px-3 py-1 rounded-lg hover:bg-rose-50 transition"
+                    >
+                      Unlink
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </Modal>
     </div>
   );

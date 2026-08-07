@@ -4,6 +4,8 @@ using Microsoft.EntityFrameworkCore;
 using OrbitApi.Authorization;
 using OrbitApi.DTOs;
 using OrbitApi.Models;
+using OrbitApi.Services;
+using System.Linq;
 using System.Security.Claims;
 
 namespace OrbitApi.Controllers
@@ -16,12 +18,14 @@ namespace OrbitApi.Controllers
         private readonly OrbitDbContext _db;
         private readonly IAuthorizationService _authorizationService;
         private readonly IConfiguration _configuration;
+        private readonly IPermissionService _permissionService;
 
-        public UsersController(OrbitDbContext db, IAuthorizationService authorizationService, IConfiguration configuration)
+        public UsersController(OrbitDbContext db, IAuthorizationService authorizationService, IConfiguration configuration, IPermissionService permissionService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _configuration = configuration;
+            _permissionService = permissionService;
         }
 
         private int? GetCurrentUserId()
@@ -83,6 +87,19 @@ namespace OrbitApi.Controllers
             return await _db.Users.FindAsync(userId)!;
         }
 
+        [HttpGet]
+        public async Task<ActionResult<IEnumerable<UserDto>>> List()
+        {
+            var users = await _db.Users.ToListAsync();
+            var dtos = new List<UserDto>();
+            foreach (var u in users)
+            {
+                var roles = await GetUserRolesAsync(u.Id);
+                dtos.Add(MapToDto(u, roles));
+            }
+            return Ok(dtos);
+        }
+
         [HttpGet("me")]
         public async Task<ActionResult<UserDto>> Me()
         {
@@ -93,7 +110,15 @@ namespace OrbitApi.Controllers
             }
 
             var user = await EnsureAppUserExistsAsync(currentUserId.Value);
-            return Ok(MapToDto(user));
+            var roles = await GetUserRolesAsync(currentUserId.Value);
+
+            // Build permissions from DB via IPermissionService
+            var roleNames = roles
+                .Select(r => Enum.TryParse<RoleName>(r.Name, out var rn) ? (RoleName?)rn : null)
+                .Where(r => r.HasValue).Select(r => r!.Value).Distinct().ToList();
+            var dbPermissions = await _permissionService.GetPermissionsForRolesAsync(roleNames);
+
+            return Ok(MapToDto(user, roles, dbPermissions));
         }
 
         [HttpGet("{id}")]
@@ -116,7 +141,8 @@ namespace OrbitApi.Controllers
                 return NotFound();
             }
 
-            return Ok(MapToDto(user));
+            var roles = await GetUserRolesAsync(user.Id);
+            return Ok(MapToDto(user, roles));
         }
 
         [HttpPut("{id}")]
@@ -146,7 +172,8 @@ namespace OrbitApi.Controllers
             if (req.MFAEnabled.HasValue) user.MFAEnabled = req.MFAEnabled.Value;
 
             await _db.SaveChangesAsync();
-            return Ok(MapToDto(user));
+            var roles = await GetUserRolesAsync(user.Id);
+            return Ok(MapToDto(user, roles));
         }
 
         [HttpPost("{id}/photo")]
@@ -181,7 +208,15 @@ namespace OrbitApi.Controllers
             user.PhotoUrl = relativePath;
             await _db.SaveChangesAsync();
 
-            return Ok(new { PhotoUrl = relativePath });
+            var roles = await GetUserRolesAsync(user.Id);
+            
+            var roleNames = roles.Select(r => Enum.Parse<RoleName>(r.Name)).ToList();
+            var dynamicPermissions = await _db.Roles
+                .Where(r => roleNames.Contains(r.Name))
+                .SelectMany(r => r.RolePermissions.Select(rp => rp.Permission!.Name))
+                .ToListAsync();
+
+            return Ok(new { PhotoUrl = relativePath, User = MapToDto(user, roles, dynamicPermissions) });
         }
 
         [HttpGet("{id}/photo/download")]
@@ -205,8 +240,13 @@ namespace OrbitApi.Controllers
             return File(stream, mimeType);
         }
 
-        private static UserDto MapToDto(User user)
+        private static UserDto MapToDto(User user, List<RoleInfoDto> roles, List<string>? dynamicPermissions = null)
         {
+            var isOwner = roles.Any(r => r.Name == RoleName.Owner.ToString());
+            var permissions = isOwner
+                ? Enum.GetValues<Permission>().Select(p => p.ToString()).OrderBy(p => p).ToList()
+                : (dynamicPermissions ?? new List<string>()).Distinct().OrderBy(p => p).ToList();
+
             return new UserDto
             {
                 Id = user.Id,
@@ -215,8 +255,58 @@ namespace OrbitApi.Controllers
                 PhotoUrl = user.PhotoUrl,
                 MFAEnabled = user.MFAEnabled,
                 PreferredLanguage = user.PreferredLanguage,
-                PhoneNumber = user.PhoneNumber
+                PhoneNumber = user.PhoneNumber,
+                Roles = roles,
+                Permissions = permissions
             };
+        }
+
+        private async Task<List<RoleInfoDto>> GetUserRolesAsync(int userId)
+        {
+            var assignments = await _db.RoleAssignments.Include(a => a.Role).Where(a => a.UserId == userId).ToListAsync();
+            var roles = assignments
+                .Where(a => a.Role != null)
+                .Select(a => new RoleInfoDto
+                {
+                    Name = a.Role!.Name.ToString(),
+                    ScopeType = a.ScopeType.ToString(),
+                    ScopeId = a.ScopeId
+                })
+                .ToList();
+
+            var memberRoles = await _db.OrganizationMembers.Include(m => m.Role)
+                .Where(m => m.UserId == userId && m.Status == OrgMemberStatus.Active)
+                .ToListAsync();
+
+            foreach (var member in memberRoles)
+            {
+                if (member.Role == null) continue;
+                if (!roles.Any(r => r.Name == member.Role.Name.ToString() && r.ScopeType == ScopeType.Organization.ToString() && r.ScopeId == member.OrganizationId))
+                {
+                    roles.Add(new RoleInfoDto
+                    {
+                        Name = member.Role.Name.ToString(),
+                        ScopeType = ScopeType.Organization.ToString(),
+                        ScopeId = member.OrganizationId
+                    });
+                }
+            }
+
+            var ownedOrgs = await _db.Organizations.Where(o => o.OwnerId == userId && !o.IsDeleted).ToListAsync();
+            foreach (var org in ownedOrgs)
+            {
+                if (!roles.Any(r => r.Name == RoleName.Owner.ToString() && r.ScopeType == ScopeType.Organization.ToString() && r.ScopeId == org.Id))
+                {
+                    roles.Add(new RoleInfoDto
+                    {
+                        Name = RoleName.Owner.ToString(),
+                        ScopeType = ScopeType.Organization.ToString(),
+                        ScopeId = org.Id
+                    });
+                }
+            }
+
+            return roles;
         }
     }
 }

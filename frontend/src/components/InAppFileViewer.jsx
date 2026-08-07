@@ -6,7 +6,7 @@ export default function InAppFileViewer({ attachment, isOpen, onClose, entityTyp
   const [hasPreviewError, setHasPreviewError] = useState(false);
 
   const resource = entityType || (attachment?.entityType ? String(attachment.entityType).toLowerCase() : 'tasks');
-  const downloadUrl = attachment ? `https://localhost:7065/api/v1/${resource}/attachments/${attachment.id}/download` : '';
+  const downloadUrl = attachment ? `${import.meta.env.VITE_API_URL}/${resource}/attachments/${attachment.id}/download` : '';
 
   useEffect(() => {
     if (!attachment || !isOpen) {

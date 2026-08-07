@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const BACKEND_BASE = 'https://localhost:7065/api/v1/auth';
+const BACKEND_BASE = `${import.meta.env.VITE_API_URL}/auth`;
 
 export default function GoogleCallback() {
   const [message, setMessage] = useState('Verifying Google sign-in...');

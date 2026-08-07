@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-const API_URL = 'https://localhost:7065/api/v1/search';
+const API_URL = `${import.meta.env.VITE_API_URL}/search`;
 
 const TYPE_ICONS = {
   Project: (

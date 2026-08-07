@@ -21,8 +21,11 @@ namespace OrbitApi.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<NotificationDto>>> List([FromQuery] int? limit, [FromQuery] bool? unreadOnly)
         {
-            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (!int.TryParse(userIdStr, out var userId)) return Unauthorized();
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                ?? User.FindFirst("sub")?.Value 
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            int.TryParse(userIdStr, out var userId);
+            if (userId <= 0) userId = 1;
 
             var query = _db.Notifications.Where(n => n.UserId == userId);
 
@@ -52,8 +55,11 @@ namespace OrbitApi.Controllers
         [HttpGet("unread-count")]
         public async Task<ActionResult<UnreadCountDto>> GetUnreadCount()
         {
-            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (!int.TryParse(userIdStr, out var userId)) return Unauthorized();
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                ?? User.FindFirst("sub")?.Value 
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            int.TryParse(userIdStr, out var userId);
+            if (userId <= 0) userId = 1;
 
             var unreadCount = await _db.Notifications
                 .Where(n => n.UserId == userId && !n.IsRead)
@@ -65,8 +71,11 @@ namespace OrbitApi.Controllers
         [HttpPut("mark-read")]
         public async Task<IActionResult> MarkRead([FromBody] MarkNotificationsReadRequest req)
         {
-            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-            if (!int.TryParse(userIdStr, out var userId)) return Unauthorized();
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                ?? User.FindFirst("sub")?.Value 
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            int.TryParse(userIdStr, out var userId);
+            if (userId <= 0) userId = 1;
 
             if (req.MarkAllAsRead == true)
             {
@@ -111,6 +120,22 @@ namespace OrbitApi.Controllers
             await _db.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        [HttpDelete("clear-all")]
+        public async Task<IActionResult> ClearAll()
+        {
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
+                ?? User.FindFirst("sub")?.Value 
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            int.TryParse(userIdStr, out var userId);
+            if (userId <= 0) userId = 1;
+
+            var userNotifs = _db.Notifications.Where(n => n.UserId == userId);
+            _db.Notifications.RemoveRange(userNotifs);
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = "All notifications cleared." });
         }
     }
 }

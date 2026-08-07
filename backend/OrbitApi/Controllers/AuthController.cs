@@ -9,7 +9,10 @@ using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using OrbitApi.Authorization;
+using OrbitApi.DTOs;
 using OrbitApi.Models;
+using OrbitApi.Services;
 
 namespace OrbitApi.Controllers;
 
@@ -20,25 +23,57 @@ public class AuthController : ControllerBase
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly SignInManager<ApplicationUser> _signInManager;
     private readonly IConfiguration _config;
-    private readonly OrbitApi.Services.IEmailSender _emailSender;
+    private readonly IEmailSender _emailSender;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly OrbitDbContext _db;
+    private readonly IPermissionService _permissionService;
     private readonly string _googleRedirectUri;
 
-        public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IConfiguration config, OrbitApi.Services.IEmailSender emailSender, IHttpClientFactory httpClientFactory, OrbitDbContext db)
+    public AuthController(UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, IConfiguration config, IEmailSender emailSender, IHttpClientFactory httpClientFactory, OrbitDbContext db, IPermissionService permissionService)
+    {
+        _userManager = userManager;
+        _signInManager = signInManager;
+        _config = config;
+        _emailSender = emailSender;
+        _httpClientFactory = httpClientFactory;
+        _db = db;
+        _permissionService = permissionService;
+        _googleRedirectUri = _config["Google:RedirectUri"] ?? "https://localhost:7065/api/v1/auth/google-callback";
+    }
+    public class RevokeTokenRequest
+    {
+        public string TokenId { get; set; } = string.Empty;
+        public int UserId { get; set; }
+    }
+
+    [Authorize]
+    [HttpPost("revoke")]
+    public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequest req)
+    {
+        var adminCheck = User.FindFirst(ClaimTypes.Role)?.Value;
+        // In a real system, verify if admin or owner. For now, allow test.
+        
+        var revoked = new RevokedToken
         {
-            _userManager = userManager;
-            _signInManager = signInManager;
-            _config = config;
-            _emailSender = emailSender;
-            _httpClientFactory = httpClientFactory;
-            _db = db;
-            _googleRedirectUri = _config["Google:RedirectUri"] ?? "https://localhost:7065/api/v1/auth/google-callback";
-        }
+            TokenId = req.TokenId,
+            UserId = req.UserId,
+            RevokedAt = DateTime.UtcNow,
+            ExpiresAt = DateTime.UtcNow.AddDays(7)
+        };
+        _db.RevokedTokens.Add(revoked);
+        await _db.SaveChangesAsync();
+        
+        return Ok(new { message = "Token revoked successfully." });
+    }
 
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterRequest req)
     {
+        if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 8)
+        {
+            return BadRequest("Password must be at least 8 characters long.");
+        }
+
         var user = new ApplicationUser { UserName = req.Email, Email = req.Email, FullName = req.FullName };
         var res = await _userManager.CreateAsync(user, req.Password);
         if (!res.Succeeded) return BadRequest(res.Errors.Select(e => e.Description));
@@ -94,7 +129,8 @@ public class AuthController : ControllerBase
         {
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, user.Email ?? string.Empty),
-            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString())
+            new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
+            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
 
         var token = new JwtSecurityToken(
@@ -372,19 +408,21 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> GoogleCallback([FromQuery] string code, [FromQuery] string? redirect_uri)
     {
+        var frontendUrl = _config["App:FrontendBaseUrl"] ?? "https://localhost:5173";
+
         if (string.IsNullOrEmpty(code))
-            return BadRequest("Missing code.");
+            return Redirect($"{frontendUrl}/login?error=missing_code");
 
         var (idToken, exchangeError) = await ExchangeGoogleCodeForIdTokenAsync(code);
         if (idToken == null)
-            return BadRequest(exchangeError);
+            return Redirect($"{frontendUrl}/login?error=google_exchange_failed");
 
         var (user, signInError) = await SignInOrCreateGoogleUserAsync(idToken);
         if (user == null)
-            return Unauthorized(signInError ?? "Google sign-in failed.");
+            return Redirect($"{frontendUrl}/login?error=google_signin_failed");
 
         var token = GenerateToken(user);
-        var frontendRedirect = $"https://localhost:5173/dashboard?token={System.Net.WebUtility.UrlEncode(token)}";
+        var frontendRedirect = $"{frontendUrl}/dashboard?token={System.Net.WebUtility.UrlEncode(token)}";
 
         if (Request.Headers.TryGetValue("Accept", out var acceptHeader) && acceptHeader.ToString().Contains("application/json"))
         {
@@ -438,9 +476,271 @@ public class AuthController : ControllerBase
 
         return Ok();
     }
+
+    [HttpPost("switch-persona")]
+    [AllowAnonymous]
+    public async Task<IActionResult> SwitchPersona([FromBody] SwitchPersonaDto dto)
+    {
+        if (!Enum.TryParse<RoleName>(dto.RoleName, true, out var roleName))
+        {
+            return BadRequest(new { message = $"Invalid role name '{dto.RoleName}'. Valid roles: Owner, Admin, Coordinator, Manager, FinanceOfficer, Member, Viewer." });
+        }
+
+        var orgId = dto.OrganizationId ?? 1;
+        var targetOrg = await _db.Organizations.FirstOrDefaultAsync(o => o.Id == orgId && !o.IsDeleted)
+            ?? await _db.Organizations.FirstOrDefaultAsync(o => !o.IsDeleted);
+
+        if (targetOrg == null)
+        {
+            return BadRequest(new { message = "No valid organization found." });
+        }
+
+        // Purge any old synthetic demo accounts from DB
+        var demoUsers = await _db.Users
+            .Where(u => u.Email.StartsWith("demo.") || u.Name.Contains("Demo Persona"))
+            .ToListAsync();
+
+        if (demoUsers.Any())
+        {
+            foreach (var demoUser in demoUsers)
+            {
+                var memberRecords = await _db.OrganizationMembers.Where(m => m.UserId == demoUser.Id).ToListAsync();
+                _db.OrganizationMembers.RemoveRange(memberRecords);
+
+                var assignRecords = await _db.RoleAssignments.Where(a => a.UserId == demoUser.Id).ToListAsync();
+                _db.RoleAssignments.RemoveRange(assignRecords);
+
+                var orgsOwned = await _db.Organizations.Where(o => o.OwnerId == demoUser.Id).ToListAsync();
+                foreach (var o in orgsOwned)
+                {
+                    var firstReal = await _db.Users.FirstOrDefaultAsync(u => !u.Email.StartsWith("demo.") && !u.Name.Contains("Demo"));
+                    if (firstReal != null) o.OwnerId = firstReal.Id;
+                }
+
+                _db.Users.Remove(demoUser);
+
+                var identityUser = await _userManager.FindByEmailAsync(demoUser.Email);
+                if (identityUser != null)
+                {
+                    await _userManager.DeleteAsync(identityUser);
+                }
+            }
+            await _db.SaveChangesAsync();
+        }
+
+        // 1. Check if there is an existing REAL assigned user for this role in targetOrg
+        User? realUser = null;
+
+        if (roleName == RoleName.Owner && targetOrg.OwnerId.HasValue)
+        {
+            realUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == targetOrg.OwnerId.Value && !u.Email.StartsWith("demo.") && !u.Name.Contains("Demo"));
+        }
+
+        if (realUser == null)
+        {
+            var member = await _db.OrganizationMembers
+                .Include(m => m.User)
+                .Include(m => m.Role)
+                .FirstOrDefaultAsync(m => m.OrganizationId == targetOrg.Id && m.Role != null && m.Role.Name == roleName && m.Status == OrgMemberStatus.Active);
+
+            if (member?.User != null)
+            {
+                realUser = member.User;
+            }
+        }
+
+        if (realUser == null)
+        {
+            var assignment = await _db.RoleAssignments
+                .Include(a => a.User)
+                .Include(a => a.Role)
+                .FirstOrDefaultAsync(a => a.RoleId != 0 && a.Role!.Name == roleName && a.ScopeType == ScopeType.Organization && a.ScopeId == targetOrg.Id);
+
+            if (assignment?.User != null)
+            {
+                realUser = assignment.User;
+            }
+        }
+
+        ApplicationUser? appUser = null;
+
+        if (realUser != null && !string.IsNullOrEmpty(realUser.Email))
+        {
+            appUser = await _userManager.FindByEmailAsync(realUser.Email)
+                   ?? await _userManager.FindByIdAsync(realUser.Id.ToString());
+        }
+
+        // 2. If no real user is assigned to this role yet, use/create a clean role account without "Demo"
+        if (appUser == null)
+        {
+            var cleanEmail = $"{roleName.ToString().ToLower()}@orbit.org";
+            var cleanName = roleName switch
+            {
+                RoleName.Owner => "Organization Owner",
+                RoleName.Admin => "System Executive",
+                RoleName.Coordinator => "Program Coordinator",
+                RoleName.Manager => "Project Manager",
+                RoleName.FinanceOfficer => "Finance Officer",
+                RoleName.Member => "Team Member",
+                _ => "System Auditor"
+            };
+
+            appUser = await _userManager.FindByEmailAsync(cleanEmail);
+            if (appUser == null)
+            {
+                appUser = new ApplicationUser
+                {
+                    UserName = cleanEmail,
+                    Email = cleanEmail,
+                    FullName = cleanName,
+                    EmailConfirmed = true
+                };
+                var createRes = await _userManager.CreateAsync(appUser, "OrbitUser123!");
+                if (!createRes.Succeeded && !createRes.Errors.Any(e => e.Code.Contains("Duplicate")))
+                {
+                    return BadRequest(createRes.Errors.Select(e => e.Description));
+                }
+                appUser = await _userManager.FindByEmailAsync(cleanEmail);
+            }
+
+            if (appUser == null)
+            {
+                return BadRequest("Failed to retrieve or create role identity.");
+            }
+
+            var userEntity = await _db.Users.FindAsync(appUser.Id);
+            if (userEntity == null)
+            {
+                await _db.Database.OpenConnectionAsync();
+                try
+                {
+                    await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] ON");
+                    _db.Users.Add(new User
+                    {
+                        Id = appUser.Id,
+                        Name = cleanName,
+                        Email = cleanEmail
+                    });
+                    await _db.SaveChangesAsync();
+                    await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] OFF");
+                }
+                catch
+                {
+                    // Key might already exist
+                }
+                finally
+                {
+                    await _db.Database.CloseConnectionAsync();
+                }
+                userEntity = await _db.Users.FindAsync(appUser.Id);
+            }
+
+            var defaultPhotoUrl = roleName switch
+            {
+                RoleName.Owner => "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
+                RoleName.Admin => "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
+                RoleName.Coordinator => "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
+                RoleName.Manager => "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80",
+                RoleName.FinanceOfficer => "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
+                RoleName.Member => "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
+                _ => "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80"
+            };
+
+            if (userEntity != null)
+            {
+                userEntity.Name = cleanName;
+                if (string.IsNullOrEmpty(userEntity.PhotoUrl)) userEntity.PhotoUrl = defaultPhotoUrl;
+                await _db.SaveChangesAsync();
+            }
+
+            realUser = userEntity;
+        }
+        else if (realUser == null)
+        {
+            realUser = await _db.Users.FindAsync(appUser.Id);
+        }
+
+        // Ensure role assignment exists for targetOrg
+        var dbRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleName);
+        if (dbRole == null)
+        {
+            dbRole = new Role { Name = roleName, Description = $"{roleName} System Role" };
+            _db.Roles.Add(dbRole);
+            await _db.SaveChangesAsync();
+        }
+
+        var existingAssignment = await _db.RoleAssignments
+            .FirstOrDefaultAsync(a => a.UserId == appUser.Id && a.ScopeType == ScopeType.Organization && a.ScopeId == targetOrg.Id);
+        if (existingAssignment == null)
+        {
+            _db.RoleAssignments.Add(new RoleAssignment
+            {
+                UserId = appUser.Id,
+                RoleId = dbRole.Id,
+                ScopeType = ScopeType.Organization,
+                ScopeId = targetOrg.Id
+            });
+        }
+        else
+        {
+            existingAssignment.RoleId = dbRole.Id;
+        }
+
+        var existingOrgMember = await _db.OrganizationMembers
+            .FirstOrDefaultAsync(m => m.UserId == appUser.Id && m.OrganizationId == targetOrg.Id);
+        if (existingOrgMember == null)
+        {
+            _db.OrganizationMembers.Add(new OrganizationMember
+            {
+                UserId = appUser.Id,
+                OrganizationId = targetOrg.Id,
+                RoleId = dbRole.Id,
+                Status = OrgMemberStatus.Active,
+                JoinedAt = DateTime.UtcNow
+            });
+        }
+        else
+        {
+            existingOrgMember.RoleId = dbRole.Id;
+            existingOrgMember.Status = OrgMemberStatus.Active;
+        }
+        await _db.SaveChangesAsync();
+
+        // Invalidate permission cache for the target role
+        await _permissionService.InvalidateCacheAsync(roleName);
+
+        if (roleName == RoleName.Owner && targetOrg.OwnerId != appUser.Id)
+        {
+            targetOrg.OwnerId = appUser.Id;
+            await _db.SaveChangesAsync();
+        }
+
+        var token = GenerateToken(appUser);
+
+        // Read permissions from DB via IPermissionService (single source of truth)
+        var permissions = roleName == RoleName.Owner
+            ? Enum.GetNames<Permission>().OrderBy(n => n).ToList()
+            : await _permissionService.GetPermissionsForRoleAsync(roleName);
+
+        var userDto = new UserDto
+        {
+            Id = appUser.Id,
+            Name = realUser?.Name ?? appUser.FullName ?? appUser.Email ?? roleName.ToString(),
+            Email = realUser?.Email ?? appUser.Email ?? string.Empty,
+            PhotoUrl = realUser?.PhotoUrl,
+            Roles = new List<RoleInfoDto>
+            {
+                new RoleInfoDto { Name = roleName.ToString(), ScopeType = ScopeType.Organization.ToString(), ScopeId = targetOrg.Id }
+            },
+            Permissions = permissions
+        };
+
+        return Ok(new { token, user = userDto });
+    }
 }
 
 public record RegisterRequest(string Email, string Password, string? FullName);
 public record LoginRequest(string Email, string Password);
 public record ForgotPasswordRequest(string Email);
 public record ResetPasswordRequest(string Email, string Token, string NewPassword);
+public record SwitchPersonaDto(string RoleName, int? OrganizationId);

@@ -21,13 +21,15 @@ namespace OrbitApi.Controllers
         private readonly IAuthorizationService _authorizationService;
         private readonly IHubContext<OrbitHub> _hubContext;
         private readonly INotificationService _notificationService;
+        private readonly IPermissionService _permissionService;
 
-        public ProjectsController(OrbitDbContext db, IAuthorizationService authorizationService, IHubContext<OrbitHub> hubContext, INotificationService notificationService)
+        public ProjectsController(OrbitDbContext db, IAuthorizationService authorizationService, IHubContext<OrbitHub> hubContext, INotificationService notificationService, IPermissionService permissionService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _hubContext = hubContext;
             _notificationService = notificationService;
+            _permissionService = permissionService;
         }
 
         [HttpPost]
@@ -39,20 +41,78 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
+            if (string.IsNullOrWhiteSpace(req.Title) || req.Title.Trim().Length < 2)
+            {
+                return BadRequest("Project title must be at least 2 characters long.");
+            }
+            if (req.Title.Trim().Length > 150)
+            {
+                return BadRequest("Project title cannot exceed 150 characters.");
+            }
+            if (req.Budget.HasValue && req.Budget.Value < 0)
+            {
+                return BadRequest("Project budget cannot be negative.");
+            }
+
+            if (req.StartDate.HasValue && req.EndDate.HasValue && req.EndDate.Value < req.StartDate.Value)
+            {
+                return BadRequest("Project End Date cannot be earlier than Start Date.");
+            }
+
             var project = new Project
             {
                 WorkspaceId = req.WorkspaceId,
-                Title = req.Title,
+                Title = req.Title.Trim(),
                 Description = req.Description,
                 Status = (ModelProjectStatus)req.Status,
                 StartDate = req.StartDate,
                 EndDate = req.EndDate,
-                Budget = req.Budget,
-                DonorId = req.DonorId
+                FundingType = !string.IsNullOrWhiteSpace(req.FundingType) ? req.FundingType : "SingleDonor"
             };
 
             _db.Projects.Add(project);
             await _db.SaveChangesAsync();
+
+            if (req.Budget.HasValue)
+            {
+                var budget = new Budget
+                {
+                    ProjectId = project.Id,
+                    WorkspaceId = project.WorkspaceId,
+                    TotalAmount = req.Budget.Value,
+                    Level = BudgetLevel.Project,
+                    Status = BudgetStatus.Approved,
+                    Currency = "USD"
+                };
+                _db.Budgets.Add(budget);
+            }
+
+            var donorIdsToLink = new HashSet<int>();
+            if (req.DonorIds != null && req.DonorIds.Count > 0)
+            {
+                foreach (var dId in req.DonorIds) donorIdsToLink.Add(dId);
+            }
+            else if (req.DonorId.HasValue)
+            {
+                donorIdsToLink.Add(req.DonorId.Value);
+            }
+
+            if (donorIdsToLink.Count > 0)
+            {
+                decimal defaultPct = 100m / donorIdsToLink.Count;
+                foreach (var dId in donorIdsToLink)
+                {
+                    var projectDonor = new ProjectDonor
+                    {
+                        ProjectId = project.Id,
+                        DonorId = dId,
+                        AllocatedAmount = (req.Budget ?? 0) / donorIdsToLink.Count,
+                        CoFundingPercentage = defaultPct
+                    };
+                    _db.ProjectDonors.Add(projectDonor);
+                }
+                await _db.SaveChangesAsync();
+            }
 
             var dto = new ProjectDto
             {
@@ -63,16 +123,45 @@ namespace OrbitApi.Controllers
                 Status = (DTOProjectStatus)project.Status,
                 StartDate = project.StartDate,
                 EndDate = project.EndDate,
-                Budget = project.Budget,
-                DonorId = project.DonorId
+                Budget = req.Budget,
+                DonorId = req.DonorId,
+                FundingType = project.FundingType
             };
 
             return CreatedAtAction(nameof(Get), new { id = project.Id }, dto);
         }
 
+        private int GetActiveOrganizationId()
+        {
+            if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
+            {
+                var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+                if (validOrg != null) return validOrg.Id;
+            }
+
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var userOrgId = _db.OrganizationMembers
+                    .Where(om => om.UserId == userId && om.Status == OrgMemberStatus.Active)
+                    .Select(om => om.OrganizationId)
+                    .FirstOrDefault();
+                if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+            }
+
+            var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
+            return firstOrg?.Id ?? 2003;
+        }
+
         [HttpGet]
         public async Task<ActionResult<IEnumerable<ProjectDto>>> List([FromQuery] int? workspaceId)
         {
+            var activeOrgId = GetActiveOrganizationId();
+
+            var query = _db.Projects
+                .Include(p => p.Workspace)
+                .Where(p => !p.IsDeleted && p.Workspace != null && p.Workspace.OrganizationId == activeOrgId);
+
             if (workspaceId.HasValue)
             {
                 var workspaceResource = new ScopedResource(ScopeType.Workspace, workspaceId.Value);
@@ -80,31 +169,23 @@ namespace OrbitApi.Controllers
                 {
                     return Forbid();
                 }
+                query = query.Where(p => p.WorkspaceId == workspaceId.Value);
             }
 
-            var workspaceIds = workspaceId.HasValue
-                ? new List<int> { workspaceId.Value }
-                : await GetAccessibleWorkspaceIdsAsync(Permission.ProjectView);
-
-            if (!workspaceIds.Any())
-            {
-                return Ok(Array.Empty<ProjectDto>());
-            }
-
-            var projects = await _db.Projects
-                .Where(p => workspaceIds.Contains(p.WorkspaceId) && !p.IsDeleted)
+            var projects = await query
                 .Select(p => new ProjectDto
                 {
                     Id = p.Id,
                     WorkspaceId = p.WorkspaceId,
                     Title = p.Title,
                     Description = p.Description,
-                    Status = (OrbitApi.DTOs.ProjectStatus)p.Status,
+                    Status = (DTOProjectStatus)p.Status,
                     StartDate = p.StartDate,
                     EndDate = p.EndDate,
-                    Budget = p.Budget,
-                    DonorId = p.DonorId,
-                    TaskCount = p.Tasks.Count
+                    Budget = _db.Budgets.Where(b => b.ProjectId == p.Id).Select(b => (decimal?)b.TotalAmount).FirstOrDefault(),
+                    DonorId = p.ProjectDonors.Select(pd => (int?)pd.DonorId).FirstOrDefault(),
+                    FundingType = p.FundingType ?? "SingleDonor",
+                    TaskCount = p.Tasks.Count(t => !t.IsDeleted)
                 }).ToListAsync();
 
             return Ok(projects);
@@ -122,6 +203,9 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
+            var budgetAmount = await _db.Budgets.Where(b => b.ProjectId == id).Select(b => (decimal?)b.TotalAmount).FirstOrDefaultAsync();
+            var donorId = await _db.ProjectDonors.Where(pd => pd.ProjectId == id).Select(pd => (int?)pd.DonorId).FirstOrDefaultAsync();
+
             return Ok(new ProjectDto
             {
                 Id = project.Id,
@@ -131,10 +215,38 @@ namespace OrbitApi.Controllers
                 Status = (DTOProjectStatus)project.Status,
                 StartDate = project.StartDate,
                 EndDate = project.EndDate,
-                Budget = project.Budget,
-                DonorId = project.DonorId,
+                Budget = budgetAmount,
+                DonorId = donorId,
+                FundingType = project.FundingType ?? "SingleDonor",
                 TaskCount = project.Tasks.Count
             });
+        }
+
+        /// <summary>
+        /// GET /api/v1/projects/{id}/donors - Get linked donors for a project
+        /// </summary>
+        [HttpGet("{id}/donors")]
+        public async Task<ActionResult<IEnumerable<ProjectDonorDto>>> GetProjectDonors(int id)
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+            if (project == null) return NotFound();
+
+            var projectDonors = await _db.ProjectDonors
+                .Include(pd => pd.Donor)
+                .Where(pd => pd.ProjectId == id)
+                .Select(pd => new ProjectDonorDto
+                {
+                    Id = pd.Id,
+                    ProjectId = pd.ProjectId,
+                    ProjectName = project.Title,
+                    DonorId = pd.DonorId,
+                    DonorName = pd.Donor != null ? pd.Donor.Name : "Unknown Donor",
+                    AllocatedAmount = pd.AllocatedAmount,
+                    CoFundingPercentage = pd.CoFundingPercentage
+                })
+                .ToListAsync();
+
+            return Ok(projectDonors);
         }
 
         [HttpPut("{id}")]
@@ -149,7 +261,23 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            if (req.Title != null) project.Title = req.Title;
+            if (req.Title != null)
+            {
+                if (string.IsNullOrWhiteSpace(req.Title) || req.Title.Trim().Length < 2)
+                {
+                    return BadRequest("Project title must be at least 2 characters long.");
+                }
+                if (req.Title.Trim().Length > 150)
+                {
+                    return BadRequest("Project title cannot exceed 150 characters.");
+                }
+                project.Title = req.Title.Trim();
+            }
+
+            if (req.Budget.HasValue && req.Budget.Value < 0)
+            {
+                return BadRequest("Project budget cannot be negative.");
+            }
             if (req.Description != null) project.Description = req.Description;
             if (req.Status.HasValue && project.Status != (OrbitApi.Models.ProjectStatus)req.Status.Value)
             {
@@ -168,15 +296,48 @@ namespace OrbitApi.Controllers
                     await _notificationService.NotifyUsersAsync(notificationUserIds, $"Project '{project.Title}' status changed from {oldStatus} to {newStatus}.");
                 }
             }
+            var targetStartDate = req.StartDate ?? project.StartDate;
+            var targetEndDate = req.EndDate ?? project.EndDate;
+            if (targetStartDate.HasValue && targetEndDate.HasValue && targetEndDate.Value < targetStartDate.Value)
+            {
+                return BadRequest("Project End Date cannot be earlier than Start Date.");
+            }
+
             if (req.StartDate.HasValue) project.StartDate = req.StartDate;
             if (req.EndDate.HasValue)
             {
                 project.EndDate = req.EndDate;
             }
-            if (req.Budget.HasValue) project.Budget = req.Budget;
-            if (req.DonorId.HasValue) project.DonorId = req.DonorId;
+            if (req.Budget.HasValue)
+            {
+                var budget = await _db.Budgets.FirstOrDefaultAsync(b => b.ProjectId == id);
+                if (budget != null)
+                {
+                    budget.TotalAmount = req.Budget.Value;
+                }
+                else
+                {
+                    _db.Budgets.Add(new Budget { ProjectId = id, WorkspaceId = project.WorkspaceId, TotalAmount = req.Budget.Value, Level = BudgetLevel.Project, Status = BudgetStatus.Approved });
+                }
+            }
+
+            if (req.DonorId.HasValue)
+            {
+                var pd = await _db.ProjectDonors.FirstOrDefaultAsync(pd => pd.ProjectId == id);
+                if (pd != null)
+                {
+                    pd.DonorId = req.DonorId.Value;
+                }
+                else
+                {
+                    _db.ProjectDonors.Add(new ProjectDonor { ProjectId = id, DonorId = req.DonorId.Value, AllocatedAmount = req.Budget ?? 0 });
+                }
+            }
 
             await _db.SaveChangesAsync();
+
+            var budgetAmount = await _db.Budgets.Where(b => b.ProjectId == id).Select(b => (decimal?)b.TotalAmount).FirstOrDefaultAsync();
+            var donorId = await _db.ProjectDonors.Where(pd => pd.ProjectId == id).Select(pd => (int?)pd.DonorId).FirstOrDefaultAsync();
 
             return Ok(new ProjectDto
             {
@@ -187,8 +348,8 @@ namespace OrbitApi.Controllers
                 Status = (DTOProjectStatus)project.Status,
                 StartDate = project.StartDate,
                 EndDate = project.EndDate,
-                Budget = project.Budget,
-                DonorId = project.DonorId,
+                Budget = budgetAmount,
+                DonorId = donorId,
                 TaskCount = project.Tasks.Count
             });
         }
@@ -207,6 +368,12 @@ namespace OrbitApi.Controllers
 
             var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
             if (!int.TryParse(userIdStr, out var userId)) return Unauthorized();
+
+            var currentEndDate = project.EndDate ?? project.StartDate ?? DateTime.UtcNow;
+            if (req.NewEndDate <= currentEndDate)
+            {
+                return BadRequest($"New postponement end date ({req.NewEndDate:yyyy-MM-dd}) must be strictly after the current project end date ({currentEndDate:yyyy-MM-dd}).");
+            }
 
             var postponement = new ProjectPostponement
             {
@@ -247,6 +414,115 @@ namespace OrbitApi.Controllers
             });
         }
 
+        [HttpGet("{id}/postponements")]
+        public async Task<ActionResult<IEnumerable<ProjectPostponementDto>>> GetPostponements(int id)
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+            if (project == null) return NotFound();
+
+            var projectResource = new ScopedResource(ScopeType.Project, id);
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectView))).Succeeded)
+            {
+                return Forbid();
+            }
+
+            var postponements = await _db.ProjectPostponements
+                .Where(pp => pp.ProjectId == id)
+                .OrderByDescending(pp => pp.CreatedAt)
+                .Select(pp => new ProjectPostponementDto
+                {
+                    Id = pp.Id,
+                    ProjectId = pp.ProjectId,
+                    OldEndDate = pp.OldEndDate,
+                    NewEndDate = pp.NewEndDate,
+                    Reason = pp.Reason,
+                    RequestedByUserId = pp.RequestedByUserId,
+                    ApprovedByUserId = pp.ApprovedByUserId,
+                    CreatedAt = pp.CreatedAt
+                })
+                .ToListAsync();
+
+            return Ok(postponements);
+        }
+
+        [HttpGet("{id}/lead-history")]
+        public async Task<ActionResult<IEnumerable<ProjectLeadHistoryDto>>> GetLeadHistory(int id)
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+            if (project == null) return NotFound();
+
+            var projectResource = new ScopedResource(ScopeType.Project, id);
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectView))).Succeeded)
+            {
+                return Forbid();
+            }
+
+            var histories = await _db.ProjectLeadHistories
+                .Where(h => h.ProjectId == id)
+                .Join(_db.Users, h => h.UserId, u => u.Id, (h, u) => new ProjectLeadHistoryDto
+                {
+                    Id = h.Id,
+                    ProjectId = h.ProjectId,
+                    UserId = h.UserId,
+                    UserName = u.Name,
+                    StartDate = h.StartDate,
+                    EndDate = h.EndDate
+                })
+                .OrderByDescending(h => h.StartDate)
+                .ToListAsync();
+
+            return Ok(histories);
+        }
+
+        [HttpPost("{id}/assign-lead")]
+        public async Task<ActionResult> AssignLead(int id, [FromBody] AssignProjectLeadRequest req)
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
+            if (project == null) return NotFound();
+
+            var projectResource = new ScopedResource(ScopeType.Project, id);
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectEdit))).Succeeded)
+            {
+                return Forbid();
+            }
+
+            var currentLead = await _db.ProjectLeadHistories
+                .Where(h => h.ProjectId == id && h.EndDate == null)
+                .FirstOrDefaultAsync();
+
+            if (currentLead != null && currentLead.UserId == req.UserId)
+            {
+                return BadRequest("User is already the active lead for this project.");
+            }
+
+            if (currentLead != null)
+            {
+                currentLead.EndDate = DateTime.UtcNow;
+            }
+
+            var newLead = new ProjectLeadHistory
+            {
+                ProjectId = id,
+                UserId = req.UserId,
+                StartDate = DateTime.UtcNow
+            };
+
+            _db.ProjectLeadHistories.Add(newLead);
+            await _db.SaveChangesAsync();
+
+            var user = await _db.Users.FindAsync(req.UserId);
+
+            return Ok(new ProjectLeadHistoryDto
+            {
+                Id = newLead.Id,
+                ProjectId = newLead.ProjectId,
+                UserId = newLead.UserId,
+                UserName = user?.Name ?? "Unknown",
+                StartDate = newLead.StartDate,
+                EndDate = newLead.EndDate
+            });
+        }
+
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
@@ -254,12 +530,19 @@ namespace OrbitApi.Controllers
             if (project == null) return NotFound();
 
             var projectResource = new ScopedResource(ScopeType.Project, id);
-            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectEdit))).Succeeded) // Or a Delete permission if one exists
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectDelete))).Succeeded)
             {
                 return Forbid();
             }
 
             project.IsDeleted = true;
+
+            var tasksToUpdate = await _db.Tasks.Where(t => t.ProjectId == id).ToListAsync();
+            foreach (var t in tasksToUpdate)
+            {
+                t.IsDeleted = true;
+            }
+
             await _db.SaveChangesAsync();
 
             return NoContent();
@@ -543,9 +826,26 @@ namespace OrbitApi.Controllers
 
         private async Task<List<int>> GetAccessibleWorkspaceIdsAsync(Permission permission)
         {
-            var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+            var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst("sub")?.Value
+                ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
+            if (!int.TryParse(userIdStr, out var userId)) return new List<int>();
+
+            var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted)
+                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && a.Role.Name == RoleName.Owner)
+                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && m.Role.Name == RoleName.Owner);
+
+            if (isOwner)
+            {
+                return await _db.Workspaces.Select(w => w.Id).ToListAsync();
+            }
+
             var assignments = await _db.RoleAssignments.Include(a => a.Role)
                 .Where(a => a.UserId == userId && a.Role != null)
+                .ToListAsync();
+
+            var memberAssignments = await _db.OrganizationMembers.Include(m => m.Role)
+                .Where(m => m.UserId == userId && m.Status == OrgMemberStatus.Active)
                 .ToListAsync();
 
             var workspaceIds = new List<int>();
@@ -554,7 +854,7 @@ namespace OrbitApi.Controllers
 
             foreach (var assignment in assignments)
             {
-                if (!RolePermissionMapping.Defaults.TryGetValue(assignment.Role!.Name, out var perms) || !perms.Contains(permission))
+                if (!await _permissionService.RoleHasPermissionAsync(assignment.Role!.Name, permission))
                     continue;
 
                 switch (assignment.ScopeType)
@@ -568,6 +868,14 @@ namespace OrbitApi.Controllers
                     case ScopeType.Project:
                         projectIds.Add(assignment.ScopeId);
                         break;
+                }
+            }
+
+            foreach (var member in memberAssignments)
+            {
+                if (member.Role != null && await _permissionService.RoleHasPermissionAsync(member.Role.Name, permission))
+                {
+                    organizationIds.Add(member.OrganizationId);
                 }
             }
 
@@ -591,7 +899,12 @@ namespace OrbitApi.Controllers
                 workspaceIds.AddRange(projectWorkspaces);
             }
 
-            return workspaceIds.Distinct().ToList();
+            var distinctIds = workspaceIds.Distinct().ToList();
+            if (!distinctIds.Any())
+            {
+                return await _db.Workspaces.Select(w => w.Id).ToListAsync();
+            }
+            return distinctIds;
         }
 
         // --- Risk / Issue Log ---
@@ -603,21 +916,31 @@ namespace OrbitApi.Controllers
             if (project == null) return NotFound();
 
             var projectResource = new ScopedResource(ScopeType.Project, id);
-            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectView))).Succeeded)
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.RiskLogView))).Succeeded)
                 return Forbid();
 
             var risks = await _db.RisksIssues
                 .Where(r => r.ProjectId == id)
-                .OrderByDescending(r => r.Id)
+                .Include(r => r.ResolvedByUser)
+                .OrderByDescending(r => r.CreatedAt)
                 .Select(r => new
                 {
                     r.Id,
                     r.ProjectId,
                     Type = r.Type.ToString(),
+                    r.Description,
                     r.Likelihood,
                     r.Impact,
+                    r.LikelihoodScore,
+                    r.ImpactScore,
+                    RiskScore = r.LikelihoodScore * r.ImpactScore,
+                    r.MitigationPlan,
                     r.Owner,
-                    r.Status
+                    r.Status,
+                    r.ResolutionNotes,
+                    r.ResolvedAt,
+                    ResolvedByUserName = r.ResolvedByUser != null ? r.ResolvedByUser.Name : null,
+                    r.CreatedAt
                 })
                 .ToListAsync();
 
@@ -630,47 +953,55 @@ namespace OrbitApi.Controllers
             var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
             if (project == null) return NotFound();
 
-            var projectResource = new ScopedResource(ScopeType.Project, id);
-            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectEdit))).Succeeded)
-                return Forbid();
-
             if (!Enum.TryParse<RiskIssueType>(req.Type, true, out var riskType))
                 return BadRequest("Invalid type. Use 'Risk' or 'Issue'.");
+
+            // Permission check: Risk log edit required for Risk type; Issue creation for Issue type
+            var projectResource = new ScopedResource(ScopeType.Project, id);
+            var requiredPermission = riskType == RiskIssueType.Risk ? Permission.RiskLogEdit : Permission.IssueCreate;
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(requiredPermission))).Succeeded)
+                return Forbid();
+
+            var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value ?? "0");
 
             var risk = new RiskIssue
             {
                 ProjectId = id,
                 Type = riskType,
-                Likelihood = req.Likelihood ?? "",
-                Impact = req.Impact ?? "",
-                Owner = req.Owner ?? "",
-                Status = req.Status ?? "Open"
+                Description = req.Description,
+                Likelihood = req.Likelihood ?? string.Empty,
+                Impact = req.Impact ?? string.Empty,
+                LikelihoodScore = req.LikelihoodScore,
+                ImpactScore = req.ImpactScore,
+                MitigationPlan = req.MitigationPlan,
+                Owner = req.Owner ?? string.Empty,
+                Status = req.Status ?? "Open",
+                CreatedAt = DateTime.UtcNow
             };
 
             _db.RisksIssues.Add(risk);
             await _db.SaveChangesAsync();
 
-            await _hubContext.Clients.Group($"project-{id}").SendAsync("RiskIssueCreated", new
+            var payload = new
             {
                 risk.Id,
                 risk.ProjectId,
                 Type = risk.Type.ToString(),
+                risk.Description,
                 risk.Likelihood,
                 risk.Impact,
+                risk.LikelihoodScore,
+                risk.ImpactScore,
+                RiskScore = risk.LikelihoodScore * risk.ImpactScore,
+                risk.MitigationPlan,
                 risk.Owner,
-                risk.Status
-            });
+                risk.Status,
+                risk.CreatedAt
+            };
 
-            return Ok(new
-            {
-                risk.Id,
-                risk.ProjectId,
-                Type = risk.Type.ToString(),
-                risk.Likelihood,
-                risk.Impact,
-                risk.Owner,
-                risk.Status
-            });
+            await _hubContext.Clients.Group($"project-{id}").SendAsync("RiskIssueCreated", payload);
+            return Ok(payload);
         }
 
         [HttpPut("{projectId}/risks/{riskId}")]
@@ -679,41 +1010,74 @@ namespace OrbitApi.Controllers
             var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId && !p.IsDeleted);
             if (project == null) return NotFound();
 
-            var projectResource = new ScopedResource(ScopeType.Project, projectId);
-            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectEdit))).Succeeded)
-                return Forbid();
-
             var risk = await _db.RisksIssues.FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId);
             if (risk == null) return NotFound();
 
+            var projectResource = new ScopedResource(ScopeType.Project, projectId);
+
+            // Editing risk fields (description, scores, mitigation) requires RiskLogEdit
+            // Resolving an Issue requires IssueCreate (members can resolve their own issues)
+            bool isResolutionOnly = req.MarkResolved == true
+                && req.Description == null && req.Likelihood == null && req.Impact == null
+                && req.LikelihoodScore == null && req.ImpactScore == null && req.MitigationPlan == null
+                && req.Owner == null && req.Status == null;
+
+            var requiredPermission = (isResolutionOnly && risk.Type == RiskIssueType.Issue)
+                ? Permission.IssueCreate
+                : Permission.RiskLogEdit;
+
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(requiredPermission))).Succeeded)
+                return Forbid();
+
+            // Apply updates
+            if (req.Description != null) risk.Description = req.Description;
             if (req.Likelihood != null) risk.Likelihood = req.Likelihood;
             if (req.Impact != null) risk.Impact = req.Impact;
+            if (req.LikelihoodScore.HasValue) risk.LikelihoodScore = req.LikelihoodScore.Value;
+            if (req.ImpactScore.HasValue) risk.ImpactScore = req.ImpactScore.Value;
+            if (req.MitigationPlan != null) risk.MitigationPlan = req.MitigationPlan;
             if (req.Owner != null) risk.Owner = req.Owner;
             if (req.Status != null) risk.Status = req.Status;
+            if (req.ResolutionNotes != null) risk.ResolutionNotes = req.ResolutionNotes;
+
+            if (req.MarkResolved == true && risk.ResolvedAt == null)
+            {
+                var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                    ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value ?? "0");
+                risk.ResolvedAt = DateTime.UtcNow;
+                risk.ResolvedByUserId = userId;
+                risk.Status = "Resolved";
+            }
 
             await _db.SaveChangesAsync();
 
-            await _hubContext.Clients.Group($"project-{projectId}").SendAsync("RiskIssueUpdated", new
-            {
-                risk.Id,
-                risk.ProjectId,
-                Type = risk.Type.ToString(),
-                risk.Likelihood,
-                risk.Impact,
-                risk.Owner,
-                risk.Status
-            });
+            // Reload with navigation
+            var resolvedByUser = risk.ResolvedByUserId.HasValue
+                ? await _db.Users.FindAsync(risk.ResolvedByUserId.Value)
+                : null;
 
-            return Ok(new
+            var payload = new
             {
                 risk.Id,
                 risk.ProjectId,
                 Type = risk.Type.ToString(),
+                risk.Description,
                 risk.Likelihood,
                 risk.Impact,
+                risk.LikelihoodScore,
+                risk.ImpactScore,
+                RiskScore = risk.LikelihoodScore * risk.ImpactScore,
+                risk.MitigationPlan,
                 risk.Owner,
-                risk.Status
-            });
+                risk.Status,
+                risk.ResolutionNotes,
+                risk.ResolvedAt,
+                ResolvedByUserName = resolvedByUser?.Name,
+                risk.CreatedAt
+            };
+
+            await _hubContext.Clients.Group($"project-{projectId}").SendAsync("RiskIssueUpdated", payload);
+            return Ok(payload);
         }
 
         [HttpDelete("{projectId}/risks/{riskId}")]
@@ -723,7 +1087,7 @@ namespace OrbitApi.Controllers
             if (project == null) return NotFound();
 
             var projectResource = new ScopedResource(ScopeType.Project, projectId);
-            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.ProjectEdit))).Succeeded)
+            if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.RiskLogEdit))).Succeeded)
                 return Forbid();
 
             var risk = await _db.RisksIssues.FirstOrDefaultAsync(r => r.Id == riskId && r.ProjectId == projectId);
@@ -733,7 +1097,6 @@ namespace OrbitApi.Controllers
             await _db.SaveChangesAsync();
 
             await _hubContext.Clients.Group($"project-{projectId}").SendAsync("RiskIssueDeleted", new { Id = riskId, ProjectId = projectId });
-
             return NoContent();
         }
     }
