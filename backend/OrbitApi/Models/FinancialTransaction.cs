@@ -38,6 +38,9 @@ public class FinancialTransaction
 
     public int? ToBankAccountId { get; set; }
 
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public int? ProjectId { get; set; }
 
     public int? TaskId { get; set; }

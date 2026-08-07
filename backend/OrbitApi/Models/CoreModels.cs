@@ -379,6 +379,9 @@ public class BankAccount
     public string Currency { get; set; } = "USD";
     public bool IsActive { get; set; } = true;
 
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public Organization? Organization { get; set; }
     public ICollection<DonorContribution> Contributions { get; set; } = new List<DonorContribution>();
     public ICollection<Expense> Expenses { get; set; } = new List<Expense>();
@@ -408,6 +411,9 @@ public class Expense
     public int? PaidByUserId { get; set; }
     public DateTime? PaidAt { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
 
     public Project? Project { get; set; }
     public TaskItem? Task { get; set; }
@@ -821,6 +827,10 @@ public class BudgetLineItem
     public int? CategoryId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
+
+    [Timestamp]
+    public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
     public Budget? Budget { get; set; }
     public FinancialCategory? FinancialCategory { get; set; }
 }

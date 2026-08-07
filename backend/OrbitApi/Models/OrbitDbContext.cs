@@ -519,5 +519,52 @@ public class OrbitDbContext : DbContext
             .WithMany()
             .HasForeignKey(ft => ft.ToBankAccountId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        // ─── High-Performance Composite Indexing Strategy ────────────────────────────────
+        modelBuilder.Entity<TaskItem>()
+            .HasIndex(t => new { t.ProjectId, t.Status, t.IsDeleted })
+            .HasDatabaseName("IX_Tasks_ProjectId_Status_IsDeleted");
+
+        modelBuilder.Entity<TaskItem>()
+            .HasIndex(t => t.ParentTaskId)
+            .HasDatabaseName("IX_Tasks_ParentTaskId");
+
+        modelBuilder.Entity<Project>()
+            .HasIndex(p => new { p.WorkspaceId, p.Status, p.IsDeleted })
+            .HasDatabaseName("IX_Projects_WorkspaceId_Status_IsDeleted");
+
+        modelBuilder.Entity<Expense>()
+            .HasIndex(e => new { e.ProjectId, e.CategoryId, e.ApprovalStatus })
+            .HasDatabaseName("IX_Expenses_ProjectId_Category_ApprovalStatus");
+
+        modelBuilder.Entity<Expense>()
+            .HasIndex(e => e.BankAccountId)
+            .HasDatabaseName("IX_Expenses_BankAccountId");
+
+        modelBuilder.Entity<BudgetLineItem>()
+            .HasIndex(b => new { b.BudgetId, b.CategoryId })
+            .HasDatabaseName("IX_BudgetLineItems_BudgetId_CategoryId");
+
+        modelBuilder.Entity<FinancialTransaction>()
+            .HasIndex(ft => new { ft.BankAccountId, ft.TransactionDate })
+            .HasDatabaseName("IX_FinancialTransactions_BankAccountId_Date");
+
+        modelBuilder.Entity<FinancialTransaction>()
+            .HasIndex(ft => new { ft.OrganizationId, ft.Type })
+            .HasDatabaseName("IX_FinancialTransactions_OrgId_Type");
+
+        modelBuilder.Entity<AuditLog>()
+            .HasIndex(a => new { a.Entity, a.Timestamp })
+            .HasDatabaseName("IX_AuditLogs_Entity_Timestamp");
+
+        modelBuilder.Entity<AuditLog>()
+            .HasIndex(a => a.PerformedByUserId)
+            .HasDatabaseName("IX_AuditLogs_PerformedByUserId");
+
+
+        modelBuilder.Entity<Notification>()
+            .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt })
+            .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedAt");
     }
 }
+
