@@ -17,10 +17,11 @@ using System.Text;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("https://localhost:7065");
 
+Dictionary<string, string>? envValues = null;
 var envFile = Path.Combine(builder.Environment.ContentRootPath, ".env");
 if (File.Exists(envFile))
 {
-    var envValues = File.ReadAllLines(envFile)
+    envValues = File.ReadAllLines(envFile)
         .Select(line => line.Trim())
         .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith("#"))
         .Select(line =>
@@ -35,15 +36,21 @@ if (File.Exists(envFile))
         .Where(kvp => kvp.HasValue)
         .Select(kvp => kvp.Value)
         .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-    builder.Configuration.AddInMemoryCollection(envValues!);
     Console.WriteLine($"DEBUG: .env file found at {envFile}");
 }
 
 builder.Configuration
     .SetBasePath(builder.Environment.ContentRootPath)
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
-    .AddEnvironmentVariables();
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
+
+if (envValues != null && envValues.Count > 0)
+{
+    builder.Configuration.AddInMemoryCollection(envValues!);
+}
+
+builder.Configuration.AddEnvironmentVariables();
+
 
 builder.Services.AddControllers();
 builder.Services.AddSignalR();
