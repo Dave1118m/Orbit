@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -50,12 +50,6 @@ namespace OrbitApi.Migrations
                 nullable: false,
                 defaultValue: new byte[0]);
 
-            migrationBuilder.AddColumn<int>(
-                name: "FiscalYear",
-                table: "Budgets",
-                type: "int",
-                nullable: false,
-                defaultValue: 0);
 
             migrationBuilder.AddColumn<byte[]>(
                 name: "RowVersion",
