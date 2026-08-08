@@ -3,6 +3,7 @@ import WorkloadChart from '../components/WorkloadChart';
 import MultiSelectMembers from '../components/MultiSelectMembers';
 import SearchSelect from '../components/SearchSelect';
 import { useUser } from '../contexts/UserContext';
+import { AutoText } from '../contexts/TranslationContext';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -484,14 +485,14 @@ export default function Teams() {
                   </div>
                   <div>
                     <div className="flex items-center gap-3">
-                      <h2 className="text-2xl font-bold text-slate-900">{selectedTeam.name}</h2>
+                      <h2 className="text-2xl font-bold text-slate-900"><AutoText text={selectedTeam.name} /></h2>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${selectedTeam.isArchived ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
-                        {selectedTeam.isArchived ? 'Archived' : 'Active'}
+                        <AutoText text={selectedTeam.isArchived ? 'Archived' : 'Active'} />
                       </span>
                     </div>
-                    <p className="text-sm text-slate-500 mt-1 max-w-md line-clamp-2">
-                      {selectedTeam.description || 'No description provided for this team.'}
-                    </p>
+                    {selectedTeam.description && (
+                      <p className="text-sm text-slate-500 mt-1 max-w-xl"><AutoText text={selectedTeam.description} /></p>
+                    )}
                   </div>
                 </div>
                 <div className="flex gap-2">

@@ -38,6 +38,84 @@
           }
         }
       },
+      "ClosedXML/0.104.2": {
+        "type": "package",
+        "dependencies": {
+          "ClosedXML.Parser": "[1.2.0, 2.0.0)",
+          "DocumentFormat.OpenXml": "[3.1.1, 4.0.0)",
+          "ExcelNumberFormat": "1.1.0",
+          "RBush": "4.0.0",
+          "SixLabors.Fonts": "1.0.0"
+        },
+        "compile": {
+          "lib/netstandard2.1/ClosedXML.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.1/ClosedXML.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
+      "ClosedXML.Parser/1.2.0": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.1/ClosedXML.Parser.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.1/ClosedXML.Parser.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "DocumentFormat.OpenXml/3.1.1": {
+        "type": "package",
+        "dependencies": {
+          "DocumentFormat.OpenXml.Framework": "3.1.1"
+        },
+        "compile": {
+          "lib/net8.0/DocumentFormat.OpenXml.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/DocumentFormat.OpenXml.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "DocumentFormat.OpenXml.Framework/3.1.1": {
+        "type": "package",
+        "dependencies": {
+          "System.IO.Packaging": "8.0.1"
+        },
+        "compile": {
+          "lib/net8.0/DocumentFormat.OpenXml.Framework.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/DocumentFormat.OpenXml.Framework.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "ExcelNumberFormat/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.0/ExcelNumberFormat.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/ExcelNumberFormat.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "Humanizer.Core/2.14.1": {
         "type": "package",
         "compile": {
@@ -49,6 +127,106 @@
           "lib/net6.0/Humanizer.dll": {
             "related": ".xml"
           }
+        }
+      },
+      "itext/9.1.0": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.DotNet.PlatformAbstractions": "1.1.0",
+          "Microsoft.Extensions.DependencyModel": "1.1.0",
+          "itext.commons": "9.1.0"
+        },
+        "compile": {
+          "lib/netstandard2.0/itext.barcodes.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.bouncy-castle-connector.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.forms.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.io.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.kernel.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.layout.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.pdfa.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.pdfua.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.sign.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.styledxmlparser.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.svg.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/itext.barcodes.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.bouncy-castle-connector.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.forms.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.io.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.kernel.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.layout.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.pdfa.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.pdfua.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.sign.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.styledxmlparser.dll": {
+            "related": ".xml"
+          },
+          "lib/netstandard2.0/itext.svg.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "itext.commons/9.1.0": {
+        "type": "package",
+        "dependencies": {
+          "Newtonsoft.Json": "13.0.1"
+        },
+        "compile": {
+          "lib/netstandard2.0/itext.commons.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/itext.commons.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "itext7/9.1.0": {
+        "type": "package",
+        "dependencies": {
+          "itext": "9.1.0"
         }
       },
       "Microsoft.AspNetCore.Authentication.JwtBearer/10.0.0": {
@@ -106,19 +284,6 @@
         ],
         "build": {
           "build/Microsoft.AspNetCore.OpenApi.targets": {}
-        }
-      },
-      "Microsoft.AspNetCore.SignalR.Common/10.0.9": {
-        "type": "package",
-        "compile": {
-          "lib/net10.0/_._": {
-            "related": ".xml"
-          }
-        },
-        "runtime": {
-          "lib/net10.0/_._": {
-            "related": ".xml"
-          }
         }
       },
       "Microsoft.Bcl.AsyncInterfaces/8.0.0": {
@@ -911,6 +1076,15 @@
           }
         }
       },
+      "Microsoft.DotNet.PlatformAbstractions/1.1.0": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard1.3/Microsoft.DotNet.PlatformAbstractions.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard1.3/Microsoft.DotNet.PlatformAbstractions.dll": {}
+        }
+      },
       "Microsoft.EntityFrameworkCore/10.0.0": {
         "type": "package",
         "dependencies": {
@@ -1009,10 +1183,26 @@
           }
         }
       },
+      "Microsoft.Extensions.Caching.StackExchangeRedis/10.0.10": {
+        "type": "package",
+        "dependencies": {
+          "StackExchange.Redis": "2.7.27"
+        },
+        "compile": {
+          "lib/net10.0/Microsoft.Extensions.Caching.StackExchangeRedis.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net10.0/Microsoft.Extensions.Caching.StackExchangeRedis.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "Microsoft.Extensions.DependencyModel/10.0.0": {
         "type": "package",
         "compile": {
-          "lib/net10.0/_._": {
+          "lib/net10.0/Microsoft.Extensions.DependencyModel.dll": {
             "related": ".xml"
           }
         },
@@ -1209,7 +1399,7 @@
       "Newtonsoft.Json/13.0.3": {
         "type": "package",
         "compile": {
-          "lib/net6.0/_._": {
+          "lib/net6.0/Newtonsoft.Json.dll": {
             "related": ".xml"
           }
         },
@@ -1217,6 +1407,87 @@
           "lib/net6.0/Newtonsoft.Json.dll": {
             "related": ".xml"
           }
+        }
+      },
+      "Pipelines.Sockets.Unofficial/2.2.8": {
+        "type": "package",
+        "compile": {
+          "lib/net5.0/Pipelines.Sockets.Unofficial.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net5.0/Pipelines.Sockets.Unofficial.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "RBush/4.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/RBush.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/RBush.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "SendGrid/9.28.1": {
+        "type": "package",
+        "dependencies": {
+          "Newtonsoft.Json": "13.0.1",
+          "starkbank-ecdsa": "[1.3.3, 2.0.0)"
+        },
+        "compile": {
+          "lib/netstandard2.0/SendGrid.dll": {
+            "related": ".pdb;.xml"
+          }
+        },
+        "runtime": {
+          "lib/netstandard2.0/SendGrid.dll": {
+            "related": ".pdb;.xml"
+          }
+        }
+      },
+      "SixLabors.Fonts/1.0.0": {
+        "type": "package",
+        "compile": {
+          "lib/netcoreapp3.1/SixLabors.Fonts.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/netcoreapp3.1/SixLabors.Fonts.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "StackExchange.Redis/2.7.27": {
+        "type": "package",
+        "dependencies": {
+          "Pipelines.Sockets.Unofficial": "2.2.8"
+        },
+        "compile": {
+          "lib/net6.0/StackExchange.Redis.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net6.0/StackExchange.Redis.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "starkbank-ecdsa/1.3.3": {
+        "type": "package",
+        "compile": {
+          "lib/netstandard2.1/StarkbankEcdsa.dll": {}
+        },
+        "runtime": {
+          "lib/netstandard2.1/StarkbankEcdsa.dll": {}
         }
       },
       "System.ClientModel/1.5.1": {
@@ -1413,6 +1684,22 @@
           }
         }
       },
+      "System.IO.Packaging/8.0.1": {
+        "type": "package",
+        "compile": {
+          "lib/net8.0/System.IO.Packaging.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net8.0/System.IO.Packaging.dll": {
+            "related": ".xml"
+          }
+        },
+        "build": {
+          "buildTransitive/net6.0/_._": {}
+        }
+      },
       "System.Memory.Data/8.0.1": {
         "type": "package",
         "compile": {
@@ -1583,6 +1870,106 @@
         "lib/netstandard2.0/Azure.Identity.xml"
       ]
     },
+    "ClosedXML/0.104.2": {
+      "sha512": "gOkSjQ152MhpKmw70cBkJV+FnaZAWzDwM36luRf/7FlWYnNeH++9XYdGTd0Y4KQlVPkKVxy948M5MMsnsGC4GQ==",
+      "type": "package",
+      "path": "closedxml/0.104.2",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "closedxml.0.104.2.nupkg.sha512",
+        "closedxml.nuspec",
+        "lib/netstandard2.0/ClosedXML.dll",
+        "lib/netstandard2.0/ClosedXML.pdb",
+        "lib/netstandard2.0/ClosedXML.xml",
+        "lib/netstandard2.1/ClosedXML.dll",
+        "lib/netstandard2.1/ClosedXML.pdb",
+        "lib/netstandard2.1/ClosedXML.xml",
+        "nuget-logo.png"
+      ]
+    },
+    "ClosedXML.Parser/1.2.0": {
+      "sha512": "w+/0tsxABS3lkSH8EUlA7IGme+mq5T/Puf3DbOiTckmSuUpAUO2LK29oXYByCcWkBv6wcRHxgWlQb1lxkwI0Tw==",
+      "type": "package",
+      "path": "closedxml.parser/1.2.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "closedxml.parser.1.2.0.nupkg.sha512",
+        "closedxml.parser.nuspec",
+        "lib/netstandard2.0/ClosedXML.Parser.dll",
+        "lib/netstandard2.0/ClosedXML.Parser.xml",
+        "lib/netstandard2.1/ClosedXML.Parser.dll",
+        "lib/netstandard2.1/ClosedXML.Parser.xml"
+      ]
+    },
+    "DocumentFormat.OpenXml/3.1.1": {
+      "sha512": "2z9QBzeTLNNKWM9SaOSDMegfQk/7hDuElOsmF77pKZMkFRP/GHA/W/4yOAQD9kn15N/FsFxHn3QVYkatuZghiA==",
+      "type": "package",
+      "path": "documentformat.openxml/3.1.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "documentformat.openxml.3.1.1.nupkg.sha512",
+        "documentformat.openxml.nuspec",
+        "icon.png",
+        "lib/net35/DocumentFormat.OpenXml.dll",
+        "lib/net35/DocumentFormat.OpenXml.xml",
+        "lib/net40/DocumentFormat.OpenXml.dll",
+        "lib/net40/DocumentFormat.OpenXml.xml",
+        "lib/net46/DocumentFormat.OpenXml.dll",
+        "lib/net46/DocumentFormat.OpenXml.xml",
+        "lib/net8.0/DocumentFormat.OpenXml.dll",
+        "lib/net8.0/DocumentFormat.OpenXml.xml",
+        "lib/netstandard2.0/DocumentFormat.OpenXml.dll",
+        "lib/netstandard2.0/DocumentFormat.OpenXml.xml"
+      ]
+    },
+    "DocumentFormat.OpenXml.Framework/3.1.1": {
+      "sha512": "6APEp/ElZV58S/4v8mf4Ke3ONEDORs64MqdD64Z7wWpcHANB9oovQsGIwtqjnKihulOj7T0a6IxHIHOfMqKOng==",
+      "type": "package",
+      "path": "documentformat.openxml.framework/3.1.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "README.md",
+        "documentformat.openxml.framework.3.1.1.nupkg.sha512",
+        "documentformat.openxml.framework.nuspec",
+        "icon.png",
+        "lib/net35/DocumentFormat.OpenXml.Framework.dll",
+        "lib/net35/DocumentFormat.OpenXml.Framework.xml",
+        "lib/net40/DocumentFormat.OpenXml.Framework.dll",
+        "lib/net40/DocumentFormat.OpenXml.Framework.xml",
+        "lib/net46/DocumentFormat.OpenXml.Framework.dll",
+        "lib/net46/DocumentFormat.OpenXml.Framework.xml",
+        "lib/net6.0/DocumentFormat.OpenXml.Framework.dll",
+        "lib/net6.0/DocumentFormat.OpenXml.Framework.xml",
+        "lib/net8.0/DocumentFormat.OpenXml.Framework.dll",
+        "lib/net8.0/DocumentFormat.OpenXml.Framework.xml",
+        "lib/netstandard2.0/DocumentFormat.OpenXml.Framework.dll",
+        "lib/netstandard2.0/DocumentFormat.OpenXml.Framework.xml"
+      ]
+    },
+    "ExcelNumberFormat/1.1.0": {
+      "sha512": "R3BVHPs9O+RkExbZYTGT0+9HLbi8ZrNij1Yziyw6znd3J7P3uoIR07uwTLGOogtz1p6+0sna66eBoXu7tBiVQA==",
+      "type": "package",
+      "path": "excelnumberformat/1.1.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "excelnumberformat.1.1.0.nupkg.sha512",
+        "excelnumberformat.nuspec",
+        "icon.png",
+        "lib/net20/ExcelNumberFormat.dll",
+        "lib/net20/ExcelNumberFormat.xml",
+        "lib/netstandard1.0/ExcelNumberFormat.dll",
+        "lib/netstandard1.0/ExcelNumberFormat.xml",
+        "lib/netstandard2.0/ExcelNumberFormat.dll",
+        "lib/netstandard2.0/ExcelNumberFormat.xml"
+      ]
+    },
     "Humanizer.Core/2.14.1": {
       "sha512": "lQKvtaTDOXnoVJ20ibTuSIOf2i0uO0MPbDhd1jm238I+U/2ZnRENj0cktKZhtchBMtCUSRQ5v4xBCUbKNmyVMw==",
       "type": "package",
@@ -1599,6 +1986,94 @@
         "lib/netstandard2.0/Humanizer.dll",
         "lib/netstandard2.0/Humanizer.xml",
         "logo.png"
+      ]
+    },
+    "itext/9.1.0": {
+      "sha512": "4aPC+8MlF78KX7/Ad0BusGpliO5RMNzJU/jOxoDrHLpP92go3fKcaULVIhuaX24gnaJpoCX5Xf+HfvhcBdEjYw==",
+      "type": "package",
+      "path": "itext/9.1.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "ITSC-avatar.png",
+        "LICENSE.md",
+        "gnu-agpl-v3.0.md",
+        "itext.9.1.0.nupkg.sha512",
+        "itext.nuspec",
+        "lib/net461/itext.barcodes.dll",
+        "lib/net461/itext.barcodes.xml",
+        "lib/net461/itext.bouncy-castle-connector.dll",
+        "lib/net461/itext.bouncy-castle-connector.xml",
+        "lib/net461/itext.forms.dll",
+        "lib/net461/itext.forms.xml",
+        "lib/net461/itext.io.dll",
+        "lib/net461/itext.io.xml",
+        "lib/net461/itext.kernel.dll",
+        "lib/net461/itext.kernel.xml",
+        "lib/net461/itext.layout.dll",
+        "lib/net461/itext.layout.xml",
+        "lib/net461/itext.pdfa.dll",
+        "lib/net461/itext.pdfa.xml",
+        "lib/net461/itext.pdfua.dll",
+        "lib/net461/itext.pdfua.xml",
+        "lib/net461/itext.sign.dll",
+        "lib/net461/itext.sign.xml",
+        "lib/net461/itext.styledxmlparser.dll",
+        "lib/net461/itext.styledxmlparser.xml",
+        "lib/net461/itext.svg.dll",
+        "lib/net461/itext.svg.xml",
+        "lib/netstandard2.0/itext.barcodes.dll",
+        "lib/netstandard2.0/itext.barcodes.xml",
+        "lib/netstandard2.0/itext.bouncy-castle-connector.dll",
+        "lib/netstandard2.0/itext.bouncy-castle-connector.xml",
+        "lib/netstandard2.0/itext.forms.dll",
+        "lib/netstandard2.0/itext.forms.xml",
+        "lib/netstandard2.0/itext.io.dll",
+        "lib/netstandard2.0/itext.io.xml",
+        "lib/netstandard2.0/itext.kernel.dll",
+        "lib/netstandard2.0/itext.kernel.xml",
+        "lib/netstandard2.0/itext.layout.dll",
+        "lib/netstandard2.0/itext.layout.xml",
+        "lib/netstandard2.0/itext.pdfa.dll",
+        "lib/netstandard2.0/itext.pdfa.xml",
+        "lib/netstandard2.0/itext.pdfua.dll",
+        "lib/netstandard2.0/itext.pdfua.xml",
+        "lib/netstandard2.0/itext.sign.dll",
+        "lib/netstandard2.0/itext.sign.xml",
+        "lib/netstandard2.0/itext.styledxmlparser.dll",
+        "lib/netstandard2.0/itext.styledxmlparser.xml",
+        "lib/netstandard2.0/itext.svg.dll",
+        "lib/netstandard2.0/itext.svg.xml"
+      ]
+    },
+    "itext.commons/9.1.0": {
+      "sha512": "oaUKSbmWg0zhOmyElnL+52yRvn+m39LxfqdXJGjHHR7ypC3MdOpfyb/GkQ4mFRMlXwyO2srLzgnZ+cN6zAjMXw==",
+      "type": "package",
+      "path": "itext.commons/9.1.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "ITSC-avatar.png",
+        "itext.commons.9.1.0.nupkg.sha512",
+        "itext.commons.nuspec",
+        "lib/net461/itext.commons.dll",
+        "lib/net461/itext.commons.xml",
+        "lib/netstandard2.0/itext.commons.dll",
+        "lib/netstandard2.0/itext.commons.xml"
+      ]
+    },
+    "itext7/9.1.0": {
+      "sha512": "xHRttMKi/9W7XDIIWRgMoau3Eo2+4JvctqN25X8a0k8uHFf56WgIMjFnGadH1nACJy+5ABi3XoWvJsUv20Wd2w==",
+      "type": "package",
+      "path": "itext7/9.1.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "ITSC-avatar.png",
+        "LICENSE.md",
+        "gnu-agpl-v3.0.md",
+        "itext7.9.1.0.nupkg.sha512",
+        "itext7.nuspec"
       ]
     },
     "Microsoft.AspNetCore.Authentication.JwtBearer/10.0.0": {
@@ -1649,25 +2124,6 @@
         "lib/net10.0/Microsoft.AspNetCore.OpenApi.xml",
         "microsoft.aspnetcore.openapi.10.0.9.nupkg.sha512",
         "microsoft.aspnetcore.openapi.nuspec"
-      ]
-    },
-    "Microsoft.AspNetCore.SignalR.Common/10.0.9": {
-      "sha512": "01IMA9xAM0YmRKXqwhpwXZWPxUHNxLisbeY4YCXLhqmyMigk7+Dw0PMYTcg0Zxakq1xPJbULgnT+r9bwBnka1w==",
-      "type": "package",
-      "path": "microsoft.aspnetcore.signalr.common/10.0.9",
-      "files": [
-        ".nupkg.metadata",
-        ".signature.p7s",
-        "Icon.png",
-        "THIRD-PARTY-NOTICES.TXT",
-        "lib/net10.0/Microsoft.AspNetCore.SignalR.Common.dll",
-        "lib/net10.0/Microsoft.AspNetCore.SignalR.Common.xml",
-        "lib/net462/Microsoft.AspNetCore.SignalR.Common.dll",
-        "lib/net462/Microsoft.AspNetCore.SignalR.Common.xml",
-        "lib/netstandard2.0/Microsoft.AspNetCore.SignalR.Common.dll",
-        "lib/netstandard2.0/Microsoft.AspNetCore.SignalR.Common.xml",
-        "microsoft.aspnetcore.signalr.common.10.0.9.nupkg.sha512",
-        "microsoft.aspnetcore.signalr.common.nuspec"
       ]
     },
     "Microsoft.Bcl.AsyncInterfaces/8.0.0": {
@@ -2969,6 +3425,19 @@
         "runtimes/win-x86/native/Microsoft.Data.SqlClient.SNI.dll"
       ]
     },
+    "Microsoft.DotNet.PlatformAbstractions/1.1.0": {
+      "sha512": "Bl6KYfbFSIW3QIRHAp931iR5h01qHjKghdpAtncwbzNUs0+IUZ+XfwkIU0sQsR33ufGvi3u4dZMIYYFysjpHAA==",
+      "type": "package",
+      "path": "microsoft.dotnet.platformabstractions/1.1.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net451/Microsoft.DotNet.PlatformAbstractions.dll",
+        "lib/netstandard1.3/Microsoft.DotNet.PlatformAbstractions.dll",
+        "microsoft.dotnet.platformabstractions.1.1.0.nupkg.sha512",
+        "microsoft.dotnet.platformabstractions.nuspec"
+      ]
+    },
     "Microsoft.EntityFrameworkCore/10.0.0": {
       "sha512": "hHa2amRjMyBLUH/KTML6FgIAhZ0VFYkhCKwWEax0rO6iNeM1P5MflyeQLE5dniSIOZHc3Oqyv5UIyTFO4e1Auw==",
       "type": "package",
@@ -3058,6 +3527,26 @@
         "lib/net10.0/Microsoft.EntityFrameworkCore.SqlServer.xml",
         "microsoft.entityframeworkcore.sqlserver.10.0.0.nupkg.sha512",
         "microsoft.entityframeworkcore.sqlserver.nuspec"
+      ]
+    },
+    "Microsoft.Extensions.Caching.StackExchangeRedis/10.0.10": {
+      "sha512": "E+3pfEY68WQh1ZVFTGDNK0JCoayzL3aIDgVHHM85HIbQO7MiABG14A7+ajHH2P/y3a4W2Rla5p2nzut3+mzoyQ==",
+      "type": "package",
+      "path": "microsoft.extensions.caching.stackexchangeredis/10.0.10",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "PACKAGE.md",
+        "THIRD-PARTY-NOTICES.TXT",
+        "lib/net10.0/Microsoft.Extensions.Caching.StackExchangeRedis.dll",
+        "lib/net10.0/Microsoft.Extensions.Caching.StackExchangeRedis.xml",
+        "lib/net462/Microsoft.Extensions.Caching.StackExchangeRedis.dll",
+        "lib/net462/Microsoft.Extensions.Caching.StackExchangeRedis.xml",
+        "lib/netstandard2.0/Microsoft.Extensions.Caching.StackExchangeRedis.dll",
+        "lib/netstandard2.0/Microsoft.Extensions.Caching.StackExchangeRedis.xml",
+        "microsoft.extensions.caching.stackexchangeredis.10.0.10.nupkg.sha512",
+        "microsoft.extensions.caching.stackexchangeredis.nuspec"
       ]
     },
     "Microsoft.Extensions.DependencyModel/10.0.0": {
@@ -3380,6 +3869,125 @@
         "packageIcon.png"
       ]
     },
+    "Pipelines.Sockets.Unofficial/2.2.8": {
+      "sha512": "zG2FApP5zxSx6OcdJQLbZDk2AVlN2BNQD6MorwIfV6gVj0RRxWPEp2LXAxqDGZqeNV1Zp0BNPcNaey/GXmTdvQ==",
+      "type": "package",
+      "path": "pipelines.sockets.unofficial/2.2.8",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net461/Pipelines.Sockets.Unofficial.dll",
+        "lib/net461/Pipelines.Sockets.Unofficial.xml",
+        "lib/net472/Pipelines.Sockets.Unofficial.dll",
+        "lib/net472/Pipelines.Sockets.Unofficial.xml",
+        "lib/net5.0/Pipelines.Sockets.Unofficial.dll",
+        "lib/net5.0/Pipelines.Sockets.Unofficial.xml",
+        "lib/netcoreapp3.1/Pipelines.Sockets.Unofficial.dll",
+        "lib/netcoreapp3.1/Pipelines.Sockets.Unofficial.xml",
+        "lib/netstandard2.0/Pipelines.Sockets.Unofficial.dll",
+        "lib/netstandard2.0/Pipelines.Sockets.Unofficial.xml",
+        "lib/netstandard2.1/Pipelines.Sockets.Unofficial.dll",
+        "lib/netstandard2.1/Pipelines.Sockets.Unofficial.xml",
+        "pipelines.sockets.unofficial.2.2.8.nupkg.sha512",
+        "pipelines.sockets.unofficial.nuspec"
+      ]
+    },
+    "RBush/4.0.0": {
+      "sha512": "j3GeRxxLUQdc+UrZnvythdQxi3bd8ayn87VDjfGXrvfodF550n9wR6SgQvpo+YiAv3GJezsu6lK0l47rRqnbdg==",
+      "type": "package",
+      "path": "rbush/4.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net47/RBush.dll",
+        "lib/net47/RBush.xml",
+        "lib/net8.0/RBush.dll",
+        "lib/net8.0/RBush.xml",
+        "lib/netstandard2.0/RBush.dll",
+        "lib/netstandard2.0/RBush.xml",
+        "rbush.4.0.0.nupkg.sha512",
+        "rbush.nuspec",
+        "readme.md"
+      ]
+    },
+    "SendGrid/9.28.1": {
+      "sha512": "LyIkgjd+svXuQxpqe5pvyOccyUdKcDqwnBNDPjyCngkKeVpXAOTAr3U1DBLWqHEbFHvu2UBFki3SJzDwxvJdfA==",
+      "type": "package",
+      "path": "sendgrid/9.28.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net40/SendGrid.dll",
+        "lib/net40/SendGrid.pdb",
+        "lib/net40/SendGrid.xml",
+        "lib/net452/SendGrid.dll",
+        "lib/net452/SendGrid.pdb",
+        "lib/net452/SendGrid.xml",
+        "lib/netstandard1.3/SendGrid.dll",
+        "lib/netstandard1.3/SendGrid.pdb",
+        "lib/netstandard1.3/SendGrid.xml",
+        "lib/netstandard2.0/SendGrid.dll",
+        "lib/netstandard2.0/SendGrid.pdb",
+        "lib/netstandard2.0/SendGrid.xml",
+        "sendgrid.9.28.1.nupkg.sha512",
+        "sendgrid.nuspec"
+      ]
+    },
+    "SixLabors.Fonts/1.0.0": {
+      "sha512": "LFQsCZlV0xlUyXAOMUo5kkSl+8zAQXXbbdwWchtk0B4o7zotZhQsQOcJUELGHdfPfm/xDAsz6hONAuV25bJaAg==",
+      "type": "package",
+      "path": "sixlabors.fonts/1.0.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/netcoreapp3.1/SixLabors.Fonts.dll",
+        "lib/netcoreapp3.1/SixLabors.Fonts.xml",
+        "lib/netstandard2.0/SixLabors.Fonts.dll",
+        "lib/netstandard2.0/SixLabors.Fonts.xml",
+        "lib/netstandard2.1/SixLabors.Fonts.dll",
+        "lib/netstandard2.1/SixLabors.Fonts.xml",
+        "sixlabors.fonts.1.0.0.nupkg.sha512",
+        "sixlabors.fonts.128.png",
+        "sixlabors.fonts.nuspec"
+      ]
+    },
+    "StackExchange.Redis/2.7.27": {
+      "sha512": "Uqc2OQHglqj9/FfGQ6RkKFkZfHySfZlfmbCl+hc+u2I/IqunfelQ7QJi7ZhvAJxUtu80pildVX6NPLdDaUffOw==",
+      "type": "package",
+      "path": "stackexchange.redis/2.7.27",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net461/StackExchange.Redis.dll",
+        "lib/net461/StackExchange.Redis.xml",
+        "lib/net472/StackExchange.Redis.dll",
+        "lib/net472/StackExchange.Redis.xml",
+        "lib/net6.0/StackExchange.Redis.dll",
+        "lib/net6.0/StackExchange.Redis.xml",
+        "lib/netcoreapp3.1/StackExchange.Redis.dll",
+        "lib/netcoreapp3.1/StackExchange.Redis.xml",
+        "lib/netstandard2.0/StackExchange.Redis.dll",
+        "lib/netstandard2.0/StackExchange.Redis.xml",
+        "stackexchange.redis.2.7.27.nupkg.sha512",
+        "stackexchange.redis.nuspec"
+      ]
+    },
+    "starkbank-ecdsa/1.3.3": {
+      "sha512": "OblOaKb1enXn+dSp7tsx9yjwV+/BEKM9jFhshIkZTwCk7LuTFTp+wSon6rFzuPiIiTGtvVWQNUw2slHjGktJog==",
+      "type": "package",
+      "path": "starkbank-ecdsa/1.3.3",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net40/StarkbankEcdsa.dll",
+        "lib/net452/StarkbankEcdsa.dll",
+        "lib/netstandard1.3/StarkbankEcdsa.dll",
+        "lib/netstandard2.0/StarkbankEcdsa.dll",
+        "lib/netstandard2.1/StarkbankEcdsa.dll",
+        "starkbank-ecdsa.1.3.3.nupkg.sha512",
+        "starkbank-ecdsa.nuspec"
+      ]
+    },
     "System.ClientModel/1.5.1": {
       "sha512": "k2jKSO0X45IqhVOT9iQB4xralNN9foRQsRvXBTyRpAVxyzCJlG895T9qYrQWbcJ6OQXxOouJQ37x5nZH5XKK+A==",
       "type": "package",
@@ -3669,6 +4277,35 @@
         "system.identitymodel.tokens.jwt.nuspec"
       ]
     },
+    "System.IO.Packaging/8.0.1": {
+      "sha512": "KYkIOAvPexQOLDxPO2g0BVoWInnQhPpkFzRqvNrNrMhVT6kqhVr0zEb6KCHlptLFukxnZrjuMVAnxK7pOGUYrw==",
+      "type": "package",
+      "path": "system.io.packaging/8.0.1",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "Icon.png",
+        "LICENSE.TXT",
+        "THIRD-PARTY-NOTICES.TXT",
+        "buildTransitive/net461/System.IO.Packaging.targets",
+        "buildTransitive/net462/_._",
+        "buildTransitive/net6.0/_._",
+        "buildTransitive/netcoreapp2.0/System.IO.Packaging.targets",
+        "lib/net462/System.IO.Packaging.dll",
+        "lib/net462/System.IO.Packaging.xml",
+        "lib/net6.0/System.IO.Packaging.dll",
+        "lib/net6.0/System.IO.Packaging.xml",
+        "lib/net7.0/System.IO.Packaging.dll",
+        "lib/net7.0/System.IO.Packaging.xml",
+        "lib/net8.0/System.IO.Packaging.dll",
+        "lib/net8.0/System.IO.Packaging.xml",
+        "lib/netstandard2.0/System.IO.Packaging.dll",
+        "lib/netstandard2.0/System.IO.Packaging.xml",
+        "system.io.packaging.8.0.1.nupkg.sha512",
+        "system.io.packaging.nuspec",
+        "useSharedDesignerContext.txt"
+      ]
+    },
     "System.Memory.Data/8.0.1": {
       "sha512": "BVYuec3jV23EMRDeR7Dr1/qhx7369dZzJ9IWy2xylvb4YfXsrUxspWc4UWYid/tj4zZK58uGZqn2WQiaDMhmAg==",
       "type": "package",
@@ -3875,12 +4512,15 @@
   },
   "projectFileDependencyGroups": {
     "net10.0": [
+      "ClosedXML >= 0.104.2",
       "Microsoft.AspNetCore.Authentication.JwtBearer >= 10.0.0",
       "Microsoft.AspNetCore.Identity.EntityFrameworkCore >= 10.0.0",
       "Microsoft.AspNetCore.OpenApi >= 10.0.9",
-      "Microsoft.AspNetCore.SignalR.Common >= 10.0.9",
       "Microsoft.EntityFrameworkCore.Design >= 10.0.0",
-      "Microsoft.EntityFrameworkCore.SqlServer >= 10.0.0"
+      "Microsoft.EntityFrameworkCore.SqlServer >= 10.0.0",
+      "Microsoft.Extensions.Caching.StackExchangeRedis >= 10.0.10",
+      "SendGrid >= 9.28.1",
+      "itext7 >= 9.1.0"
     ]
   },
   "packageFolders": {
@@ -3889,11 +4529,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\Users\\FALCON COMPUTERS\\Desktop\\Orbit\\repo\\backend\\orbitapi\\OrbitApi.csproj",
+      "projectUniqueName": "C:\\Users\\FALCON COMPUTERS\\Desktop\\Orbit\\repo\\backend\\OrbitApi\\OrbitApi.csproj",
       "projectName": "OrbitApi",
-      "projectPath": "C:\\Users\\FALCON COMPUTERS\\Desktop\\Orbit\\repo\\backend\\orbitapi\\OrbitApi.csproj",
+      "projectPath": "C:\\Users\\FALCON COMPUTERS\\Desktop\\Orbit\\repo\\backend\\OrbitApi\\OrbitApi.csproj",
       "packagesPath": "C:\\Users\\FALCON COMPUTERS\\.nuget\\packages\\",
-      "outputPath": "C:\\Users\\FALCON COMPUTERS\\Desktop\\Orbit\\repo\\backend\\orbitapi\\obj\\",
+      "outputPath": "C:\\Users\\FALCON COMPUTERS\\Desktop\\Orbit\\repo\\backend\\OrbitApi\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\FALCON COMPUTERS\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -3928,6 +4568,10 @@
         "framework": "net10.0",
         "targetAlias": "net10.0",
         "dependencies": {
+          "ClosedXML": {
+            "target": "Package",
+            "version": "[0.104.2, )"
+          },
           "Microsoft.AspNetCore.Authentication.JwtBearer": {
             "target": "Package",
             "version": "[10.0.0, )"
@@ -3940,10 +4584,6 @@
             "target": "Package",
             "version": "[10.0.9, )"
           },
-          "Microsoft.AspNetCore.SignalR.Common": {
-            "target": "Package",
-            "version": "[10.0.9, )"
-          },
           "Microsoft.EntityFrameworkCore.Design": {
             "include": "Runtime, Build, Native, ContentFiles, Analyzers, BuildTransitive",
             "suppressParent": "All",
@@ -3953,6 +4593,18 @@
           "Microsoft.EntityFrameworkCore.SqlServer": {
             "target": "Package",
             "version": "[10.0.0, )"
+          },
+          "Microsoft.Extensions.Caching.StackExchangeRedis": {
+            "target": "Package",
+            "version": "[10.0.10, )"
+          },
+          "SendGrid": {
+            "target": "Package",
+            "version": "[9.28.1, )"
+          },
+          "itext7": {
+            "target": "Package",
+            "version": "[9.1.0, )"
           }
         },
         "imports": [
@@ -4393,16 +5045,6 @@
     }
   },
   "logs": [
-    {
-      "code": "NU1510",
-      "level": "Warning",
-      "warningLevel": 1,
-      "message": "PackageReference Microsoft.AspNetCore.SignalR.Common will not be pruned. Consider removing this package from your dependencies, as it is likely unnecessary.",
-      "libraryId": "Microsoft.AspNetCore.SignalR.Common",
-      "targetGraphs": [
-        "net10.0"
-      ]
-    },
     {
       "code": "NU1903",
       "level": "Warning",

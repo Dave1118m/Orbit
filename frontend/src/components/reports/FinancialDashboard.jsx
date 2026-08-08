@@ -237,6 +237,24 @@ export default function FinancialDashboard() {
           </p>
         </div>
 
+        <div className="bg-gradient-to-br from-amber-900 via-slate-900 to-slate-950 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+          <div className="flex items-center justify-between text-amber-200 mb-2 text-xs font-semibold uppercase tracking-wider">
+            <span>Burn-Rate Velocity</span>
+            <TrendingUp className="w-4 h-4 text-amber-400" />
+          </div>
+          <div className="text-2xl font-black tracking-tight text-white">
+            ${(totalExpenses > 0 ? (totalExpenses / 6) : 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo
+          </div>
+          <p className="mt-2 text-xs text-amber-200/80 flex items-center justify-between">
+            <span>Est. Run-Out Date:</span>
+            <span className="font-bold text-amber-300 font-mono">
+              {totalExpenses > 0 && totalIncome > totalExpenses
+                ? new Date(new Date().setMonth(new Date().getMonth() + Math.round((totalIncome - totalExpenses) / (totalExpenses / 6)))).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
+                : 'Balanced'}
+            </span>
+          </p>
+        </div>
+
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between text-slate-500 mb-2 text-xs font-semibold uppercase tracking-wider">
             <span>Active Bank Reserve</span>

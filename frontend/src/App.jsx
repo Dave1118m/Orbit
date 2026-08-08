@@ -18,6 +18,7 @@ import VolunteerPublicApply from './pages/VolunteerPublicApply';
 import Landing from './pages/Landing';
 import DashboardLayout from './components/DashboardLayout';
 import { UserProvider } from './contexts/UserContext';
+import { TranslationProvider } from './contexts/TranslationContext';
 
 function AuthLayout({ children }) {
   return (
@@ -103,11 +104,13 @@ function Content() {
 
 function App() {
   return (
-    <UserProvider>
-      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <Content />
-      </BrowserRouter>
-    </UserProvider>
+    <TranslationProvider>
+      <UserProvider>
+        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Content />
+        </BrowserRouter>
+      </UserProvider>
+    </TranslationProvider>
   );
 }
 

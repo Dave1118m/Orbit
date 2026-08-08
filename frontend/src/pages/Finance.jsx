@@ -6,6 +6,7 @@ import BankAccounts from '../components/finance/BankAccounts';
 import Budgets from '../components/finance/Budgets';
 import Expenses from '../components/finance/Expenses';
 import Compliance from '../components/finance/Compliance';
+import { AutoText } from '../contexts/TranslationContext';
 import { 
   DollarSign, Layers, HeartHandshake, CreditCard, PieChart, 
   Receipt, ShieldCheck
@@ -15,12 +16,12 @@ export default function Finance() {
   const [activeTab, setActiveTab] = useState('overview');
 
   const tabs = [
-    { id: 'overview', label: 'Overview & Ledger', icon: DollarSign },
-    { id: 'categories', label: 'Categories', icon: Layers },
-    { id: 'donors', label: 'Donors & Income', icon: HeartHandshake },
+    { id: 'overview', label: 'Financial Overview', icon: DollarSign },
+    { id: 'categories', label: 'Chart of Accounts (COA)', icon: Layers },
+    { id: 'donors', label: 'Donor Contributions', icon: HeartHandshake },
     { id: 'banks', label: 'Bank Accounts', icon: CreditCard },
-    { id: 'budgets', label: 'Budgets', icon: PieChart },
-    { id: 'expenses', label: 'Expenses', icon: Receipt },
+    { id: 'budgets', label: 'Budgets & Revisions', icon: PieChart },
+    { id: 'expenses', label: 'Expense Approval Trail', icon: Receipt },
     { id: 'compliance', label: 'Compliance', icon: ShieldCheck }
   ];
 
@@ -30,9 +31,11 @@ export default function Finance() {
       <div className="border-b border-slate-200 bg-white px-6 py-5 shadow-2xs">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">Financial Management Suite</h1>
+            <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
+              <AutoText text="Financial Governance & Budgets" />
+            </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Enterprise financial control: Central Ledger, Categories, Budgets, Expenses, and Compliance.
+              <AutoText text="Donor allocations, multi-level budgets, expense approvals, and bank accounts." />
             </p>
           </div>
         </div>
@@ -53,7 +56,7 @@ export default function Finance() {
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? 'text-brand-600' : 'text-slate-400'}`} />
-                {tab.label}
+                <AutoText text={tab.label} />
               </button>
             );
           })}

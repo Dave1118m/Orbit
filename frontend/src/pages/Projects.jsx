@@ -1,10 +1,12 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import Modal from '../components/Modal';
+import { AutoText } from '../contexts/TranslationContext';
 import SearchSelect from '../components/SearchSelect';
 import CommentSection from '../components/CommentSection';
 import AttachmentList from '../components/AttachmentList';
 import RiskRegister from '../components/RiskRegister';
+import GanttTimelineView from '../components/GanttTimelineView';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/projects`;
 const TEAMS_URL = `${import.meta.env.VITE_API_URL}/teams`;
@@ -103,25 +105,25 @@ function ProjectCard({ project, donors, onClick }) {
           </div>
           <div className="min-w-0">
             <h3 className="font-semibold text-slate-900 text-sm leading-tight truncate max-w-[160px]">
-              {project.title}
+              <AutoText text={project.title} />
             </h3>
             {donor && (
               <p className="text-xs text-slate-400 truncate max-w-[160px] mt-0.5">
-                {donor.name}
+                <AutoText text={donor.name} />
               </p>
             )}
           </div>
         </div>
         {/* Health badge */}
         <span className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium flex-shrink-0 ${health.color}`}>
-          {health.label}
+          <AutoText text={health.label} />
         </span>
       </div>
 
       {/* Description */}
       {project.description && (
         <p className="text-xs text-slate-500 leading-relaxed mb-4 line-clamp-2">
-          {project.description}
+          <AutoText text={project.description} />
         </p>
       )}
 
@@ -317,7 +319,7 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
 
         {/* Tabs */}
         <div className="flex gap-1 px-6 py-3 border-b border-slate-100 flex-shrink-0 overflow-x-auto">
-          {['overview', 'timeline', 'comments', 'attachments', 'risks'].map(tab => (
+          {['overview', 'gantt', 'comments', 'attachments', 'risks'].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -327,13 +329,53 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
                   : 'text-slate-500 hover:bg-slate-100'
               }`}
             >
-              {tab}
+              {tab === 'gantt' ? 'Gantt / Timeline' : tab}
             </button>
           ))}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto">
+          {activeTab === 'gantt' && (
+            <div className="p-6 space-y-6">
+              <GanttTimelineView projectId={project.id} />
+
+              {/* Project Lead History Audit Log */}
+              <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Leadership Tenure History</p>
+                  <button onClick={() => setIsAssigningLead(true)} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
+                    + Assign New Lead
+                  </button>
+                </div>
+                {leadHistory.length === 0 ? (
+                  <p className="text-xs text-slate-500 italic">No lead tenure records logged.</p>
+                ) : (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {leadHistory.map(entry => (
+                      <div key={entry.id} className={`rounded-xl border p-3 flex items-center justify-between ${!entry.endDate ? 'border-brand-200 bg-brand-50/30' : 'border-slate-100 bg-slate-50/50'}`}>
+                        <div className="flex items-center gap-2">
+                          <div className={`flex h-7 w-7 items-center justify-center rounded-full text-white text-[10px] font-bold ${avatarColor(entry.userName)}`}>
+                            {initials(entry.userName)}
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-slate-800">{entry.userName}</p>
+                            <p className="text-[10px] text-slate-500">
+                              {new Date(entry.startDate).toLocaleDateString()} — {entry.endDate ? new Date(entry.endDate).toLocaleDateString() : 'Present'}
+                            </p>
+                          </div>
+                        </div>
+                        {!entry.endDate && (
+                          <span className="rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-bold text-brand-700">Current Lead</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
           {activeTab === 'overview' && (
             <div className="p-6 space-y-5">
               {/* Health + progress */}
@@ -352,29 +394,6 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
                   <span>{project.taskCount} total tasks</span>
                   <span className="font-semibold text-slate-700">{progress}%</span>
                 </div>
-              </div>
-
-              {/* Project Lead card */}
-              <div className="rounded-xl border border-slate-100 bg-white p-4">
-                <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Project Lead</p>
-                  <button onClick={() => setIsAssigningLead(true)} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
-                    {currentLead ? 'Change' : 'Assign'}
-                  </button>
-                </div>
-                {currentLeadUser ? (
-                  <div className="flex items-center gap-3">
-                    <div className={`flex h-9 w-9 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor(currentLeadUser.name)}`}>
-                      {initials(currentLeadUser.name)}
-                    </div>
-                    <div>
-                      <p className="text-sm font-semibold text-slate-800">{currentLeadUser.name}</p>
-                      <p className="text-xs text-slate-500">Since {new Date(currentLead.startDate).toLocaleDateString()}</p>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-sm text-slate-500 italic">No lead assigned</p>
-                )}
               </div>
 
               {/* Meta grid */}
@@ -469,84 +488,6 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
                 >
                   Delete
                 </button>
-              </div>
-            </div>
-          )}
-
-          {/* ── TIMELINE TAB ── */}
-          {activeTab === 'timeline' && (
-            <div className="p-6 space-y-6">
-              {/* Project Lead History */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Lead History</p>
-                  <button onClick={() => setIsAssigningLead(true)} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
-                    + Assign Lead
-                  </button>
-                </div>
-                {leadHistory.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
-                    No lead history yet. Assign the first project lead above.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {leadHistory.map(entry => (
-                      <div key={entry.id} className={`rounded-xl border p-4 ${!entry.endDate ? 'border-brand-200 bg-brand-50/30' : 'border-slate-100 bg-white'}`}>
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className={`flex h-8 w-8 items-center justify-center rounded-full text-white text-xs font-bold ${avatarColor(entry.userName)}`}>
-                              {initials(entry.userName)}
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold text-slate-800">{entry.userName}</p>
-                              <p className="text-xs text-slate-500">
-                                {new Date(entry.startDate).toLocaleDateString()} — {entry.endDate ? new Date(entry.endDate).toLocaleDateString() : 'Present'}
-                              </p>
-                            </div>
-                          </div>
-                          {!entry.endDate && (
-                            <span className="rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-semibold text-brand-700">Active</span>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Postponement History */}
-              <div>
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Postponements</p>
-                  <button onClick={() => setIsPostponing(true)} className="text-xs font-semibold text-amber-600 hover:text-amber-700">
-                    + Postpone
-                  </button>
-                </div>
-                {postponements.length === 0 ? (
-                  <div className="rounded-xl border border-dashed border-slate-300 bg-white p-6 text-center text-sm text-slate-500">
-                    No postponements recorded.
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {postponements.map(p => (
-                      <div key={p.id} className="rounded-xl border border-slate-100 bg-white p-4">
-                        <div className="flex items-center gap-2 mb-2">
-                          <svg className="h-4 w-4 text-amber-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-                          </svg>
-                          <span className="text-sm font-semibold text-slate-800">Timeline Extended</span>
-                          <span className="text-xs text-slate-400 ml-auto">{new Date(p.createdAt).toLocaleDateString()}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-slate-600 mb-1">
-                          <span className="line-through text-slate-400">{new Date(p.oldEndDate).toLocaleDateString()}</span>
-                          <span>→</span>
-                          <span className="font-semibold text-amber-700">{new Date(p.newEndDate).toLocaleDateString()}</span>
-                        </div>
-                        {p.reason && <p className="text-xs text-slate-500 italic mt-1">"{p.reason}"</p>}
-                      </div>
-                    ))}
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -924,7 +865,7 @@ export default function Projects() {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Projects</h1>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="mt-1 text-sm text-slate-500">
             {totalProjects} project{totalProjects !== 1 ? 's' : ''} · {activeProjects} active
           </p>
         </div>
@@ -954,10 +895,10 @@ export default function Projects() {
 
       {/* ── Stats Row ── */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard label="Total Projects"  value={totalProjects}  icon="📁" accent="bg-brand-500" />
-        <StatCard label="Active"          value={activeProjects} icon="▶️" accent="bg-emerald-500" />
-        <StatCard label="At Risk"         value={atRisk}         icon="⚠️" accent="bg-orange-500" />
-        <StatCard label="Completed"       value={completed}      icon="✅" accent="bg-blue-500" />
+        <StatCard label={<AutoText text="Total Projects" />}  value={totalProjects}  icon="📁" accent="bg-brand-500" />
+        <StatCard label={<AutoText text="Active" />}          value={activeProjects} icon="▶️" accent="bg-emerald-500" />
+        <StatCard label={<AutoText text="At Risk" />}         value={atRisk}         icon="⚠️" accent="bg-orange-500" />
+        <StatCard label={<AutoText text="Completed" />}       value={completed}      icon="✅" accent="bg-blue-500" />
       </div>
 
       {/* ── Filter + Search + View toggle ── */}
@@ -974,7 +915,7 @@ export default function Projects() {
                   : 'text-slate-500 hover:text-slate-700'
               }`}
             >
-              {f}
+              <AutoText text={f} />
             </button>
           ))}
         </div>

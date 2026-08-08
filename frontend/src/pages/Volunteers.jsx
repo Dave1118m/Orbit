@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useUser } from '../contexts/UserContext';
 import SearchSelect from '../components/SearchSelect';
+import { AutoText } from '../contexts/TranslationContext';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -616,7 +617,7 @@ export default function Volunteers() {
                   <InitialsAvatar name={selectedVolunteer.name} size="lg" />
                   <div>
                     <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                      <h2 className="text-xl sm:text-2xl font-bold text-slate-900">{selectedVolunteer.name}</h2>
+                      <h2 className="text-xl sm:text-2xl font-bold text-slate-900"><AutoText text={selectedVolunteer.name} /></h2>
                       <span className="text-xs font-mono bg-slate-200 text-slate-700 px-2 py-0.5 rounded font-semibold">V-{selectedVolunteer.id}</span>
                       {getStatusBadge(selectedVolunteer.backgroundCheckStatus)}
                     </div>

@@ -525,12 +525,53 @@ namespace OrbitApi.Controllers
         }
 
         [HttpPost("{id}/attachments")]
-        public async Task<ActionResult> UploadAttachment(int id, IFormFile file)
+        public async Task<ActionResult> UploadAttachment(int id, [FromForm] IFormFile? file, [FromForm] string? cloudUrl, [FromForm] string? cloudProvider, [FromForm] string? cloudFileName)
         {
-            if (file == null || file.Length == 0) return BadRequest("No file uploaded.");
-
             var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
             int.TryParse(userIdStr, out var userId);
+
+            // ── Handle Cloud Link (Google Drive / OneDrive) ──────────────────────
+            if (!string.IsNullOrWhiteSpace(cloudUrl))
+            {
+                var cloudName = !string.IsNullOrWhiteSpace(cloudFileName) 
+                    ? cloudFileName 
+                    : $"{(cloudProvider ?? "Cloud")} Attached Document";
+
+                var cloudAttachment = new Attachment
+                {
+                    EntityType = EntityType.Task,
+                    EntityId = id,
+                    FileName = cloudName,
+                    AbsoluteFilePath = cloudUrl,
+                    MediaType = OrbitApi.Models.MediaType.Document,
+                    MimeType = "text/html",
+                    FileSizeBytes = 0,
+                    PreviewEnabled = true,
+                    UserId = userId
+                };
+
+                _db.Attachments.Add(cloudAttachment);
+                await _db.SaveChangesAsync();
+
+                return Ok(new AttachmentDto
+                {
+                    Id = cloudAttachment.Id,
+                    EntityType = cloudAttachment.EntityType,
+                    EntityId = cloudAttachment.EntityId,
+                    FileName = cloudAttachment.FileName,
+                    AbsoluteFilePath = cloudAttachment.AbsoluteFilePath,
+                    MediaType = cloudAttachment.MediaType.ToString(),
+                    MimeType = cloudAttachment.MimeType,
+                    FileSizeBytes = cloudAttachment.FileSizeBytes,
+                    PreviewEnabled = cloudAttachment.PreviewEnabled,
+                    DownloadUrl = cloudUrl,
+                    PreviewUrl = cloudUrl,
+                    UserId = cloudAttachment.UserId
+                });
+            }
+
+            // ── Handle Physical File Upload ─────────────────────────────────────
+            if (file == null || file.Length == 0) return BadRequest("No file or cloud link provided.");
 
             var uploadsDir = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Tasks", id.ToString());
             Directory.CreateDirectory(uploadsDir);

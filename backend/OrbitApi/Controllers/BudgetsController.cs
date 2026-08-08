@@ -512,6 +512,89 @@ namespace OrbitApi.Controllers
                 Status = status
             });
         }
+
+        [HttpGet("projects/{projectId}/export-audit-package")]
+        public async Task<IActionResult> ExportAuditPackage(int projectId)
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId && !p.IsDeleted);
+            if (project == null) return NotFound("Project not found");
+
+            var budget = await _db.Budgets
+                .Include(b => b.LineItems)
+                .Include(b => b.Revisions)
+                .FirstOrDefaultAsync(b => b.ProjectId == projectId);
+
+            var expenses = await _db.Expenses
+                .Where(e => e.ProjectId == projectId)
+                .ToListAsync();
+
+            var donorAllocations = await _db.ProjectDonors
+                .Include(pd => pd.Donor)
+                .Where(pd => pd.ProjectId == projectId)
+                .ToListAsync();
+
+            var postponements = await _db.ProjectPostponements
+                .Where(pp => pp.ProjectId == projectId)
+                .ToListAsync();
+
+            using (var memoryStream = new System.IO.MemoryStream())
+            {
+                using (var archive = new System.IO.Compression.ZipArchive(memoryStream, System.IO.Compression.ZipArchiveMode.Create, true))
+                {
+                    // 1. Audit Summary Text File
+                    var summaryEntry = archive.CreateEntry("Audit_Summary.txt");
+                    using (var writer = new System.IO.StreamWriter(summaryEntry.Open()))
+                    {
+                        writer.WriteLine($"=== ORBITDESK FINANCIAL AUDIT SUPPORT PACKAGE ===");
+                        writer.WriteLine($"Project Title: {project.Title}");
+                        writer.WriteLine($"Project ID: {project.Id}");
+                        writer.WriteLine($"Generated At: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
+                        writer.WriteLine($"Status: {project.Status}");
+                        writer.WriteLine($"Total Project Budget: ${budget?.TotalAmount.ToString("N2") ?? "0.00"}");
+                        writer.WriteLine($"Total Approved Expenses: ${expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Approved).Sum(e => e.Amount):N2}");
+                        writer.WriteLine($"Total Donor Contributions Allocated: ${donorAllocations.Sum(da => da.AllocatedAmount):N2}");
+                        writer.WriteLine($"=================================================");
+                    }
+
+                    // 2. Budget Revisions JSON
+                    var budgetEntry = archive.CreateEntry("Budgets_And_Revisions.json");
+                    using (var writer = new System.IO.StreamWriter(budgetEntry.Open()))
+                    {
+                        var auditBudgetData = new {
+                            ProjectId = project.Id,
+                            ProjectTitle = project.Title,
+                            TotalBudget = budget?.TotalAmount,
+                            BudgetItems = budget?.LineItems.Select(l => new { l.Id, l.Category, l.Description, l.Amount }),
+                            VersionHistory = budget?.Revisions.Select(r => new { r.Id, r.VersionNo, r.DateApproved, r.Notes })
+                        };
+                        writer.Write(System.Text.Json.JsonSerializer.Serialize(auditBudgetData, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    }
+
+                    // 3. Approved Expenses JSON
+                    var expensesEntry = archive.CreateEntry("Expense_Ledger.json");
+                    using (var writer = new System.IO.StreamWriter(expensesEntry.Open()))
+                    {
+                        var auditExpenseData = expenses.Select(e => new {
+                            e.Id, e.Description, e.Amount, e.Currency, e.Date, e.ApprovalStatus, e.ApprovedByFinanceOfficerId, e.SignedOffByManagerId, e.AttachmentId
+                        });
+                        writer.Write(System.Text.Json.JsonSerializer.Serialize(auditExpenseData, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    }
+
+                    // 4. Donor Allocations & Timeline History JSON
+                    var complianceEntry = archive.CreateEntry("Grant_Compliance_Trail.json");
+                    using (var writer = new System.IO.StreamWriter(complianceEntry.Open()))
+                    {
+                        var auditComplianceData = new {
+                            Donors = donorAllocations.Select(d => new { d.DonorId, DonorName = d.Donor?.Name, d.AllocatedAmount }),
+                            TimelinePostponementLog = postponements.Select(p => new { p.OldEndDate, p.NewEndDate, p.Reason, p.CreatedAt })
+                        };
+                        writer.Write(System.Text.Json.JsonSerializer.Serialize(auditComplianceData, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+                    }
+                }
+
+                return File(memoryStream.ToArray(), "application/zip", $"OrbitDesk_Audit_Package_Project_{projectId}.zip");
+            }
+        }
     }
 
     public class ProjectBudgetBalancingDto

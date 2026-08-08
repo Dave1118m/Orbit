@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useUser } from '../contexts/UserContext';
+import { AutoText } from '../contexts/TranslationContext';
 import OwnerDashboard from '../components/dashboard/OwnerDashboard';
 import AdminDashboard from '../components/dashboard/AdminDashboard';
 import CoordinatorDashboard from '../components/dashboard/CoordinatorDashboard';
@@ -149,7 +150,7 @@ function DefaultDashboard({ stats, tasks = [], projects = [] }) {
         <p className="text-3xl font-bold text-slate-900">
           {value !== null ? value : 0}
         </p>
-        <p className="text-sm font-medium text-slate-500 mt-1">{title}</p>
+        <p className="text-sm font-medium text-slate-500 mt-1"><AutoText text={title} /></p>
       </div>
     </div>
   );

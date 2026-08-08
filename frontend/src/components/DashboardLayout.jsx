@@ -4,6 +4,8 @@ import Sidebar from './Sidebar';
 import Modal from './Modal';
 import GlobalSearchDropdown from './GlobalSearchDropdown';
 import RoleSwitcherBar from './RoleSwitcherBar';
+import LanguageSwitcher from './LanguageSwitcher';
+import { AutoText } from '../contexts/TranslationContext';
 import { createOrGetConnection, onEvent, offEvent } from '../lib/signalrClient';
 
 export default function DashboardLayout({ children }) {
@@ -253,7 +255,7 @@ export default function DashboardLayout({ children }) {
           </div>
 
           <div className="hidden lg:block w-1/3">
-             <h1 className="text-2xl font-bold text-slate-900">{pageTitle}</h1>
+             <h1 className="text-2xl font-bold text-slate-900"><AutoText text={pageTitle} /></h1>
              <p className="text-sm text-slate-500">{today}</p>
           </div>
 
@@ -285,6 +287,7 @@ export default function DashboardLayout({ children }) {
             </div>
             
             <div className="flex items-center gap-4 border-l border-slate-200 pl-6">
+              <LanguageSwitcher />
               <RoleSwitcherBar />
 
               <button 

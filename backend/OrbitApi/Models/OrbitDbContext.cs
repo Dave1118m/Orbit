@@ -8,6 +8,45 @@ public class OrbitDbContext : DbContext
     {
     }
 
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        EnforceImmutability();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
+    }
+
+    public override Task<int> SaveChangesAsync(bool acceptAllChangesOnSuccess, CancellationToken cancellationToken = default)
+    {
+        EnforceImmutability();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void EnforceImmutability()
+    {
+        var immutableTypes = new HashSet<Type>
+        {
+            typeof(AuditLog),
+            typeof(TaskStatusHistory),
+            typeof(ProjectLeadHistory),
+            typeof(ProjectTeamHistory),
+            typeof(ProjectPostponement)
+        };
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (immutableTypes.Contains(entry.Entity.GetType()))
+            {
+                if (entry.State == EntityState.Modified)
+                {
+                    throw new InvalidOperationException($"Security Violation: Records in '{entry.Entity.GetType().Name}' are append-only and cannot be modified.");
+                }
+                if (entry.State == EntityState.Deleted)
+                {
+                    throw new InvalidOperationException($"Security Violation: Records in '{entry.Entity.GetType().Name}' are append-only and cannot be deleted.");
+                }
+            }
+        }
+    }
+
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<RoleAssignment> RoleAssignments => Set<RoleAssignment>();
     public DbSet<AppPermission> Permissions => Set<AppPermission>();

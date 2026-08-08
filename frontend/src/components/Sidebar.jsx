@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { NavLink, useNavigate, Link } from 'react-router-dom';
 import Modal from './Modal';
+import LanguageSwitcher from './LanguageSwitcher';
+import { AutoText } from '../contexts/TranslationContext';
 
 const BACKEND_ORGANIZATIONS_URL = `${import.meta.env.VITE_API_URL}/organizations`;
 const BACKEND_WORKSPACES_URL = `${import.meta.env.VITE_API_URL}/workspaces`;
@@ -14,7 +16,6 @@ const fallbackLinks = [
   { id: 'finance', label: 'Finance & Grants', to: '/finance', icon: 'dollar' },
   { id: 'volunteers', label: 'Volunteers', to: '/volunteers', icon: 'heart' },
   { id: 'reports', label: 'Reports', to: '/reports', icon: 'chart' },
-    // Timeline removed per request
 ];
 
 export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
@@ -323,7 +324,7 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
               {({ isActive }) => (
                 <>
                   <Icon name={link.icon} active={isActive} />
-                  {link.label}
+                  <AutoText text={link.label} />
                 </>
               )}
             </NavLink>
@@ -331,7 +332,9 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
         </nav>
 
         {/* Bottom Section */}
-        <div className="mt-auto p-4 mb-4">
+        <div className="mt-auto p-4 mb-4 space-y-3">
+          <LanguageSwitcher className="w-full justify-center py-2 text-xs font-semibold" />
+
           <div className="flex items-center gap-3">
             <NavLink
               to="/settings"
@@ -345,12 +348,12 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
               }
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-              Settings
+              <AutoText text="Settings" />
             </NavLink>
 
             <button onClick={handleLogout} className="ml-2 flex items-center gap-3 rounded-2xl px-4 py-3 text-sm font-medium text-slate-400 hover:bg-slate-800/50 hover:text-white">
               <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 16l4-4m0 0l-4-4m4 4H7"/><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 8v8"/></svg>
-              Logout
+              <AutoText text="Logout" />
             </button>
           </div>
         </div>

@@ -637,6 +637,24 @@ namespace OrbitApi.Controllers
             _db.Comments.Add(comment);
             await _db.SaveChangesAsync();
 
+            if (project != null && !string.IsNullOrWhiteSpace(req.Content))
+            {
+                var mentionedUserNames = System.Text.RegularExpressions.Regex.Matches(req.Content, @"@([\w\.\-]+)")
+                    .Cast<System.Text.RegularExpressions.Match>()
+                    .Select(m => m.Groups[1].Value.ToLower())
+                    .Distinct();
+
+                foreach (var uname in mentionedUserNames)
+                {
+                    var mentionedUser = await _db.Users.FirstOrDefaultAsync(u => u.Name.ToLower().Replace(" ", "").Contains(uname) || (u.Email != null && u.Email.ToLower().StartsWith(uname)));
+                    if (mentionedUser != null && mentionedUser.Id != userId)
+                    {
+                        var msg = $"You were @mentioned in a project comment on '{project.Title}'.";
+                        await _notificationService.NotifyUserAsync(mentionedUser.Id, msg);
+                    }
+                }
+            }
+
             var user = await _db.Users.FindAsync(userId);
 
             return Ok(new CommentDto
@@ -704,10 +722,8 @@ namespace OrbitApi.Controllers
         }
 
         [HttpPost("{id}/attachments")]
-        public async Task<ActionResult> UploadAttachment(int id, IFormFile file)
+        public async Task<ActionResult> UploadAttachment(int id, [FromForm] IFormFile? file, [FromForm] string? cloudUrl, [FromForm] string? cloudProvider, [FromForm] string? cloudFileName)
         {
-            if (file == null || file.Length == 0) return BadRequest("No file uploaded.");
-
             var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == id && !p.IsDeleted);
             if (project == null) return NotFound();
 
@@ -719,6 +735,49 @@ namespace OrbitApi.Controllers
 
             var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
             int.TryParse(userIdStr, out var userId);
+
+            // ── Handle Cloud Link (Google Drive / OneDrive) ──────────────────────
+            if (!string.IsNullOrWhiteSpace(cloudUrl))
+            {
+                var cloudName = !string.IsNullOrWhiteSpace(cloudFileName) 
+                    ? cloudFileName 
+                    : $"{(cloudProvider ?? "Cloud")} Attached Document";
+
+                var cloudAttachment = new Attachment
+                {
+                    EntityType = EntityType.Project,
+                    EntityId = id,
+                    FileName = cloudName,
+                    AbsoluteFilePath = cloudUrl,
+                    MediaType = OrbitApi.Models.MediaType.Document,
+                    MimeType = "text/html",
+                    FileSizeBytes = 0,
+                    PreviewEnabled = true,
+                    UserId = userId
+                };
+
+                _db.Attachments.Add(cloudAttachment);
+                await _db.SaveChangesAsync();
+
+                return Ok(new AttachmentDto
+                {
+                    Id = cloudAttachment.Id,
+                    EntityType = cloudAttachment.EntityType,
+                    EntityId = cloudAttachment.EntityId,
+                    FileName = cloudAttachment.FileName,
+                    AbsoluteFilePath = cloudAttachment.AbsoluteFilePath,
+                    MediaType = cloudAttachment.MediaType.ToString(),
+                    MimeType = cloudAttachment.MimeType,
+                    FileSizeBytes = cloudAttachment.FileSizeBytes,
+                    PreviewEnabled = cloudAttachment.PreviewEnabled,
+                    DownloadUrl = cloudUrl,
+                    PreviewUrl = cloudUrl,
+                    UserId = cloudAttachment.UserId
+                });
+            }
+
+            // ── Handle Physical File Upload ─────────────────────────────────────
+            if (file == null || file.Length == 0) return BadRequest("No file or cloud link provided.");
 
             var uploadsDir = Path.Combine(Directory.GetCurrentDirectory(), "Uploads", "Projects", id.ToString());
             Directory.CreateDirectory(uploadsDir);
@@ -1098,6 +1157,152 @@ namespace OrbitApi.Controllers
 
             await _hubContext.Clients.Group($"project-{projectId}").SendAsync("RiskIssueDeleted", new { Id = riskId, ProjectId = projectId });
             return NoContent();
+        }
+
+        [HttpGet("{projectId}/export-audit-package")]
+        public async Task<IActionResult> ExportAuditPackage(int projectId)
+        {
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId && !p.IsDeleted);
+            if (project == null) return NotFound("Project not found");
+
+            var budget = await _db.Budgets
+                .Include(b => b.LineItems)
+                .Include(b => b.Revisions)
+                .FirstOrDefaultAsync(b => b.ProjectId == projectId);
+
+            var expenses = await _db.Expenses
+                .Where(e => e.ProjectId == projectId)
+                .ToListAsync();
+
+            var donorAllocations = await _db.ProjectDonors
+                .Include(pd => pd.Donor)
+                .Where(pd => pd.ProjectId == projectId)
+                .ToListAsync();
+
+            var postponements = await _db.ProjectPostponements
+                .Where(pp => pp.ProjectId == projectId)
+                .ToListAsync();
+
+            using (var memoryStream = new System.IO.MemoryStream())
+            {
+                using (var archive = new System.IO.Compression.ZipArchive(memoryStream, System.IO.Compression.ZipArchiveMode.Create, true))
+                {
+                    // 1. Audit Summary & Master Excel Workbook (.xlsx)
+                    using (var workbook = new ClosedXML.Excel.XLWorkbook())
+                    {
+                        // Sheet 1: Executive Summary
+                        var summarySheet = workbook.Worksheets.Add("Audit Summary");
+                        summarySheet.Cell(1, 1).Value = "ORBITDESK FINANCIAL AUDIT SUPPORT PACKAGE";
+                        summarySheet.Cell(1, 1).Style.Font.Bold = true;
+                        summarySheet.Cell(1, 1).Style.Font.FontSize = 14;
+
+                        summarySheet.Cell(3, 1).Value = "Project Title:";
+                        summarySheet.Cell(3, 2).Value = project.Title;
+                        summarySheet.Cell(4, 1).Value = "Project ID:";
+                        summarySheet.Cell(4, 2).Value = project.Id;
+                        summarySheet.Cell(5, 1).Value = "Status:";
+                        summarySheet.Cell(5, 2).Value = project.Status.ToString();
+                        summarySheet.Cell(6, 1).Value = "Generated Date (UTC):";
+                        summarySheet.Cell(6, 2).Value = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
+
+                        summarySheet.Cell(8, 1).Value = "Financial Metric";
+                        summarySheet.Cell(8, 2).Value = "Amount ($)";
+                        summarySheet.Row(8).Style.Font.Bold = true;
+
+                        summarySheet.Cell(9, 1).Value = "Total Project Budget";
+                        summarySheet.Cell(9, 2).Value = budget?.TotalAmount ?? 0m;
+                        summarySheet.Cell(10, 1).Value = "Total Approved Expenses";
+                        summarySheet.Cell(10, 2).Value = expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Approved).Sum(e => e.Amount);
+                        summarySheet.Cell(11, 1).Value = "Total Donor Allocations";
+                        summarySheet.Cell(11, 2).Value = donorAllocations.Sum(da => da.AllocatedAmount);
+
+                        summarySheet.Columns().AdjustToContents();
+
+                        // Sheet 2: Budget Line Items & Revisions
+                        var budgetSheet = workbook.Worksheets.Add("Budget & Revisions");
+                        budgetSheet.Cell(1, 1).Value = "Line Item ID";
+                        budgetSheet.Cell(1, 2).Value = "Category";
+                        budgetSheet.Cell(1, 3).Value = "Description";
+                        budgetSheet.Cell(1, 4).Value = "Amount ($)";
+                        budgetSheet.Row(1).Style.Font.Bold = true;
+
+                        int bRow = 2;
+                        if (budget?.LineItems != null)
+                        {
+                            foreach (var item in budget.LineItems)
+                            {
+                                budgetSheet.Cell(bRow, 1).Value = item.Id;
+                                budgetSheet.Cell(bRow, 2).Value = item.Category.ToString();
+                                budgetSheet.Cell(bRow, 3).Value = item.Description;
+                                budgetSheet.Cell(bRow, 4).Value = item.Amount;
+                                bRow++;
+                            }
+                        }
+                        budgetSheet.Columns().AdjustToContents();
+
+                        // Sheet 3: Expense Ledger
+                        var expenseSheet = workbook.Worksheets.Add("Expense Ledger");
+                        expenseSheet.Cell(1, 1).Value = "Expense ID";
+                        expenseSheet.Cell(1, 2).Value = "Description";
+                        expenseSheet.Cell(1, 3).Value = "Amount";
+                        expenseSheet.Cell(1, 4).Value = "Currency";
+                        expenseSheet.Cell(1, 5).Value = "Date";
+                        expenseSheet.Cell(1, 6).Value = "Approval Status";
+                        expenseSheet.Row(1).Style.Font.Bold = true;
+
+                        int eRow = 2;
+                        foreach (var exp in expenses)
+                        {
+                            expenseSheet.Cell(eRow, 1).Value = exp.Id;
+                            expenseSheet.Cell(eRow, 2).Value = exp.Description;
+                            expenseSheet.Cell(eRow, 3).Value = exp.Amount;
+                            expenseSheet.Cell(eRow, 4).Value = exp.Currency;
+                            expenseSheet.Cell(eRow, 5).Value = exp.Date.ToString("yyyy-MM-dd");
+                            expenseSheet.Cell(eRow, 6).Value = exp.ApprovalStatus.ToString();
+                            eRow++;
+                        }
+                        expenseSheet.Columns().AdjustToContents();
+
+                        // Sheet 4: Donor Allocations & Postponements
+                        var donorSheet = workbook.Worksheets.Add("Grant & Timeline Trail");
+                        donorSheet.Cell(1, 1).Value = "Donor ID";
+                        donorSheet.Cell(1, 2).Value = "Donor Name";
+                        donorSheet.Cell(1, 3).Value = "Allocated Amount ($)";
+                        donorSheet.Cell(1, 4).Value = "Co-Funding %";
+                        donorSheet.Row(1).Style.Font.Bold = true;
+
+                        int dRow = 2;
+                        foreach (var da in donorAllocations)
+                        {
+                            donorSheet.Cell(dRow, 1).Value = da.DonorId;
+                            donorSheet.Cell(dRow, 2).Value = da.Donor?.Name ?? "—";
+                            donorSheet.Cell(dRow, 3).Value = da.AllocatedAmount;
+                            donorSheet.Cell(dRow, 4).Value = da.CoFundingPercentage;
+                            dRow++;
+                        }
+                        donorSheet.Columns().AdjustToContents();
+
+                        // Save Excel Workbook into ZIP
+                        var excelEntry = archive.CreateEntry($"Audit_Master_Ledger_Project_{projectId}.xlsx");
+                        using (var entryStream = excelEntry.Open())
+                        {
+                            workbook.SaveAs(entryStream);
+                        }
+                    }
+
+                    // 2. Add CSV Ledgers into ZIP for multi-format auditor compatibility
+                    var csvEntry = archive.CreateEntry($"Expense_Ledger_Project_{projectId}.csv");
+                    using (var writer = new System.IO.StreamWriter(csvEntry.Open()))
+                    {
+                        writer.WriteLine("Expense ID,Description,Amount,Currency,Date,Approval Status");
+                        foreach (var exp in expenses)
+                        {
+                            writer.WriteLine($"\"{exp.Id}\",\"{exp.Description.Replace("\"", "\"\"")}\",{exp.Amount},\"{exp.Currency}\",\"{exp.Date:yyyy-MM-dd}\",\"{exp.ApprovalStatus}\"");
+                        }
+                    }
+                }
+                return File(memoryStream.ToArray(), "application/zip", $"OrbitDesk_Audit_Package_Project_{projectId}_{DateTime.UtcNow:yyyy-MM-dd}.zip");
+            }
         }
     }
 }

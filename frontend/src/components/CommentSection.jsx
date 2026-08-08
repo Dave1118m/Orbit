@@ -1,16 +1,30 @@
 import React, { useState, useEffect } from 'react';
+import { AutoText } from '../contexts/TranslationContext';
 
 export default function CommentSection({ entityType, entityId, additionalActivity = [] }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
+  const [usersList, setUsersList] = useState([]);
+  const [mentionQuery, setMentionQuery] = useState(null);
+  const [cursorPos, setCursorPos] = useState(0);
 
   const API_URL = `${import.meta.env.VITE_API_URL}/${entityType}/${entityId}/comments`;
 
   useEffect(() => {
     if (entityId) {
       fetchComments();
+      fetchUsers();
     }
   }, [entityId, entityType]);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/users`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) setUsersList(await res.json());
+    } catch (err) { console.error(err); }
+  };
 
   const fetchComments = async () => {
     try {
@@ -19,6 +33,33 @@ export default function CommentSection({ entityType, entityId, additionalActivit
       });
       if (res.ok) setComments(await res.json());
     } catch (err) { console.error(err); }
+  };
+
+  const handleInputChange = (e) => {
+    const val = e.target.value;
+    const pos = e.target.selectionStart;
+    setNewComment(val);
+    setCursorPos(pos);
+
+    // Detect @ symbol before cursor
+    const lastAt = val.lastIndexOf('@', pos);
+    if (lastAt !== -1 && (lastAt === 0 || /\s/.test(val[lastAt - 1]))) {
+      const query = val.slice(lastAt + 1, pos);
+      if (!/\s/.test(query)) {
+        setMentionQuery({ query, atIndex: lastAt });
+        return;
+      }
+    }
+    setMentionQuery(null);
+  };
+
+  const selectMentionUser = (user) => {
+    if (!mentionQuery) return;
+    const handle = user.name ? user.name.replace(/\s+/g, '') : (user.email ? user.email.split('@')[0] : 'user');
+    const before = newComment.slice(0, mentionQuery.atIndex);
+    const after = newComment.slice(cursorPos);
+    setNewComment(`${before}@${handle} ${after}`);
+    setMentionQuery(null);
   };
 
   const handleAddComment = async (e) => {
@@ -38,6 +79,7 @@ export default function CommentSection({ entityType, entityId, additionalActivit
         const created = await res.json();
         setComments(prev => [created, ...prev]);
         setNewComment('');
+        setMentionQuery(null);
       }
     } catch (err) { console.error(err); }
   };
@@ -87,7 +129,7 @@ export default function CommentSection({ entityType, entityId, additionalActivit
                     </span>
                     {entityLabel && (
                       <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[10px] font-medium text-brand-700">
-                        {entityLabel}
+                        <AutoText text={entityLabel} />
                       </span>
                     )}
                   </div>
@@ -97,11 +139,11 @@ export default function CommentSection({ entityType, entityId, additionalActivit
                 </div>
                 <p className="text-xs text-slate-600 leading-relaxed">
                   {item.type === 'comment' ? (
-                    item.content
+                    <AutoText text={item.content} />
                   ) : item.oldStatus || item.newStatus ? (
-                    <>Changed status from <span className="font-semibold">{item.oldStatus}</span> to <span className="font-semibold">{item.newStatus}</span></>
+                    <>Changed status from <span className="font-semibold"><AutoText text={item.oldStatus} /></span> to <span className="font-semibold"><AutoText text={item.newStatus} /></span></>
                   ) : (
-                    item.content
+                    <AutoText text={item.content} />
                   )}
                 </p>
               </div>
@@ -109,22 +151,44 @@ export default function CommentSection({ entityType, entityId, additionalActivit
           );
         })}
         {activityFeed.length === 0 && (
-          <p className="text-center text-xs text-slate-500">No activity yet.</p>
+          <p className="text-center text-xs text-slate-500"><AutoText text="No activity yet." /></p>
         )}
       </div>
-      <form onSubmit={handleAddComment} className="border-t border-slate-100 pt-3 flex gap-2 shrink-0">
+      <form onSubmit={handleAddComment} className="relative border-t border-slate-100 pt-3 flex gap-2 shrink-0">
+        {/* @Mention Autocomplete Dropdown */}
+        {mentionQuery && (
+          <div className="absolute bottom-full mb-2 left-0 w-64 max-h-48 overflow-y-auto rounded-xl bg-white border border-slate-200 shadow-xl z-50 p-1 divide-y divide-slate-100 animate-fadeIn">
+            <div className="px-3 py-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+              Mention Teammate
+            </div>
+            {usersList
+              .filter(u => !mentionQuery.query || (u.name && u.name.toLowerCase().includes(mentionQuery.query.toLowerCase())) || (u.email && u.email.toLowerCase().includes(mentionQuery.query.toLowerCase())))
+              .map(user => (
+                <button
+                  key={user.id}
+                  type="button"
+                  onClick={() => selectMentionUser(user)}
+                  className="w-full text-left px-3 py-2 text-xs hover:bg-indigo-50 rounded-lg flex items-center justify-between transition"
+                >
+                  <span className="font-semibold text-slate-800">{user.name || user.email}</span>
+                  <span className="text-[10px] text-indigo-600 font-mono">@{user.name ? user.name.replace(/\s+/g, '') : 'user'}</span>
+                </button>
+              ))}
+          </div>
+        )}
+
         <input
           type="text"
           value={newComment}
-          onChange={(e) => setNewComment(e.target.value)}
-          placeholder="Write a comment..."
+          onChange={handleInputChange}
+          placeholder="Write a comment... (use @ to mention)"
           className="flex-1 rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
         <button
           type="submit"
           className="rounded-lg bg-brand-500 px-3 py-1.5 text-xs font-semibold text-white hover:bg-brand-600 transition"
         >
-          Send
+          <AutoText text="Send" />
         </button>
       </form>
     </div>

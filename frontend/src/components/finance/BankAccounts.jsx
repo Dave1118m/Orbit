@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
+import { AutoText } from '../../contexts/TranslationContext';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -281,21 +282,21 @@ export default function BankAccounts() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Bank Accounts & Financial Accounts</h2>
-          <p className="text-sm text-slate-500 mt-1">Manage real account balances, inter-account transfers, and dual transaction ledgers.</p>
+          <h2 className="text-2xl font-bold text-slate-900 tracking-tight"><AutoText text="Bank Accounts" /></h2>
+          <p className="text-sm text-slate-500 mt-1"><AutoText text="Manage real account balances, inter-account transfers, and dual transaction ledgers." /></p>
         </div>
         <div className="flex items-center gap-3">
           <button
             onClick={openTransferModal}
             className="bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 font-semibold py-2.5 px-4 rounded-xl shadow-sm transition flex items-center gap-2 text-sm"
           >
-            🔄 Inter-Account Transfer
+            🔄 <AutoText text="Inter-Account Transfer" />
           </button>
           <button
             onClick={openAddModal}
             className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm"
           >
-            + Add Bank Account
+            + <AutoText text="Add Bank Account" />
           </button>
         </div>
       </div>
@@ -303,19 +304,19 @@ export default function BankAccounts() {
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Active Accounts</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Active Accounts" /></p>
           <p className="text-3xl font-extrabold text-slate-900">{activeAccountsCount}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Net Balance</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Current Balance" /></p>
           <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(totalBalance)}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Deposits</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Total Received" /></p>
           <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalReceived)}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Disbursed</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Total Expended" /></p>
           <p className="text-3xl font-extrabold text-rose-600">{formatCurrency(totalExpended)}</p>
         </div>
       </div>

@@ -43,13 +43,16 @@ export default function ExportCapabilities() {
   const [risksList, setRisksList] = useState([]);
   const [volunteersList, setVolunteersList] = useState([]);
 
+  const [projectsList, setProjectsList] = useState([]);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+
   useEffect(() => {
     fetchData();
   }, [orgId]);
 
   const fetchData = async () => {
     try {
-      const [catRes, txnRes, sumRes, analyticsRes, tasksRes, donorsRes, risksRes, volsRes] = await Promise.all([
+      const [catRes, txnRes, sumRes, analyticsRes, tasksRes, donorsRes, risksRes, volsRes, projRes] = await Promise.all([
         fetch(`${API_BASE}/FinancialCategories/organization/${orgId}`, { headers: authHeaders() }),
         fetch(`${API_BASE}/FinancialTransactions/organization/${orgId}?pageSize=200`, { headers: authHeaders() }),
         fetch(`${API_BASE}/FinancialTransactions/organization/${orgId}/summary`, { headers: authHeaders() }),
@@ -57,7 +60,8 @@ export default function ExportCapabilities() {
         fetch(`${API_BASE}/tasks`, { headers: authHeaders() }),
         fetch(`${API_BASE}/donors`, { headers: authHeaders() }),
         fetch(`${API_BASE}/organizations/${orgId}/risks`, { headers: authHeaders() }),
-        fetch(`${API_BASE}/volunteers/${orgId}`, { headers: authHeaders() })
+        fetch(`${API_BASE}/volunteers/${orgId}`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/projects`, { headers: authHeaders() })
       ]);
 
       if (catRes.ok) setCategories(await catRes.json());
@@ -74,6 +78,11 @@ export default function ExportCapabilities() {
         setRisksList(Array.isArray(rData) ? rData : (rData.items || rData.risks || []));
       }
       if (volsRes && volsRes.ok) setVolunteersList(await volsRes.json());
+      if (projRes && projRes.ok) {
+        const projs = await projRes.json();
+        setProjectsList(projs);
+        if (projs.length > 0 && !selectedProjectId) setSelectedProjectId(projs[0].id);
+      }
     } catch (e) {
       console.warn('Export data load error:', e);
     }
@@ -170,10 +179,50 @@ export default function ExportCapabilities() {
       icon: Sparkles,
       color: 'from-amber-500 to-orange-600'
     },
+    {
+      id: 'audit_support_package',
+      title: '1-Click Audit Support Package',
+      subtitle: 'Complete financial & compliance trail for external auditors',
+      tag: 'ZIP Audit Bundle',
+      icon: ShieldCheck,
+      color: 'from-emerald-600 to-teal-700'
+    },
   ];
 
   const handleExport = async () => {
     setExporting(true);
+
+    if (reportType === 'audit_support_package') {
+      try {
+        const projectId = selectedProjectId || (projectsList.length > 0 ? projectsList[0].id : 1);
+        const res = await fetch(`${API_BASE}/projects/${projectId}/export-audit-package`, {
+          headers: authHeaders()
+        });
+
+        if (!res.ok) {
+          const errText = await res.text();
+          alert(`Audit export failed: ${errText || 'Server error'}`);
+          setExporting(false);
+          return;
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(new Blob([blob], { type: 'application/zip' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', `OrbitDesk_Audit_Package_Project_${projectId}_${new Date().toISOString().slice(0, 10)}.zip`);
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+      } catch (err) {
+        console.error('Audit package export error:', err);
+        alert('Failed to download audit package.');
+      } finally {
+        setExporting(false);
+      }
+      return;
+    }
 
     // ── Excel & PDF: delegate to backend document engine ──────────────────────
     if (fileFormat === 'excel' || fileFormat === 'pdf') {
@@ -561,6 +610,7 @@ export default function ExportCapabilities() {
                   </h3>
                   <p className="text-[11px] text-slate-300 font-medium mt-0.5">
                     {reportType === 'master_executive_pack' && 'Comprehensive 7-in-1 Institutional Portfolio Pack combining all financial, donor, risk, workforce, and task analytics.'}
+                    {reportType === 'audit_support_package' && 'Complete 1-Click ZIP bundle containing verified financial ledger, approved expenses, donor allocations, and project postponement history.'}
                     {reportType === 'statement_of_activities' && 'Statement of Activities & Functional Expenses breaking down revenue and expenditures against target budgets.'}
                     {reportType === 'donor_allocations' && 'Grant & Donor Allocations Ledger detailing pledged contributions, received funds, and active grants.'}
                     {reportType === 'transaction_ledger' && 'Full Financial Transaction Audit Ledger tracking all income, expense lines, and bank account transfers.'}
@@ -578,7 +628,57 @@ export default function ExportCapabilities() {
             </div>
 
             {/* Render Tailored Tables & Headers per Report Type */}
-            {reportType === 'master_executive_pack' ? (
+            {reportType === 'audit_support_package' ? (
+              <div className="space-y-4">
+                <div className="bg-emerald-900/10 border border-emerald-300 rounded-xl p-4 text-xs text-slate-800 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-900 text-sm">Select Target Audit Project:</span>
+                    <select
+                      value={selectedProjectId || ''}
+                      onChange={(e) => setSelectedProjectId(Number(e.target.value))}
+                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {projectsList.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.title} (ID #{p.id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <p className="text-slate-600 text-xs">
+                    This 1-Click action compiles an immutable ZIP package formatted for external NGO auditors (USAID, EU, Global Fund).
+                  </p>
+                </div>
+
+                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
+                  <div className="bg-slate-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
+                    <span>Audit Support ZIP Bundle Contents</span>
+                    <span className="text-[9px] bg-emerald-600 px-2 py-0.5 rounded text-white font-semibold">ZIP Ready</span>
+                  </div>
+                  <table className="w-full text-left">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
+                        <th className="py-2 px-3">File Artifact Name</th>
+                        <th className="py-2 px-3">Data Format</th>
+                        <th className="py-2 px-3">Description &amp; Audit Purpose</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-mono">
+                      <tr className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-bold text-emerald-700">Audit_Master_Ledger.xlsx</td>
+                        <td className="py-2.5 px-3 text-emerald-600 font-bold">Excel (.xlsx)</td>
+                        <td className="py-2.5 px-3 text-slate-800 font-sans">Multi-tab Excel workbook containing Executive Summary, Budget Revisions, Expense Ledger, and Donor Allocations</td>
+                      </tr>
+                      <tr className="hover:bg-slate-50">
+                        <td className="py-2.5 px-3 font-bold text-emerald-700">Expense_Ledger.csv</td>
+                        <td className="py-2.5 px-3 text-emerald-600 font-bold">CSV (.csv)</td>
+                        <td className="py-2.5 px-3 text-slate-800 font-sans">Full CSV financial transaction ledger ready for accounting software import</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : reportType === 'master_executive_pack' ? (
               <div className="space-y-4">
                 {/* 1. Executive Summary & Liquidity */}
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">

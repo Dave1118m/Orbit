@@ -156,6 +156,52 @@ export default function AttachmentList({ entityType, entityId }) {
     setUploading(false);
   };
 
+  const [showCloudModal, setShowCloudModal] = useState(false);
+  const [cloudProvider, setCloudProvider] = useState('Google Drive');
+  const [cloudUrlInput, setCloudUrlInput] = useState('');
+  const [cloudFileNameInput, setCloudFileNameInput] = useState('');
+
+  const handleCloudAttach = async (e) => {
+    e.preventDefault();
+    if (!cloudUrlInput.trim()) return;
+
+    setUploading(true);
+    setUploadError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('cloudUrl', cloudUrlInput.trim());
+      formData.append('cloudProvider', cloudProvider);
+      formData.append('cloudFileName', cloudFileNameInput.trim());
+
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`
+        },
+        body: formData
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        setUploadError(text || 'Cloud import failed');
+        setUploading(false);
+        return;
+      }
+
+      const uploaded = await res.json();
+      setAttachments(prev => [uploaded, ...prev]);
+      setShowCloudModal(false);
+      setCloudUrlInput('');
+      setCloudFileNameInput('');
+    } catch (err) {
+      console.error('Cloud attachment error', err);
+      setUploadError(err?.message || 'Failed to attach cloud file');
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);
     await uploadFiles(files);
@@ -196,6 +242,23 @@ export default function AttachmentList({ entityType, entityId }) {
           </svg>
         </div>
         <p className="text-xs font-medium text-slate-600">Click to upload or drag and drop files</p>
+        <div className="flex items-center justify-center gap-3 pt-2">
+          <button
+            type="button"
+            onClick={() => { setCloudProvider('Google Drive'); setShowCloudModal(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+          >
+            <span className="font-bold text-blue-600">G</span> Drive Import
+          </button>
+          <button
+            type="button"
+            onClick={() => { setCloudProvider('OneDrive'); setShowCloudModal(true); }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-2xs"
+          >
+            <span className="font-bold text-sky-600">☁</span> OneDrive Import
+          </button>
+        </div>
+
         <input
           type="file"
           multiple
@@ -251,6 +314,79 @@ export default function AttachmentList({ entityType, entityId }) {
           <p className="text-center text-xs text-slate-500">No attachments yet.</p>
         )}
       </div>
+
+      {/* Real Cloud Storage Importer Modal */}
+      {showCloudModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl border border-slate-200 p-6 max-w-md w-full shadow-2xl space-y-4 animate-fadeIn">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <div className="flex items-center gap-2">
+                <span className={`text-lg font-black ${cloudProvider === 'Google Drive' ? 'text-blue-600' : 'text-sky-600'}`}>
+                  {cloudProvider === 'Google Drive' ? 'G' : '☁'}
+                </span>
+                <h3 className="text-sm font-bold text-slate-900">
+                  Import from {cloudProvider}
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCloudModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleCloudAttach} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  Document / File Name (Optional)
+                </label>
+                <input
+                  type="text"
+                  placeholder={`e.g., USAID Grant Agreement (${cloudProvider})`}
+                  value={cloudFileNameInput}
+                  onChange={(e) => setCloudFileNameInput(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  {cloudProvider} Shared Link / URL <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="url"
+                  required
+                  placeholder={cloudProvider === 'Google Drive' ? 'https://drive.google.com/file/d/...' : 'https://1drv.ms/b/s!...'}
+                  value={cloudUrlInput}
+                  onChange={(e) => setCloudUrlInput(e.target.value)}
+                  className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowCloudModal(false)}
+                  className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={uploading}
+                  className={`px-4 py-2 text-xs font-bold text-white rounded-xl shadow-xs ${
+                    cloudProvider === 'Google Drive' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-sky-600 hover:bg-sky-700'
+                  }`}
+                >
+                  {uploading ? 'Attaching...' : 'Attach Cloud Document'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
 
       <InAppFileViewer
         attachment={selectedAttachment}

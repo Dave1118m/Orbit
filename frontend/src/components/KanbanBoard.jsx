@@ -2,6 +2,7 @@ import React from 'react';
 import { DndContext, closestCenter, DragOverlay, useSensor, useSensors, PointerSensor, useDroppable } from '@dnd-kit/core';
 import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { AutoText } from '../contexts/TranslationContext';
 
 const statusMap = {
   0: 'To Do',
@@ -49,14 +50,14 @@ function SortableTaskItem({ task, onClick, isSelected }) {
     >
       <div className="flex-1 flex flex-col justify-between outline-none">
         <div className="flex justify-between gap-2">
-          <h4 className="font-semibold text-slate-800">{task.title}</h4>
+          <h4 className="font-semibold text-slate-800"><AutoText text={task.title} /></h4>
           {isSelected && (
             <span className="shrink-0 h-2 w-2 mt-1.5 rounded-full bg-brand-500" />
           )}
         </div>
         <div className="mt-4 flex items-center justify-between">
           <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getPriorityColor(task.priority)}`}>
-            {priorityMap[task.priority]}
+            <AutoText text={priorityMap[task.priority]} />
           </span>
           {task.deadline && (
             <span className="text-xs font-medium text-slate-500">
@@ -80,7 +81,7 @@ function KanbanColumn({ statusId, title, tasks, onTaskClick, selectedTaskId }) {
       className="flex w-80 shrink-0 flex-col rounded-2xl bg-slate-50 p-4 border border-slate-200 h-full overflow-hidden"
     >
       <div className="mb-4 flex items-center justify-between px-1 shrink-0">
-        <h3 className="font-semibold text-slate-700">{title}</h3>
+        <h3 className="font-semibold text-slate-700"><AutoText text={title} /></h3>
         <span className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-200 text-xs font-semibold text-slate-600">
           {tasks.length}
         </span>

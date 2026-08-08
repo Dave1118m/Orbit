@@ -134,6 +134,9 @@ export default function InAppFileViewer({ attachment, isOpen, onClose, entityTyp
     }
 
     const mimeType = attachment.mimeType || '';
+    const fileName = attachment.fileName || '';
+    const ext = fileName.split('.').pop()?.toLowerCase();
+
     if (mimeType.startsWith('image/')) {
       return (
         <div className="flex h-full items-center justify-center bg-slate-900">
@@ -166,6 +169,48 @@ export default function InAppFileViewer({ attachment, isOpen, onClose, entityTyp
           className="h-full w-full border-none"
           onError={() => setHasPreviewError(true)}
         />
+      );
+    }
+
+    // Office Document Previews (.docx, .xlsx, .pptx)
+    if (
+      ext === 'docx' ||
+      ext === 'doc' ||
+      ext === 'xlsx' ||
+      ext === 'xls' ||
+      ext === 'pptx' ||
+      mimeType.includes('wordprocessingml') ||
+      mimeType.includes('spreadsheetml') ||
+      mimeType.includes('presentationml')
+    ) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center space-y-4 bg-slate-900/90 p-8 text-white">
+          <div className="rounded-2xl bg-indigo-500/20 p-6 ring-1 ring-indigo-400/30">
+            <svg className="h-14 w-14 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+          </div>
+          <div className="text-center space-y-1">
+            <h4 className="font-semibold text-lg text-slate-100">{attachment.fileName}</h4>
+            <p className="text-xs text-slate-400 uppercase tracking-wider">Office Document In-App Viewer</p>
+          </div>
+          <div className="flex items-center gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleOpen}
+              className="rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-lg hover:bg-indigo-500 transition"
+            >
+              Interactive In-Tab Preview
+            </button>
+            <button
+              type="button"
+              onClick={handleDownload}
+              className="rounded-xl bg-slate-800 border border-slate-700 px-5 py-2.5 text-sm font-semibold text-slate-200 hover:bg-slate-700 transition"
+            >
+              Download File
+            </button>
+          </div>
+        </div>
       );
     }
 
