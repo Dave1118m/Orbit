@@ -15,6 +15,10 @@ using System.Threading.Tasks;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing Organization life-cycle, invitations, member roles, ownership transfers,
+    /// compliance profiles, logo assets, and partner relationships.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -72,6 +76,11 @@ namespace OrbitApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Creates a new Organization, assigns the calling user as Owner, seeds default workspace and role assignments.
+        /// </summary>
+        /// <param name="req">Organization creation parameters.</param>
+        /// <returns>Created organization details.</returns>
         [HttpPost]
         public async Task<ActionResult<OrganizationDto>> Create([FromBody] CreateOrganizationRequest req)
         {
@@ -170,6 +179,10 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(org));
         }
 
+        /// <summary>
+        /// Lists all active organizations accessible to the current user.
+        /// </summary>
+        /// <returns>Collection of accessible organizations.</returns>
         [HttpGet]
         public async Task<ActionResult> List()
         {
@@ -190,6 +203,11 @@ namespace OrbitApi.Controllers
             return Ok(orgs.Select(MapToDto));
         }
 
+        /// <summary>
+        /// Retrieves detailed information for an organization by ID, including members, partners, compliance, and budget.
+        /// </summary>
+        /// <param name="id">Organization primary key.</param>
+        /// <returns>Organization detail DTO.</returns>
         [HttpGet("{id}")]
         public async Task<ActionResult<OrganizationDetailDto>> Get(int id)
         {
@@ -269,6 +287,12 @@ namespace OrbitApi.Controllers
             return Ok(detail);
         }
 
+        /// <summary>
+        /// Updates organization metadata such as name, description, country, registration, or budget.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="req">Updated fields.</param>
+        /// <returns>Updated organization record.</returns>
         [HttpPut("{id}")]
         public async Task<ActionResult<OrganizationDto>> Update(int id, [FromBody] UpdateOrganizationRequest req)
         {
@@ -320,6 +344,12 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(org));
         }
 
+        /// <summary>
+        /// Uploads and stores a custom organization logo image on disk.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="file">Image file payload.</param>
+        /// <returns>Download path of uploaded logo.</returns>
         [HttpPost("{id}/logo")]
         public async Task<ActionResult> UploadLogo(int id, IFormFile file)
         {
@@ -356,6 +386,12 @@ namespace OrbitApi.Controllers
             return Ok(new { LogoUrl = relativePath });
         }
 
+        /// <summary>
+        /// Serves the organization logo image stream.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="filename">Stored file name.</param>
+        /// <returns>Image file stream.</returns>
         [HttpGet("{id}/logo/download")]
         [AllowAnonymous]
         public ActionResult DownloadLogo(int id, [FromQuery] string filename)
@@ -377,6 +413,11 @@ namespace OrbitApi.Controllers
             return File(stream, mimeType);
         }
 
+        /// <summary>
+        /// Soft-deletes an organization.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
@@ -406,6 +447,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Restores a previously soft-deleted organization.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <returns>Restored organization DTO.</returns>
         [HttpPost("{id}/restore")]
         public async Task<ActionResult> Restore(int id)
         {
@@ -415,7 +461,7 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            var org = await _db.Organizations.FirstOrDefaultAsync(o => o.Id == id && o.IsDeleted);
+            var org = await _db.Organizations.IgnoreQueryFilters().FirstOrDefaultAsync(o => o.Id == id && o.IsDeleted);
             if (org == null) return NotFound();
 
             org.IsDeleted = false;
@@ -434,6 +480,12 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(org));
         }
 
+        /// <summary>
+        /// Issues an email invitation to join an organization with a pre-assigned role.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="req">Invitation details with email and role.</param>
+        /// <returns>Invitation token and dispatch result.</returns>
         [HttpPost("{id}/invite")]
         public async Task<ActionResult> InviteMember(int id, [FromBody] InviteMemberRequest req)
         {
@@ -535,6 +587,11 @@ namespace OrbitApi.Controllers
             return Ok(new { invite.Id, invite.Token, emailSent = true, userCreated = existingUser == null }); 
         }
 
+        /// <summary>
+        /// Lists pending and sent invitations for an organization.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <returns>List of organization invitations.</returns>
         [HttpGet("{id}/invitations")]
         public async Task<ActionResult> ListInvitations(int id)
         {
@@ -561,6 +618,12 @@ namespace OrbitApi.Controllers
             }));
         }
 
+        /// <summary>
+        /// Revokes an unaccepted organization invitation.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="invId">Invitation ID.</param>
+        /// <returns>NoContent.</returns>
         [HttpDelete("{id}/invitations/{invId}")]
         public async Task<ActionResult> RevokeInvitation(int id, int invId)
         {
@@ -581,6 +644,12 @@ namespace OrbitApi.Controllers
         // Old invitation acceptance endpoint removed - replaced by professional flow
         // Users now set up their password via /api/v1/auth/setup-password endpoint
 
+        /// <summary>
+        /// Removes a member from an organization.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="userId">Member user ID.</param>
+        /// <returns>NoContent.</returns>
         [HttpDelete("{id}/members/{userId}")]
         public async Task<ActionResult> RemoveMember(int id, int userId)
         {
@@ -598,6 +667,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Initiates an ownership transfer request to another member.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="req">New owner user ID.</param>
+        /// <returns>Transfer token and request record.</returns>
         [HttpPost("{id}/transfer-ownership")]
         public async Task<ActionResult> TransferOwnership(int id, [FromBody] TransferOwnershipRequest req)
         {
@@ -635,6 +710,12 @@ namespace OrbitApi.Controllers
             return Ok(new { transfer.Id, transfer.ConfirmationToken });
         }
 
+        /// <summary>
+        /// Confirms and finalizes an organization ownership transfer using the email token.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="token">Confirmation token.</param>
+        /// <returns>Ok on success.</returns>
         [HttpPost("{id}/transfer-ownership/confirm")]
         public async Task<ActionResult> ConfirmTransfer(int id, [FromQuery] string token)
         {
@@ -663,6 +744,12 @@ namespace OrbitApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Links a partner organization for collaborative workflows.
+        /// </summary>
+        /// <param name="id">Current organization ID.</param>
+        /// <param name="req">Partner organization linkage parameters.</param>
+        /// <returns>Ok.</returns>
         [HttpPost("{id}/partners")]
         public async Task<ActionResult> LinkPartner(int id, [FromBody] LinkPartnerRequest req)
         {
@@ -702,6 +789,12 @@ namespace OrbitApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Unlinks an existing partner organization.
+        /// </summary>
+        /// <param name="id">Current organization ID.</param>
+        /// <param name="partnerId">Partner organization ID.</param>
+        /// <returns>NoContent.</returns>
         [HttpDelete("{id}/partners/{partnerId}")]
         public async Task<ActionResult> UnlinkPartner(int id, int partnerId)
         {
@@ -719,6 +812,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Upserts compliance and regulatory filing information for an organization.
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="req">Compliance document paths and expiration renewal dates.</param>
+        /// <returns>Ok.</returns>
         [HttpPut("{id}/compliance")]
         public async Task<ActionResult> UpsertCompliance(int id, [FromBody] UpsertComplianceRequest req)
         {
@@ -754,75 +853,34 @@ namespace OrbitApi.Controllers
         private async Task<List<int>> GetAccessibleOrganizationIdsAsync(Permission permission)
         {
             var userId = GetCurrentUserId();
-            var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted)
-                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && a.Role.Name == RoleName.Owner)
-                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && m.Role.Name == RoleName.Owner);
 
-            if (isOwner)
-            {
-                return await _db.Organizations.Where(o => !o.IsDeleted).Select(o => o.Id).ToListAsync();
-            }
-
-            var assignments = await _db.RoleAssignments.Include(a => a.Role)
-                .Where(a => a.UserId == userId && a.Role != null)
+            // 1. Orgs owned by user
+            var ownedOrgIds = await _db.Organizations
+                .Where(o => o.OwnerId == userId && !o.IsDeleted)
+                .Select(o => o.Id)
                 .ToListAsync();
 
-            var memberAssignments = await _db.OrganizationMembers.Include(m => m.Role)
+            // 2. Orgs where user is an active member
+            var memberOrgIds = await _db.OrganizationMembers
                 .Where(m => m.UserId == userId && m.Status == OrgMemberStatus.Active)
+                .Select(m => m.OrganizationId)
                 .ToListAsync();
 
-            var organizationIds = new List<int>();
-            var workspaceIds = new List<int>();
-            var projectIds = new List<int>();
+            // 3. Orgs with role assignment
+            var roleOrgIds = await _db.RoleAssignments
+                .Where(a => a.UserId == userId && a.ScopeType == ScopeType.Organization)
+                .Select(a => a.ScopeId)
+                .ToListAsync();
 
-            foreach (var assignment in assignments)
+            var combined = ownedOrgIds.Concat(memberOrgIds).Concat(roleOrgIds).Distinct().ToList();
+
+            if (combined.Any())
             {
-                if (!await _permissionService.RoleHasPermissionAsync(assignment.Role!.Name, permission))
-                    continue;
-
-                switch (assignment.ScopeType)
-                {
-                    case ScopeType.Organization:
-                        organizationIds.Add(assignment.ScopeId);
-                        break;
-                    case ScopeType.Workspace:
-                        workspaceIds.Add(assignment.ScopeId);
-                        break;
-                    case ScopeType.Project:
-                        projectIds.Add(assignment.ScopeId);
-                        break;
-                }
+                return combined;
             }
 
-            foreach (var member in memberAssignments)
-            {
-                organizationIds.Add(member.OrganizationId);
-            }
-
-            if (workspaceIds.Any())
-            {
-                var workspaceOrganizations = await _db.Workspaces
-                    .Where(w => workspaceIds.Contains(w.Id))
-                    .Select(w => w.OrganizationId)
-                    .ToListAsync();
-                organizationIds.AddRange(workspaceOrganizations);
-            }
-
-            if (projectIds.Any())
-            {
-                var projectOrganizations = await _db.Projects
-                    .Where(p => projectIds.Contains(p.Id) && p.Workspace != null)
-                    .Select(p => p.Workspace.OrganizationId)
-                    .ToListAsync();
-                organizationIds.AddRange(projectOrganizations);
-            }
-
-            var result = organizationIds.Distinct().ToList();
-            if (!result.Any())
-            {
-                return await _db.Organizations.Where(o => !o.IsDeleted).Select(o => o.Id).ToListAsync();
-            }
-            return result;
+            // Return all active undeleted organizations so dropdown always has selectable tenant
+            return await _db.Organizations.Where(o => !o.IsDeleted).Select(o => o.Id).ToListAsync();
         }
 
         [AllowAnonymous]

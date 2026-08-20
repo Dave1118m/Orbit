@@ -15,6 +15,10 @@ using TaskStatus = OrbitApi.Models.TaskStatus;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Executive Analytics Controller providing real-time task velocity metrics,
+    /// completion burndown rates, team workload balances, and public platform telemetry.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -41,9 +45,13 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id;
+            return firstOrg?.Id ?? 0;
         }
 
+        /// <summary>
+        /// Computes live real-time task execution analytics, completion velocity, overdue counts, and workload distribution.
+        /// </summary>
+        /// <returns>Task analytics payload.</returns>
         [HttpGet("tasks")]
         public async Task<ActionResult<TaskAnalyticsDto>> GetTaskAnalytics()
         {

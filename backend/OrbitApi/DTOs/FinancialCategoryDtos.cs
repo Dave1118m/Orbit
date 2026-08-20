@@ -22,6 +22,9 @@ public class FinancialCategoryDto
     public int SubCategoriesCount { get; set; }
     public decimal TotalExpensesAmount { get; set; }
     public decimal TotalIncomeAmount { get; set; }
+    public bool IsUSAIDAllowable { get; set; }
+    public LogframeLevel? LogframeLevel { get; set; }
+    public int? LogframeEntityId { get; set; }
     public List<FinancialCategoryDto> SubCategories { get; set; } = new List<FinancialCategoryDto>();
 }
 
@@ -51,6 +54,10 @@ public class CreateFinancialCategoryDto
 
     [Range(0, 1000000000000.00, ErrorMessage = "Target budget limit cannot be negative.")]
     public decimal? TargetBudgetLimit { get; set; }
+
+    public bool IsUSAIDAllowable { get; set; } = true;
+    public LogframeLevel? LogframeLevel { get; set; }
+    public int? LogframeEntityId { get; set; }
 }
 
 public class UpdateFinancialCategoryDto
@@ -78,4 +85,7 @@ public class UpdateFinancialCategoryDto
     public decimal? TargetBudgetLimit { get; set; }
 
     public bool IsActive { get; set; } = true;
+    public bool IsUSAIDAllowable { get; set; } = true;
+    public LogframeLevel? LogframeLevel { get; set; }
+    public int? LogframeEntityId { get; set; }
 }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import GoogleSignIn from '../components/GoogleSignIn';
+import { parseApiResponse } from '../utils/toastHelper';
 
 export default function Register() {
   const [email, setEmail] = useState('');
@@ -35,7 +36,7 @@ export default function Register() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         let errorMsg = 'Registration failed';
         try {
           const parsed = JSON.parse(text);

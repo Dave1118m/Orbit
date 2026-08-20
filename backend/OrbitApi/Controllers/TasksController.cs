@@ -8,6 +8,10 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing task tracking, assignments, Kanban transitions, subtasks,
+    /// dependencies, comments, attachments, and Google Calendar event sync.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -17,15 +21,22 @@ namespace OrbitApi.Controllers
         private readonly IAuthorizationService _authorizationService;
         private readonly INotificationService _notificationService;
         private readonly IPermissionService _permissionService;
+        private readonly IGoogleCalendarService _googleCalendarService;
 
-        public TasksController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService, IPermissionService permissionService)
+        public TasksController(OrbitDbContext db, IAuthorizationService authorizationService, INotificationService notificationService, IPermissionService permissionService, IGoogleCalendarService googleCalendarService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _notificationService = notificationService;
             _permissionService = permissionService;
+            _googleCalendarService = googleCalendarService;
         }
 
+        /// <summary>
+        /// Creates a new task within a project with date boundary validation and dependency checks.
+        /// </summary>
+        /// <param name="req">Task creation payload.</param>
+        /// <returns>Created task DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<TaskDto>> Create([FromBody] CreateTaskRequest req)
         {
@@ -49,12 +60,32 @@ namespace OrbitApi.Controllers
                 return BadRequest("Task End Date (Deadline) cannot be earlier than Task Start Date.");
             }
 
-            if (req.Deadline.HasValue)
+            var project = await _db.Projects.FindAsync(req.ProjectId);
+            if (project != null)
             {
-                var project = await _db.Projects.FindAsync(req.ProjectId);
-                if (project != null && project.EndDate.HasValue && req.Deadline.Value.Date > project.EndDate.Value.Date)
+                if (req.StartDate.HasValue && project.StartDate.HasValue && req.StartDate.Value.Date < project.StartDate.Value.Date)
+                {
+                    return BadRequest($"Task start date ({req.StartDate.Value:yyyy-MM-dd}) cannot be earlier than the project start date ({project.StartDate.Value:yyyy-MM-dd}).");
+                }
+                if (req.Deadline.HasValue && project.EndDate.HasValue && req.Deadline.Value.Date > project.EndDate.Value.Date)
                 {
                     return BadRequest($"Task deadline ({req.Deadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}). Please postpone the project end date first.");
+                }
+            }
+
+            if (req.ParentTaskId.HasValue)
+            {
+                var parentTask = await _db.Tasks.FindAsync(req.ParentTaskId.Value);
+                if (parentTask != null)
+                {
+                    if (req.StartDate.HasValue && parentTask.StartDate.HasValue && req.StartDate.Value.Date < parentTask.StartDate.Value.Date)
+                    {
+                        return BadRequest($"Subtask start date cannot be earlier than parent task start date ({parentTask.StartDate.Value:yyyy-MM-dd}).");
+                    }
+                    if (req.Deadline.HasValue && parentTask.Deadline.HasValue && req.Deadline.Value.Date > parentTask.Deadline.Value.Date)
+                    {
+                        return BadRequest($"Subtask deadline cannot exceed parent task deadline ({parentTask.Deadline.Value:yyyy-MM-dd}).");
+                    }
                 }
             }
 
@@ -95,7 +126,7 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id ?? 2003;
+            return firstOrg?.Id ?? 0;
         }
 
         [HttpGet]
@@ -207,14 +238,64 @@ namespace OrbitApi.Controllers
                 }
             }
             if (req.Priority.HasValue) task.Priority = (OrbitApi.Models.PriorityLevel)req.Priority.Value;
+            var finalStartDate = req.StartDate ?? task.StartDate;
+            var finalDeadline = req.Deadline ?? task.Deadline;
+
+            if (finalStartDate.HasValue && finalDeadline.HasValue && finalDeadline.Value.Date < finalStartDate.Value.Date)
+            {
+                return BadRequest("Task End Date (Deadline) cannot be earlier than Task Start Date.");
+            }
+
+            var project = await _db.Projects.FindAsync(task.ProjectId);
+            if (project != null)
+            {
+                if (finalStartDate.HasValue && project.StartDate.HasValue && finalStartDate.Value.Date < project.StartDate.Value.Date)
+                {
+                    return BadRequest($"Task start date ({finalStartDate.Value:yyyy-MM-dd}) cannot be earlier than the project start date ({project.StartDate.Value:yyyy-MM-dd}).");
+                }
+                if (finalDeadline.HasValue && project.EndDate.HasValue && finalDeadline.Value.Date > project.EndDate.Value.Date)
+                {
+                    return BadRequest($"Task deadline ({finalDeadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}).");
+                }
+            }
+
+            if (finalStartDate.HasValue)
+            {
+                var dependencies = await _db.TaskDependencies
+                    .Include(d => d.DependsOnTask)
+                    .Where(d => d.TaskId == id)
+                    .ToListAsync();
+                    
+                foreach (var dep in dependencies)
+                {
+                    if (dep.DependsOnTask != null && dep.DependsOnTask.Deadline.HasValue && finalStartDate.Value.Date < dep.DependsOnTask.Deadline.Value.Date)
+                    {
+                        return BadRequest($"Task start date cannot be earlier than the deadline of prerequisite task '{dep.DependsOnTask.Title}' ({dep.DependsOnTask.Deadline.Value:yyyy-MM-dd}).");
+                    }
+                }
+            }
+
+            if (req.ParentTaskId.HasValue) 
+            {
+                task.ParentTaskId = req.ParentTaskId;
+            }
+
+            if (task.ParentTaskId.HasValue)
+            {
+                var parentTask = await _db.Tasks.FindAsync(task.ParentTaskId.Value);
+                if (parentTask != null)
+                {
+                    if (finalStartDate.HasValue && parentTask.StartDate.HasValue && finalStartDate.Value.Date < parentTask.StartDate.Value.Date)
+                        return BadRequest($"Subtask start date cannot be earlier than parent task start date ({parentTask.StartDate.Value:yyyy-MM-dd}).");
+                    if (finalDeadline.HasValue && parentTask.Deadline.HasValue && finalDeadline.Value.Date > parentTask.Deadline.Value.Date)
+                        return BadRequest($"Subtask deadline cannot exceed parent task deadline ({parentTask.Deadline.Value:yyyy-MM-dd}).");
+                }
+            }
+
+            if (req.StartDate.HasValue) task.StartDate = req.StartDate;
+
             if (req.Deadline.HasValue)
             {
-                var project = await _db.Projects.FindAsync(task.ProjectId);
-                if (project != null && project.EndDate.HasValue && req.Deadline.Value.Date > project.EndDate.Value.Date)
-                {
-                    return BadRequest($"Task deadline ({req.Deadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}). Please postpone the project end date first.");
-                }
-
                 var oldDeadlineText = task.Deadline.HasValue ? task.Deadline.Value.ToString("yyyy-MM-dd") : "No deadline";
                 var newDeadlineText = req.Deadline.Value.ToString("yyyy-MM-dd");
                 if (task.Deadline != req.Deadline)
@@ -237,13 +318,17 @@ namespace OrbitApi.Controllers
                     task.Deadline = req.Deadline;
                 }
             }
-            if (req.ParentTaskId.HasValue) task.ParentTaskId = req.ParentTaskId;
 
             await _db.SaveChangesAsync();
 
             return Ok(MapToDto(task));
         }
 
+        /// <summary>
+        /// Soft-deletes a task item.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
@@ -262,6 +347,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Creates a new subtask checklist item under a parent task.
+        /// </summary>
+        /// <param name="id">Parent Task ID.</param>
+        /// <param name="req">Subtask title payload.</param>
+        /// <returns>Created subtask DTO.</returns>
         [HttpPost("{id}/subtasks")]
         public async Task<ActionResult<SubtaskDto>> CreateSubtask(int id, [FromBody] CreateSubtaskRequest req)
         {
@@ -293,6 +384,11 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Lists subtasks associated with a parent task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>List of subtask records.</returns>
         [HttpGet("{id}/subtasks")]
         public async Task<ActionResult> GetSubtasks(int id)
         {
@@ -307,6 +403,13 @@ namespace OrbitApi.Controllers
             return Ok(subtasks);
         }
 
+        /// <summary>
+        /// Updates a subtask completion status or title.
+        /// </summary>
+        /// <param name="taskId">Parent Task ID.</param>
+        /// <param name="subtaskId">Subtask ID.</param>
+        /// <param name="req">Updated fields.</param>
+        /// <returns>Updated subtask DTO.</returns>
         [HttpPut("{taskId}/subtasks/{subtaskId}")]
         public async Task<ActionResult> ToggleSubtask(int taskId, int subtaskId, [FromBody] SubtaskDto req)
         {
@@ -320,6 +423,12 @@ namespace OrbitApi.Controllers
             return Ok(new SubtaskDto { Id = subtask.Id, TaskId = subtask.TaskId, Title = subtask.Title, IsDone = subtask.IsDone });
         }
 
+        /// <summary>
+        /// Deletes a subtask.
+        /// </summary>
+        /// <param name="taskId">Parent Task ID.</param>
+        /// <param name="subtaskId">Subtask ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{taskId}/subtasks/{subtaskId}")]
         public async Task<ActionResult> DeleteSubtask(int taskId, int subtaskId)
         {
@@ -332,8 +441,28 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Quick-toggles subtask completion status.
+        /// </summary>
+        /// <param name="subtaskId">Subtask primary key.</param>
+        /// <returns>Updated subtask DTO.</returns>
+        [HttpPatch("/api/v1/subtasks/{subtaskId}/toggle")]
+        public async Task<ActionResult> ToggleSubtaskStatus(int subtaskId)
+        {
+            var subtask = await _db.Subtasks.FindAsync(subtaskId);
+            if (subtask == null) return NotFound();
+            subtask.IsDone = !subtask.IsDone;
+            await _db.SaveChangesAsync();
+            return Ok(new SubtaskDto { Id = subtask.Id, TaskId = subtask.TaskId, Title = subtask.Title, IsDone = subtask.IsDone });
+        }
+
         // --- Task Members (Assignment) ---
 
+        /// <summary>
+        /// Lists assigned team members for a task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>List of task members.</returns>
         [HttpGet("{id}/members")]
         public async Task<ActionResult> GetMembers(int id)
         {
@@ -353,6 +482,12 @@ namespace OrbitApi.Controllers
             return Ok(members);
         }
 
+        /// <summary>
+        /// Assigns a team member to a task and dispatches notification.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <param name="req">User ID to assign.</param>
+        /// <returns>Task member record.</returns>
         [HttpPost("{id}/members")]
         public async Task<ActionResult> AssignMember(int id, [FromBody] AssignTaskMemberRequest req)
         {
@@ -376,6 +511,12 @@ namespace OrbitApi.Controllers
             return Ok(new TaskMemberDto { Id = member.Id, TaskId = member.TaskId, UserId = member.UserId });
         }
 
+        /// <summary>
+        /// Unassigns a user from a task.
+        /// </summary>
+        /// <param name="taskId">Task ID.</param>
+        /// <param name="userId">User ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{taskId}/members/{userId}")]
         public async Task<ActionResult> UnassignMember(int taskId, int userId)
         {
@@ -390,6 +531,11 @@ namespace OrbitApi.Controllers
 
         // --- Comments ---
 
+        /// <summary>
+        /// Lists discussion comments on a task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>List of comment DTOs.</returns>
         [HttpGet("{id}/comments")]
         public async Task<ActionResult> GetComments(int id)
         {
@@ -430,6 +576,12 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Posts a comment on a task and triggers @mention notifications.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <param name="req">Comment content.</param>
+        /// <returns>Created comment record.</returns>
         [HttpPost("{id}/comments")]
         public async Task<ActionResult> CreateComment(int id, [FromBody] CreateCommentRequest req)
         {
@@ -499,6 +651,11 @@ namespace OrbitApi.Controllers
 
         // --- Attachments ---
 
+        /// <summary>
+        /// Lists file attachments and cloud documents on a task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>List of task attachments.</returns>
         [HttpGet("{id}/attachments")]
         public async Task<ActionResult> GetAttachments(int id)
         {
@@ -524,6 +681,15 @@ namespace OrbitApi.Controllers
             return Ok(attachments);
         }
 
+        /// <summary>
+        /// Uploads a file or links an external cloud document to a task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <param name="file">File payload.</param>
+        /// <param name="cloudUrl">External document URL.</param>
+        /// <param name="cloudProvider">Cloud provider.</param>
+        /// <param name="cloudFileName">Document name.</param>
+        /// <returns>Created attachment metadata.</returns>
         [HttpPost("{id}/attachments")]
         public async Task<ActionResult> UploadAttachment(int id, [FromForm] IFormFile? file, [FromForm] string? cloudUrl, [FromForm] string? cloudProvider, [FromForm] string? cloudFileName)
         {
@@ -657,8 +823,27 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Generates a Google Calendar event creation URL for adding task deadlines to calendar.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>Google Calendar URL.</returns>
+        [HttpGet("{id}/google-calendar-url")]
+        public async Task<ActionResult> GetGoogleCalendarUrl(int id)
+        {
+            var task = await _db.Tasks.FindAsync(id);
+            if (task == null) return NotFound();
+            var url = _googleCalendarService.GenerateGoogleCalendarWebUrl(task);
+            return Ok(new { url });
+        }
+
         // --- Status History ---
 
+        /// <summary>
+        /// Retrieves the status change audit history for a task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>Status change history entries.</returns>
         [HttpGet("{id}/history")]
         public async Task<ActionResult> GetStatusHistory(int id)
         {
@@ -684,6 +869,11 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Lists prerequisites and predecessor dependencies for a task.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <returns>List of task dependencies.</returns>
         [HttpGet("{id}/dependencies")]
         public async Task<ActionResult<IEnumerable<TaskDependencyDto>>> GetDependencies(int id)
         {
@@ -708,6 +898,12 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Links a predecessor task dependency with circular dependency and timeline sequence validation.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <param name="req">Predecessor task ID.</param>
+        /// <returns>Created dependency record.</returns>
         [HttpPost("{id}/dependencies")]
         public async Task<ActionResult<TaskDependencyDto>> AddDependency(int id, [FromBody] CreateTaskDependencyRequest req)
         {
@@ -728,6 +924,24 @@ namespace OrbitApi.Controllers
             if (existing != null)
             {
                 return BadRequest("This dependency link already exists.");
+            }
+
+            // Finish-to-Start: Task B cannot start before Task A ends
+            if (task.StartDate.HasValue && dependsOnTask.Deadline.HasValue
+                && task.StartDate.Value.Date < dependsOnTask.Deadline.Value.Date)
+            {
+                return BadRequest(
+                    $"Dependency conflict: '{task.Title}' starts on {task.StartDate.Value:yyyy-MM-dd}, " +
+                    $"but prerequisite '{dependsOnTask.Title}' ends on {dependsOnTask.Deadline.Value:yyyy-MM-dd}. " +
+                    $"Please update task dates before linking.");
+            }
+
+            // Circular dependency check (simple: A→B then B→A)
+            var reverseExists = await _db.TaskDependencies
+                .AnyAsync(td => td.TaskId == req.DependsOnTaskId && td.DependsOnTaskId == id);
+            if (reverseExists)
+            {
+                return BadRequest("Circular dependency detected: the predecessor already depends on this task.");
             }
 
             var dep = new TaskDependency
@@ -751,6 +965,12 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Removes a task dependency link.
+        /// </summary>
+        /// <param name="id">Task ID.</param>
+        /// <param name="dependencyId">Dependency primary key.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}/dependencies/{dependencyId}")]
         public async Task<IActionResult> RemoveDependency(int id, int dependencyId)
         {

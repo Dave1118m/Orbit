@@ -7,30 +7,42 @@ import CommentSection from '../components/CommentSection';
 import AttachmentList from '../components/AttachmentList';
 import RiskRegister from '../components/RiskRegister';
 import GanttTimelineView from '../components/GanttTimelineView';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/projects`;
 const TEAMS_URL = `${import.meta.env.VITE_API_URL}/teams`;
 const WORKSPACES_URL = `${import.meta.env.VITE_API_URL}/workspaces`;
 const DONORS_URL = `${import.meta.env.VITE_API_URL}/donors`;
 
-// ─── Status helpers ────────────────────────────────────────────────────────────
+/**
+ * Status style mapping configurations for project badges and indicator dots.
+ */
 const STATUS_CONFIG = {
-  0: { label: 'Planning',  color: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400'  },
-  1: { label: 'Active',    color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
-  2: { label: 'On Hold',   color: 'bg-amber-50 text-amber-700',     dot: 'bg-amber-500'   },
-  3: { label: 'Completed', color: 'bg-blue-50 text-blue-700',       dot: 'bg-blue-500'    },
-  4: { label: 'Cancelled', color: 'bg-red-50 text-red-700',         dot: 'bg-red-500'     },
+  "Planning":  { label: 'Planning',  color: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400'  },
+  "Active":    { label: 'Active',    color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  "OnHold":    { label: 'On Hold',   color: 'bg-amber-50 text-amber-700',     dot: 'bg-amber-500'   },
+  "Completed": { label: 'Completed', color: 'bg-blue-50 text-blue-700',       dot: 'bg-blue-500'    },
+  "Cancelled": { label: 'Cancelled', color: 'bg-red-50 text-red-700',         dot: 'bg-red-500'     },
 };
 
+/**
+ * Resolves styling configuration object for a project status.
+ * @param {string} status - Project status string.
+ * @returns {{ label: string, color: string, dot: string }}
+ */
 function getStatusConfig(status) {
-  return STATUS_CONFIG[status] ?? STATUS_CONFIG[0];
+  return STATUS_CONFIG[status] ?? STATUS_CONFIG["Planning"];
 }
 
-// Derive a "health" badge based on dates & status
+/**
+ * Computes project health badge status based on milestones, deadlines, and schedule variance.
+ * @param {Object} project - The project object.
+ * @returns {{ label: string, color: string }} Health badge label and class.
+ */
 function getHealthBadge(project) {
-  if (project.status === 3) return { label: 'Completed', color: 'bg-blue-50 text-blue-700' };
-  if (project.status === 4) return { label: 'Cancelled', color: 'bg-red-50 text-red-600' };
-  if (project.status === 2) return { label: 'On Hold', color: 'bg-amber-50 text-amber-700' };
+  if (project.status === 'Completed') return { label: 'Completed', color: 'bg-blue-50 text-blue-700' };
+  if (project.status === 'Cancelled') return { label: 'Cancelled', color: 'bg-red-50 text-red-600' };
+  if (project.status === 'OnHold') return { label: 'On Hold', color: 'bg-amber-50 text-amber-700' };
 
   const now = new Date();
   if (project.endDate) {
@@ -42,32 +54,49 @@ function getHealthBadge(project) {
   return { label: 'On Track', color: 'bg-emerald-50 text-emerald-700' };
 }
 
-// Derive task progress percentage (dummy formula if no completedTaskCount — backend returns taskCount only)
+/**
+ * Derives project completion percentage based on tasks or milestone heuristic.
+ * @param {Object} project - The project object.
+ * @returns {number} Completion percentage (0 - 100).
+ */
 function getProgress(project) {
   if (!project.taskCount || project.taskCount === 0) return 0;
-  // If backend provides completedTaskCount use it; otherwise use status heuristic
   if (project.completedTaskCount !== undefined) {
     return Math.round((project.completedTaskCount / project.taskCount) * 100);
   }
-  const heuristic = { 0: 10, 1: 45, 2: 30, 3: 100, 4: 0 };
+  const heuristic = { "Planning": 10, "Active": 45, "OnHold": 30, "Completed": 100, "Cancelled": 0 };
   return heuristic[project.status] ?? 0;
 }
 
-// Generate avatar initials / color from name
 const AVATAR_COLORS = [
   'bg-violet-500','bg-blue-500','bg-emerald-500','bg-rose-500',
   'bg-amber-500','bg-cyan-500','bg-pink-500','bg-indigo-500',
 ];
+
+/**
+ * Deterministically generates an avatar background color from a string hash.
+ * @param {string} str - Name string.
+ * @returns {string} Tailwind CSS background class.
+ */
 function avatarColor(str = '') {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
+
+/**
+ * Extracts 2-letter uppercase initials from full name.
+ * @param {string} name - Full name string.
+ * @returns {string} Two-letter initials.
+ */
 function initials(name = '') {
   return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase();
 }
 
-// ─── Stat Card ────────────────────────────────────────────────────────────────
+/**
+ * Metric summary stat card widget.
+ * @param {{ label: string, value: string|number, icon: React.ReactNode, accent: string }} props
+ */
 function StatCard({ label, value, icon, accent }) {
   return (
     <div className="flex items-center gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -103,12 +132,12 @@ function ProjectCard({ project, donors, onClick }) {
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/10 text-brand-600 font-bold text-sm flex-shrink-0">
             {project.title.slice(0, 2).toUpperCase()}
           </div>
-          <div className="min-w-0">
-            <h3 className="font-semibold text-slate-900 text-sm leading-tight truncate max-w-[160px]">
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-slate-900 text-sm leading-tight break-words">
               <AutoText text={project.title} />
             </h3>
             {donor && (
-              <p className="text-xs text-slate-400 truncate max-w-[160px] mt-0.5">
+              <p className="text-xs text-slate-400 break-words mt-0.5">
                 <AutoText text={donor.name} />
               </p>
             )}
@@ -287,7 +316,7 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
         onClick={onClose}
       />
       {/* Panel */}
-      <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-full max-w-lg bg-white shadow-2xl border-l border-slate-200">
+      <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-full md:w-1/2 bg-white shadow-2xl border-l border-slate-200">
         {/* Header */}
         <div className="flex items-start justify-between px-6 py-5 border-b border-slate-100 flex-shrink-0">
           <div className="flex items-center gap-3 min-w-0">
@@ -587,11 +616,11 @@ export default function Projects() {
   const [selectedReplacementTeamId, setSelectedReplacementTeamId] = useState(null);
 
   const [formData, setFormData] = useState({
-    title: '', description: '', status: 0, budget: '', donorId: '', fundingType: 'SingleDonor', startDate: '', endDate: ''
+    title: '', description: '', status: 'Planning', budget: '', donorId: '', fundingType: 'SingleDonor', startDate: '', endDate: ''
   });
 
   const [editFormData, setEditFormData] = useState({
-    title: '', description: '', status: 0, budget: '', donorId: '', fundingType: 'SingleDonor', startDate: '', endDate: ''
+    title: '', description: '', status: 'Planning', budget: '', donorId: '', fundingType: 'SingleDonor', startDate: '', endDate: ''
   });
 
   // ── Data fetching ──
@@ -697,9 +726,13 @@ export default function Projects() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedWorkspaceId) { alert('Select a workspace first.'); return; }
+    if (!selectedWorkspaceId) { showSuccessToast('Select a workspace first.'); return; }
     if (formData.startDate && formData.endDate && new Date(formData.endDate) < new Date(formData.startDate)) {
-      alert('Project Deadline (End Date) cannot be earlier than Start Date.');
+      showSuccessToast('Project Deadline (End Date) cannot be earlier than Start Date.');
+      return;
+    }
+    if ((String(formData.status) === '1' || formData.status === 'Active') && (!formData.startDate || !formData.endDate)) {
+      showSuccessToast('An Active project must have both a Start Date and an End Date.');
       return;
     }
     try {
@@ -710,7 +743,7 @@ export default function Projects() {
           workspaceId: selectedWorkspaceId,
           title: formData.title,
           description: formData.description,
-          status: parseInt(formData.status, 10),
+          status: formData.status,
           budget: formData.budget ? parseFloat(formData.budget) : null,
           donorId: formData.donorId ? parseInt(formData.donorId, 10) : null,
           donorIds: (formData.donorIds && formData.donorIds.length > 0)
@@ -723,10 +756,11 @@ export default function Projects() {
       });
       if (res.ok) {
         setIsCreateModalOpen(false);
-        setFormData({ title: '', description: '', status: 0, budget: '', donorId: '', donorIds: [], fundingType: 'SingleDonor', startDate: '', endDate: '' });
+        setFormData({ title: '', description: '', status: 'Planning', budget: '', donorId: '', donorIds: [], fundingType: 'SingleDonor', startDate: '', endDate: '' });
         fetchProjects(selectedWorkspaceId);
       } else {
-        alert('Failed to create project. Check your permissions.');
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Failed to create project. Error: ${errText || 'Check your permissions.'}`);
       }
     } catch (err) { console.error(err); }
   };
@@ -743,7 +777,7 @@ export default function Projects() {
     setEditFormData({
       title: project.title || '',
       description: project.description || '',
-      status: project.status ?? 0,
+      status: project.status ?? 'Planning',
       budget: project.budget != null ? String(project.budget) : '',
       donorId: project.donorId != null ? String(project.donorId) : '',
       fundingType: project.fundingType || 'SingleDonor',
@@ -759,14 +793,18 @@ export default function Projects() {
     e.preventDefault();
     if (!selectedProject) return;
     if (editFormData.startDate && editFormData.endDate && new Date(editFormData.endDate) < new Date(editFormData.startDate)) {
-      alert('End Date cannot be earlier than Start Date.');
+      showSuccessToast('End Date cannot be earlier than Start Date.');
+      return;
+    }
+    if ((String(editFormData.status) === '1' || editFormData.status === 'Active') && (!editFormData.startDate || !editFormData.endDate)) {
+      showSuccessToast('An Active project must have both a Start Date and an End Date.');
       return;
     }
     try {
       const body = {
         title: editFormData.title,
         description: editFormData.description || null,
-        status: parseInt(editFormData.status, 10),
+        status: editFormData.status,
         budget: editFormData.budget ? parseFloat(editFormData.budget) : null,
         donorId: editFormData.donorId ? parseInt(editFormData.donorId, 10) : null,
         fundingType: editFormData.fundingType || 'SingleDonor',
@@ -784,15 +822,15 @@ export default function Projects() {
         setIsEditModalOpen(false);
         fetchProjects(selectedWorkspaceId);
       } else {
-        const err = await res.text();
-        alert(`Failed to update project: ${err}`);
+        const err = await parseApiResponse(res);
+        showErrorToast(`Failed to update project: ${err}`);
       }
     } catch (err) { console.error(err); }
   };
 
   const handleAssignTeam = async (e) => {
     e.preventDefault();
-    if (selectedTeamIds.length === 0) { alert('Select at least one team'); return; }
+    if (selectedTeamIds.length === 0) { showSuccessToast('Select at least one team'); return; }
     try {
       const results = await Promise.all(selectedTeamIds.map(teamId =>
         fetch(`${TEAMS_URL}/${teamId}/assign-project`, {
@@ -808,14 +846,14 @@ export default function Projects() {
         const assignedTeams = teams.filter(t => selectedTeamIds.includes(t.id));
         setSelectedProject(prev => ({ ...prev, teams: [...(prev.teams || []), ...assignedTeams] }));
       } else {
-        alert('Some teams failed to assign.');
+        showErrorToast('Some teams failed to assign.');
       }
     } catch (err) { console.error(err); }
   };
 
   const handleReplaceTeam = async (e) => {
     e.preventDefault();
-    if (!selectedReplacementTeamId) { alert('Select a replacement team'); return; }
+    if (!selectedReplacementTeamId) { showSuccessToast('Select a replacement team'); return; }
     try {
       const oldTeamId = projectTeams[0]?.id;
       const res = await fetch(`${TEAMS_URL}/${oldTeamId}/replace-on-project`, {
@@ -1144,17 +1182,19 @@ export default function Projects() {
                 )}
               </div>
               <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto p-1.5 border border-slate-100 rounded-lg bg-slate-50/50">
-                <button
-                  type="button"
-                  onClick={() => setFormData({ ...formData, donorId: '', donorIds: [] })}
-                  className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
-                    (!formData.donorId && (!formData.donorIds || formData.donorIds.length === 0))
-                      ? 'bg-slate-800 text-white border-slate-800'
-                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
-                  }`}
-                >
-                  None
-                </button>
+                {formData.fundingType !== 'SingleDonor' && (
+                  <button
+                    type="button"
+                    onClick={() => setFormData({ ...formData, donorId: '', donorIds: [] })}
+                    className={`px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
+                      (!formData.donorId && (!formData.donorIds || formData.donorIds.length === 0))
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    None
+                  </button>
+                )}
                 {donors.map(d => {
                   const idStr = String(d.id);
                   const isMulti = formData.fundingType === 'MultiDonor';
@@ -1183,7 +1223,7 @@ export default function Projects() {
                       }`}
                     >
                       {isSelected && isMulti && <span>✓</span>}
-                      {d.name || d.code || `Donor #${d.id}`}
+                      {d.name || d.code || 'Institutional Donor'}
                     </button>
                   );
                 })}
@@ -1333,7 +1373,7 @@ export default function Projects() {
                       }`}
                     >
                       {isSelected && isMulti && <span>✓</span>}
-                      {d.name || d.code || `Donor #${d.id}`}
+                      {d.name || d.code || 'Institutional Donor'}
                     </button>
                   );
                 })}

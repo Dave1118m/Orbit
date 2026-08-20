@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { parseApiResponse, showErrorToast } from '../../utils/toastHelper';
 
 export default function LogHoursModal({ isOpen, onClose, taskId, volunteerId, onLogged }) {
   const [hours, setHours] = useState('');
@@ -27,7 +28,7 @@ export default function LogHoursModal({ isOpen, onClose, taskId, volunteerId, on
         })
       });
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         throw new Error(text);
       }
       onLogged();
@@ -36,7 +37,7 @@ export default function LogHoursModal({ isOpen, onClose, taskId, volunteerId, on
       setHours('');
       setNotes('');
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setLoading(false);
     }

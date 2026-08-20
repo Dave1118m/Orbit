@@ -74,9 +74,10 @@ export default function DonorProgressReportModal({ donor, onClose }) {
     csvContent += `\n`;
 
     csvContent += `ITEMIZED EXPENSE TRANSACTION AUDIT LOG\n`;
-    csvContent += `Transaction ID,Date,Project Title,Category,Description,Amount,Currency,Approval Status,Finance Approver,Manager Sign-off\n`;
-    report.itemizedExpenses.forEach(e => {
-      csvContent += `"${e.id}","${new Date(e.date).toLocaleDateString()}","${e.projectTitle}","${e.categoryName}","${(e.description || '').replace(/"/g, '""')}","${e.amount}","${e.currency}","${e.status}","${e.approvedByFinance || 'Done'}","${e.signedOffByManager || 'Done'}"\n`;
+    csvContent += `Transaction Reference,Date,Project Title,Category,Description,Amount,Currency,Approval Status,Finance Approver,Manager Sign-off\n`;
+    report.itemizedExpenses.forEach((e, idx) => {
+      const refCode = `TXN-${String(idx + 1001)}`;
+      csvContent += `"${refCode}","${new Date(e.date).toLocaleDateString()}","${e.projectTitle}","${e.categoryName}","${(e.description || '').replace(/"/g, '""')}","${e.amount}","${e.currency}","${e.status}","${e.approvedByFinance || 'Done'}","${e.signedOffByManager || 'Done'}"\n`;
     });
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });

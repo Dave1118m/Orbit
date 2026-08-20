@@ -31,6 +31,9 @@ namespace OrbitApi.DTOs
 
         /// <summary>Open | InProgress | Mitigated | Resolved | Closed</summary>
         public string? Status { get; set; }
+
+        public string? LogframeLevel { get; set; }
+        public int? LogframeEntityId { get; set; }
     }
 
     public class UpdateRiskIssueRequest
@@ -56,5 +59,8 @@ namespace OrbitApi.DTOs
 
         /// <summary>Set to true to mark as resolved (sets ResolvedAt + ResolvedByUserId automatically)</summary>
         public bool? MarkResolved { get; set; }
+
+        public string? LogframeLevel { get; set; }
+        public int? LogframeEntityId { get; set; }
     }
 }

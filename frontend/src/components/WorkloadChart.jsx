@@ -3,8 +3,7 @@ export default function WorkloadChart({ workloadData }) {
 
   const maxTasks = Math.max(
     workloadData.openTasksTotal,
-    workloadData.overdueTasksTotal,
-    ...workloadData.memberWorkloads.map(m => m.openTasks + m.overdueTasks)
+    ...workloadData.memberWorkloads.map(m => m.openTasks)
   ) || 1;
 
   return (
@@ -34,9 +33,9 @@ export default function WorkloadChart({ workloadData }) {
         <h4 className="text-sm font-semibold text-slate-900 mb-4">Member Workload</h4>
         <div className="space-y-4">
           {workloadData.memberWorkloads.map((member, idx) => {
-            const totalTasks = member.openTasks + member.overdueTasks;
+            const totalTasks = member.openTasks;
             const percentage = (totalTasks / maxTasks) * 100;
-            const overduePercentage = member.overdueTasks > 0 ? (member.overdueTasks / totalTasks) * 100 : 0;
+            const overduePercentage = totalTasks > 0 ? (member.overdueTasks / totalTasks) * 100 : 0;
 
             return (
               <div key={idx} className="space-y-1.5">
@@ -83,13 +82,13 @@ export default function WorkloadChart({ workloadData }) {
         <div className="text-center">
           <div className="text-sm font-medium text-slate-600">Overdue Rate</div>
           <div className="text-2xl font-bold mt-1 text-slate-900">
-            {workloadData.openTasksTotal > 0 ? ((workloadData.overdueTasksTotal / (workloadData.openTasksTotal + workloadData.overdueTasksTotal)) * 100).toFixed(0) : 0}%
+            {workloadData.openTasksTotal > 0 ? ((workloadData.overdueTasksTotal / workloadData.openTasksTotal) * 100).toFixed(0) : 0}%
           </div>
         </div>
         <div className="text-center">
           <div className="text-sm font-medium text-slate-600">Distribution</div>
-          <div className={`text-2xl font-bold mt-1 ${Math.max(...workloadData.memberWorkloads.map(m => m.openTasks + m.overdueTasks)) > workloadData.averageTasksPerMember * 1.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
-            {Math.max(...workloadData.memberWorkloads.map(m => m.openTasks + m.overdueTasks)) > workloadData.averageTasksPerMember * 1.5 ? '⚠️ Uneven' : '✅ Balanced'}
+          <div className={`text-2xl font-bold mt-1 ${Math.max(...workloadData.memberWorkloads.map(m => m.openTasks)) > workloadData.averageTasksPerMember * 1.5 ? 'text-amber-600' : 'text-emerald-600'}`}>
+            {Math.max(...workloadData.memberWorkloads.map(m => m.openTasks)) > workloadData.averageTasksPerMember * 1.5 ? '⚠️ Uneven' : '✅ Balanced'}
           </div>
         </div>
       </div>

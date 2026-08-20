@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import { AutoText } from '../../contexts/TranslationContext';
+import { ETHIOPIAN_BANKS } from '../../lib/ethiopianBanks';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -51,7 +53,6 @@ export default function BankAccounts() {
     bankName: '',
     accountName: '',
     accountNumber: '',
-    swiftCode: '',
     currency: 'USD',
     isActive: true
   });
@@ -66,8 +67,17 @@ export default function BankAccounts() {
     description: ''
   });
 
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 130 });
+
   useEffect(() => {
     fetchAccounts();
+    async function loadRates() {
+      try {
+        const res = await fetch(`${API_BASE}/currency/rates?baseCurrency=USD`, { headers: authHeaders() });
+        if (res.ok) setExchangeRates(await res.json());
+      } catch {}
+    }
+    loadRates();
   }, []);
 
   async function fetchAccounts() {
@@ -114,7 +124,7 @@ export default function BankAccounts() {
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingAccountId(null);
-    setFormData({ bankName: '', accountName: '', accountNumber: '', swiftCode: '', currency: 'USD', isActive: true });
+    setFormData({ bankName: '', accountName: '', accountNumber: '', currency: 'USD', isActive: true });
     setIsModalOpen(true);
   };
 
@@ -125,7 +135,6 @@ export default function BankAccounts() {
       bankName: account.bankName,
       accountName: account.accountName,
       accountNumber: account.accountNumber,
-      swiftCode: account.swiftCode,
       currency: account.currency,
       isActive: account.isActive
     });
@@ -171,7 +180,7 @@ export default function BankAccounts() {
 
   const openTransferModal = () => {
     if (accounts.length < 2) {
-      alert('You need at least 2 bank accounts to perform an inter-account transfer.');
+      showErrorToast('You need at least 2 bank accounts to perform an inter-account transfer.');
       return;
     }
     const fromId = accounts[0]?.id ? String(accounts[0].id) : '';
@@ -204,14 +213,15 @@ export default function BankAccounts() {
       });
 
       if (!response.ok) {
-        const errText = await response.text();
+        const errText = await parseApiResponse(response);
         throw new Error(errText || `Failed to ${isEditMode ? 'update' : 'add'} bank account`);
       }
 
       setIsModalOpen(false);
       fetchAccounts();
+      showSuccessToast(`Bank account ${isEditMode ? 'updated' : 'added'} successfully.`);
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -221,7 +231,7 @@ export default function BankAccounts() {
     e.preventDefault();
     e.stopPropagation();
     if (transferData.fromBankAccountId === transferData.toBankAccountId) {
-      alert('Source and target bank accounts must be different.');
+      showErrorToast('Source and target bank accounts must be different.');
       return;
     }
     try {
@@ -239,15 +249,16 @@ export default function BankAccounts() {
       });
 
       if (!response.ok) {
-        const errText = await response.text();
+        const errText = await parseApiResponse(response);
         throw new Error(`Transfer failed: ${errText}`);
       }
 
       setIsTransferModalOpen(false);
       fetchAccounts();
       if (expandedAccountId) fetchTransactions(expandedAccountId);
+      showSuccessToast('Transfer completed successfully.');
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -261,21 +272,29 @@ export default function BankAccounts() {
         headers: authHeaders()
       });
       if (!response.ok) {
-        const errText = await response.text();
+        const errText = await parseApiResponse(response);
         throw new Error(errText || 'Failed to delete bank account');
       }
       setAccounts(prev => prev.filter(a => a.id !== id));
       if (expandedAccountId === id) setExpandedAccountId(null);
+      showSuccessToast('Bank account deleted.');
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
   // KPIs
   const activeAccountsCount = accounts.filter(a => a.isActive).length;
-  const totalBalance = accounts.reduce((sum, a) => sum + (a.currentBalance || 0), 0);
-  const totalReceived = accounts.reduce((sum, a) => sum + (a.totalReceived || 0), 0);
-  const totalExpended = accounts.reduce((sum, a) => sum + (a.totalExpended || 0), 0);
+
+  function toUSD(amount, currency) {
+    if (!currency || currency === 'USD') return amount;
+    const rate = exchangeRates[currency];
+    return rate ? amount / rate : amount;
+  }
+
+  const totalBalance = accounts.reduce((sum, a) => sum + toUSD(a.currentBalance || 0, a.currency), 0);
+  const totalReceived = accounts.reduce((sum, a) => sum + toUSD(a.totalReceived || 0, a.currency), 0);
+  const totalExpended = accounts.reduce((sum, a) => sum + toUSD(a.totalExpended || 0, a.currency), 0);
 
   return (
     <div className="space-y-6">
@@ -308,16 +327,16 @@ export default function BankAccounts() {
           <p className="text-3xl font-extrabold text-slate-900">{activeAccountsCount}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Current Balance" /></p>
-          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(totalBalance)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Current Balance (USD eq.)" /></p>
+          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(totalBalance, 'USD')}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Total Received" /></p>
-          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalReceived)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Total Received (USD eq.)" /></p>
+          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalReceived, 'USD')}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Total Expended" /></p>
-          <p className="text-3xl font-extrabold text-rose-600">{formatCurrency(totalExpended)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1"><AutoText text="Total Expended (USD eq.)" /></p>
+          <p className="text-3xl font-extrabold text-rose-600">{formatCurrency(totalExpended, 'USD')}</p>
         </div>
       </div>
 
@@ -374,7 +393,6 @@ export default function BankAccounts() {
                       </td>
                       <td className="px-6 py-4 text-sm font-mono text-slate-600">
                         <div>{acc.accountNumber}</div>
-                        {acc.swiftCode && <div className="text-[11px] text-slate-400">SWIFT: {acc.swiftCode}</div>}
                       </td>
                       <td className="px-6 py-4">
                         <span className="inline-flex px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-100 text-slate-700">
@@ -498,14 +516,12 @@ export default function BankAccounts() {
             <form onSubmit={handleSubmit} className="flex flex-col gap-3">
               <div>
                 <label className="block font-semibold text-slate-700 mb-1">Bank Name *</label>
-                <input
-                  type="text"
-                  name="bankName"
-                  required
+                <SearchSelect
+                  options={ETHIOPIAN_BANKS}
                   value={formData.bankName}
-                  onChange={handleInputChange}
-                  placeholder="e.g. Commercial Bank / Chase"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  onChange={val => handleInputChange({ target: { name: 'bankName', value: val } })}
+                  placeholder="Select Bank..."
+                  isClearable={true}
                 />
               </div>
 
@@ -522,30 +538,17 @@ export default function BankAccounts() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Account Number *</label>
-                  <input
-                    type="text"
-                    name="accountNumber"
-                    required
-                    value={formData.accountNumber}
-                    onChange={handleInputChange}
-                    placeholder="100029384"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">SWIFT Code</label>
-                  <input
-                    type="text"
-                    name="swiftCode"
-                    value={formData.swiftCode}
-                    onChange={handleInputChange}
-                    placeholder="CBETETAA"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Account Number *</label>
+                <input
+                  type="text"
+                  name="accountNumber"
+                  required
+                  value={formData.accountNumber}
+                  onChange={handleInputChange}
+                  placeholder="100029384"
+                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                />
               </div>
 
               <div>

@@ -5,11 +5,18 @@ using System.Threading.Tasks;
 
 namespace OrbitApi.Services;
 
+/// <summary>
+/// Email delivery provider implementing SendGrid API integration for sending password resets, invitations, and notifications.
+/// </summary>
 public class SendGridEmailSender : IEmailSender
 {
     private readonly IConfiguration _config;
     private readonly ISendGridClient _sendGridClient;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SendGridEmailSender"/> using configured SendGrid credentials.
+    /// </summary>
+    /// <param name="config">Configuration provider for reading API keys and sender addresses.</param>
     public SendGridEmailSender(IConfiguration config)
     {
         _config = config;
@@ -21,6 +28,12 @@ public class SendGridEmailSender : IEmailSender
         _sendGridClient = new SendGridClient(apiKey);
     }
 
+    /// <summary>
+    /// Constructs and sends an HTML email message via SendGrid's mail send endpoint.
+    /// </summary>
+    /// <param name="to">Recipient address.</param>
+    /// <param name="subject">Email subject.</param>
+    /// <param name="htmlBody">HTML body markup.</param>
     public async Task SendEmailAsync(string to, string subject, string htmlBody)
     {
         var fromEmail = _config["SendGrid:FromEmail"];

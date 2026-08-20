@@ -13,6 +13,7 @@ using OrbitApi.Services;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.Json.Serialization;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("https://localhost:7065");
@@ -51,14 +52,25 @@ if (envValues != null && envValues.Count > 0)
 
 builder.Configuration.AddEnvironmentVariables();
 
-
-builder.Services.AddControllers();
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new JsonStringEnumConverter());
+    });
 builder.Services.AddSignalR();
+builder.Services.Configure<HostOptions>(options =>
+{
+    options.BackgroundServiceExceptionBehavior = BackgroundServiceExceptionBehavior.Ignore;
+});
 builder.Services.AddOpenApi();
 
 // Add Local Memory Caching (Replaces Redis for local testing without external database)
 builder.Services.AddDistributedMemoryCache();
 builder.Services.AddScoped<ICacheService, RedisCacheService>();
+builder.Services.AddScoped<IGoogleCalendarService, GoogleCalendarService>();
+builder.Services.AddScoped<ICurrencyService, CurrencyService>();
+builder.Services.AddHttpClient();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("DefaultCorsPolicy", policy =>
@@ -189,6 +201,7 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<OrbitDbContext>();
     try
     {
+        db.Database.ExecuteSqlRaw("IF NOT EXISTS (SELECT * FROM sys.indexes WHERE name = 'IX_Expenses_ProjectId_Category_ApprovalStatus' AND object_id = OBJECT_ID('Expenses')) BEGIN CREATE INDEX [IX_Expenses_ProjectId_Category_ApprovalStatus] ON [Expenses] ([ProjectId], [ApprovalStatus]); END");
         db.Database.Migrate();
     }
     catch (Exception ex)
@@ -197,43 +210,10 @@ using (var scope = app.Services.CreateScope())
         Console.WriteLine($"WARNING: Database migration failed or pending changes detected: {ex.Message}");
     }
 
-    try
-    {
-        db.Database.ExecuteSqlRaw(@"
-            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ContactInquiries')
-            BEGIN
-                CREATE TABLE [ContactInquiries] (
-                    [Id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                    [Name] NVARCHAR(MAX) NOT NULL,
-                    [Email] NVARCHAR(MAX) NOT NULL,
-                    [Subject] NVARCHAR(MAX) NOT NULL,
-                    [Message] NVARCHAR(MAX) NOT NULL,
-                    [CreatedAt] DATETIME2 NOT NULL,
-                    [IsResolved] BIT NOT NULL DEFAULT 0,
-                    [AdminNotes] NVARCHAR(MAX) NULL,
-                    [ReplyMessage] NVARCHAR(MAX) NULL,
-                    [RepliedAt] DATETIME2 NULL,
-                    [RepliedByUserName] NVARCHAR(MAX) NULL
-                );
-            END
-            ELSE
-            BEGIN
-                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('ContactInquiries') AND name = 'ReplyMessage')
-                    ALTER TABLE [ContactInquiries] ADD [ReplyMessage] NVARCHAR(MAX) NULL;
-                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('ContactInquiries') AND name = 'RepliedAt')
-                    ALTER TABLE [ContactInquiries] ADD [RepliedAt] DATETIME2 NULL;
-                IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('ContactInquiries') AND name = 'RepliedByUserName')
-                    ALTER TABLE [ContactInquiries] ADD [RepliedByUserName] NVARCHAR(MAX) NULL;
-            END
-        ");
-    }
-    catch (Exception ex)
-    {
-        Console.WriteLine($"WARNING: Automatic ContactInquiries table check: {ex.Message}");
-    }
-
-    var existingRoles = db.Roles.Select(r => r.Name).ToHashSet();
-    var missingRoles = Enum.GetValues<RoleName>().Where(role => !existingRoles.Contains(role)).ToList();
+    var existingRoleNames = db.Roles.ToList().Select(r => r.Name.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+    var missingRoles = Enum.GetValues<RoleName>()
+        .Where(role => !existingRoleNames.Contains(role.ToString()))
+        .ToList();
     if (missingRoles.Any())
     {
         db.Roles.AddRange(missingRoles.Select(role => new Role { Name = role, Description = role.ToString() }));
@@ -286,10 +266,10 @@ using (var scope = app.Services.CreateScope())
     db.Permissions.AddRange(missingPerms);
 
     // Seed all roles from the RoleName enum (add any missing ones)
-    var existingRoleNames = db.Roles.Select(r => r.Name).ToHashSet();
+    var existingRoleNamesSet = db.Roles.ToList().Select(r => r.Name.ToString()).ToHashSet(StringComparer.OrdinalIgnoreCase);
     var allRoleNames = Enum.GetValues<RoleName>();
     var missingRoles = allRoleNames
-        .Where(r => !existingRoleNames.Contains(r))
+        .Where(r => !existingRoleNamesSet.Contains(r.ToString()))
         .Select(r => new Role { Name = r, Description = $"{r} role" });
     db.Roles.AddRange(missingRoles);
 
@@ -302,25 +282,15 @@ using (var scope = app.Services.CreateScope())
     {
         [RoleName.Owner] = Enum.GetValues<Permission>(),
 
-        [RoleName.Admin] = new[] {
-            Permission.OrganizationManage, Permission.OrganizationView, Permission.OrganizationInvite,
-            Permission.OrganizationRestore, Permission.OrganizationManagePartners, Permission.OrganizationManageCompliance,
-            Permission.WorkspaceCreate, Permission.WorkspaceEdit, Permission.WorkspaceDelete, Permission.WorkspaceView,
-            Permission.ProjectCreate, Permission.ProjectEdit, Permission.ProjectDelete, Permission.ProjectView, Permission.ProjectAssignTeam, Permission.ProjectPostpone,
-            Permission.TeamCreate, Permission.TeamEdit, Permission.TeamDelete, Permission.TeamManageMembers, Permission.TeamAssignProject, Permission.TeamView,
-            Permission.TaskCreate, Permission.TaskEdit, Permission.TaskDelete, Permission.TaskView,
-            Permission.UserManage, Permission.UserInvite,
-            Permission.ViewReports,
-            Permission.VolunteerManage, Permission.VolunteerView,
-            Permission.RiskLogView, Permission.RiskLogEdit, Permission.IssueCreate
-        },
+        [RoleName.Admin] = Enum.GetValues<Permission>().Where(p => p != Permission.OrganizationTransferOwnership).ToArray(),
 
         [RoleName.Coordinator] = new[] {
             Permission.OrganizationView,
-            Permission.WorkspaceCreate, Permission.WorkspaceEdit, Permission.WorkspaceView,
-            Permission.ProjectCreate, Permission.ProjectEdit, Permission.ProjectView, Permission.ProjectAssignTeam, Permission.ProjectPostpone,
+            Permission.WorkspaceCreate, Permission.WorkspaceEdit, Permission.WorkspaceView, Permission.WorkspaceDelete,
+            Permission.ProjectCreate, Permission.ProjectEdit, Permission.ProjectView, Permission.ProjectAssignTeam, Permission.ProjectPostpone, Permission.ProjectDelete,
             Permission.TeamCreate, Permission.TeamEdit, Permission.TeamDelete, Permission.TeamView, Permission.TeamManageMembers, Permission.TeamAssignProject,
-            Permission.TaskCreate, Permission.TaskEdit, Permission.TaskView,
+            Permission.TaskCreate, Permission.TaskEdit, Permission.TaskDelete, Permission.TaskView,
+            Permission.BudgetEdit,
             Permission.ViewReports,
             Permission.VolunteerManage, Permission.VolunteerView,
             Permission.RiskLogView, Permission.RiskLogEdit, Permission.IssueCreate

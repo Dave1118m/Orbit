@@ -4,6 +4,14 @@ import { useUser } from '../contexts/UserContext';
 const rawApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://localhost:7065';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 
+/**
+ * Organization-wide aggregated Risk and Issue Rollup dashboard.
+ * Summarizes risk severity breakdowns across all projects and provides interactive filtering by critical/high thresholds.
+ * @param {{
+ *   orgId: number|string,
+ *   onSelectProject?: (projectId: number|string) => void
+ * }} props
+ */
 export default function OrgRiskRollup({ orgId, onSelectProject }) {
   const { hasPermission } = useUser();
   const canView = hasPermission('RiskLogView');
@@ -19,6 +27,9 @@ export default function OrgRiskRollup({ orgId, onSelectProject }) {
     fetchRollupData();
   }, [orgId]);
 
+  /**
+   * Fetches organization-wide aggregated risk scores and project breakdown metrics.
+   */
   const fetchRollupData = async () => {
     setLoading(true);
     setError(null);

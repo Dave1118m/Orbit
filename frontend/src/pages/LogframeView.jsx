@@ -3,14 +3,21 @@ import { useParams, Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import Modal from '../components/Modal';
 import SearchSelect from '../components/SearchSelect';
+import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
 
 const API_URL = `${import.meta.env.VITE_API_URL}`;
 
+/**
+ * Logical Framework (Logframe) Matrix page component.
+ * Visualizes hierarchical Goal -> Outcome -> Output -> Activity results chains with linked KPIs/indicators,
+ * operational task associations, and risk dependencies.
+ */
 export default function LogframeView() {
   const { projectId } = useParams();
   const { hasPermission } = useUser();
   const [logframe, setLogframe] = useState({ goals: [], indicators: [] });
   const [tasks, setTasks] = useState([]);
+  const [risks, setRisks] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -28,8 +35,12 @@ export default function LogframeView() {
   useEffect(() => {
     fetchLogframe();
     fetchTasks();
+    fetchRisks();
   }, [projectId]);
 
+  /**
+   * Loads the structured logframe tree (goals, outcomes, outputs, activities, indicators) for this project.
+   */
   const fetchLogframe = async () => {
     try {
       const response = await fetch(`${API_URL}/projects/${projectId}/logframe`, { headers: authHeaders });
@@ -43,12 +54,31 @@ export default function LogframeView() {
     }
   };
 
+  /**
+   * Fetches project tasks for linking to logframe operational activities.
+   */
   const fetchTasks = async () => {
     try {
       const response = await fetch(`${API_URL}/tasks?projectId=${projectId}`, { headers: authHeaders });
       if (response.ok) {
         const data = await response.json();
         setTasks(data);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  /**
+   * Fetches risk register items linked to project logframe objectives.
+   */
+  const fetchRisks = async () => {
+    try {
+      const response = await fetch(`${API_URL}/projects/${projectId}/risks`, { headers: authHeaders });
+      if (response.ok) {
+        const data = await response.json();
+        // Keep all risks that are of type Risk (including closed/mitigated) so they can be shown on the Logframe
+        setRisks(data.filter(r => r.type === 'Risk'));
       }
     } catch (err) {
       console.error(err);
@@ -135,9 +165,9 @@ export default function LogframeView() {
         fetchLogframe();
         handleCloseModal();
       } else {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         console.error('Logframe save error:', res.status, errText);
-        alert(`Action failed: ${errText || 'Check your permissions or input data.'}`);
+        showErrorToast(`Action failed: ${errText || 'Check your permissions or input data.'}`);
       }
     } catch (err) {
       console.error(err);
@@ -155,7 +185,7 @@ export default function LogframeView() {
       if (res.ok) {
         fetchLogframe();
       } else {
-        alert('Failed to delete item.');
+        showErrorToast('Failed to delete item.');
       }
     } catch (err) {
       console.error(err);
@@ -175,7 +205,7 @@ export default function LogframeView() {
         fetchLogframe();
         handleCloseModal();
       } else {
-        alert('Failed to link task.');
+        showErrorToast('Failed to link task.');
       }
     } catch (err) {
       console.error(err);
@@ -189,7 +219,7 @@ export default function LogframeView() {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) {
-        alert('Failed to export logframe CSV');
+        showErrorToast('Failed to export logframe CSV');
         return;
       }
       const blob = await res.blob();
@@ -241,6 +271,42 @@ export default function LogframeView() {
             style={{ width: `${pct}%` }}
           />
         </div>
+      </div>
+    );
+  };
+
+  const RiskBadge = ({ level, entityId }) => {
+    const linkedRisks = risks.filter(r => r.logframeLevel === level && parseInt(r.logframeEntityId) === entityId);
+    if (!linkedRisks.length) return null;
+    
+    const activeRisks = linkedRisks.filter(r => r.status !== 'Closed' && r.status !== 'Mitigated' && r.status !== 'Resolved');
+    const resolvedRisks = linkedRisks.filter(r => r.status === 'Closed' || r.status === 'Mitigated' || r.status === 'Resolved');
+    
+    return (
+      <div className="flex flex-col gap-1 mt-2">
+        {activeRisks.length > 0 && (() => {
+          const maxScore = Math.max(...activeRisks.map(r => r.impactScore * r.likelihoodScore));
+          const isCritical = maxScore >= 15;
+          const isHigh = maxScore >= 10;
+          
+          const color = isCritical ? 'bg-red-500/20 text-red-400 border-red-500/50' 
+                      : isHigh ? 'bg-orange-500/20 text-orange-400 border-orange-500/50'
+                      : 'bg-amber-500/20 text-amber-400 border-amber-500/50';
+
+          return (
+            <div className={`flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-bold w-fit ${color}`} title={`${activeRisks.length} active risk(s) threatening this ${level}`}>
+              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>
+              {activeRisks.length} Active Risk{activeRisks.length > 1 ? 's' : ''}
+            </div>
+          );
+        })()}
+
+        {resolvedRisks.length > 0 && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-bold w-fit bg-emerald-500/20 text-emerald-400 border-emerald-500/50" title={`${resolvedRisks.length} mitigated or resolved risk(s)`}>
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {resolvedRisks.length} Mitigated Risk{resolvedRisks.length > 1 ? 's' : ''}
+          </div>
+        )}
       </div>
     );
   };
@@ -362,6 +428,8 @@ export default function LogframeView() {
                     Goal
                   </div>
                   <p className="text-sm font-medium text-white">{goal.description}</p>
+                  
+                  <RiskBadge level="Goal" entityId={goal.id} />
 
                   <ProgressBar value={goal.progress} label="Overall Progress" />
 
@@ -395,6 +463,8 @@ export default function LogframeView() {
                     Outcome
                   </div>
                   <p className="text-sm font-medium text-white">{outcome.description}</p>
+                  
+                  <RiskBadge level="Outcome" entityId={outcome.id} />
 
                   <ProgressBar value={outcome.progress} label="Avg. Progress" />
 
@@ -423,6 +493,8 @@ export default function LogframeView() {
                     Output
                   </div>
                   <p className="text-sm font-medium text-white">{output.description}</p>
+
+                  <RiskBadge level="Output" entityId={output.id} />
 
                   <ProgressBar value={output.progress} label="Avg. Progress" />
 
@@ -487,8 +559,7 @@ export default function LogframeView() {
 
                   <EditControls 
                     type="activity" 
-                    data={activity}
-                    onAddIndicator={() => { setEntityId(activity.id); setIndicatorLevel(3); openModal('indicator', 'create'); }}
+                    data={activity} 
                   />
                 </div>
               ))}
@@ -529,7 +600,7 @@ export default function LogframeView() {
                     />
                   </div>
 
-                  {modalType.mode === 'create' && (
+                  {modalType.mode === 'create' && modalType.type !== 'activity' && (
                     <div className="space-y-3 pt-3 border-t border-slate-800">
                       <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
                         Linked Key Indicator (OVI) &amp; Verification
@@ -623,8 +694,8 @@ export default function LogframeView() {
                     </div>
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-400">Unit</label>
-                    <input type="text" value={modalData.unit || ''} onChange={e => setModalData({...modalData, unit: e.target.value})} className={inputClass} placeholder="e.g. tons, families, %" />
+                    <label className="mb-1.5 block text-sm font-medium text-slate-400">Unit *</label>
+                    <input required type="text" value={modalData.unit || ''} onChange={e => setModalData({...modalData, unit: e.target.value})} className={inputClass} placeholder="e.g. tons, families, %" />
                   </div>
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-slate-400">Notes (MoV &amp; Assumptions)</label>

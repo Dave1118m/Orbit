@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import Modal from './Modal';
+import { parseApiResponse } from '../utils/toastHelper';
 
 export default function InAppFileViewer({ attachment, isOpen, onClose, entityType }) {
   const [previewUrl, setPreviewUrl] = useState('');
@@ -27,7 +28,7 @@ export default function InAppFileViewer({ attachment, isOpen, onClose, entityTyp
         console.log('Preview response status:', response.status);
         
         if (!response.ok) {
-          const errorText = await response.text();
+          const errorText = await parseApiResponse(response);
           console.error('Failed to fetch preview:', response.status, errorText);
           setHasPreviewError(true);
           return;

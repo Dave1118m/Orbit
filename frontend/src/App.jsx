@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { Toaster } from 'react-hot-toast';
 import Register from './pages/Register';
 import Login from './pages/Login';
 import SetupPassword from './pages/SetupPassword';
@@ -107,6 +108,7 @@ function App() {
     <TranslationProvider>
       <UserProvider>
         <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+          <Toaster />
           <Content />
         </BrowserRouter>
       </UserProvider>

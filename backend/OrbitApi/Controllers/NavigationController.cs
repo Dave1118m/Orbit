@@ -1,11 +1,21 @@
 using Microsoft.AspNetCore.Mvc;
 
+using Microsoft.AspNetCore.Authorization;
+
 namespace OrbitApi.Controllers;
 
+/// <summary>
+/// API Controller providing dynamic navigation structures and sidebar menu configurations for client applications.
+/// </summary>
 [ApiController]
 [Route("api/v1/[controller]")]
+[Authorize]
 public class NavigationController : ControllerBase
 {
+    /// <summary>
+    /// Retrieves the standard sidebar menu schema with routes, descriptions, and sub-navigation items.
+    /// </summary>
+    /// <returns>Array of navigation group objects.</returns>
     [HttpGet]
     public IActionResult Get()
     {

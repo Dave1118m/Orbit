@@ -7,17 +7,33 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Authorization;
 
+/// <summary>
+/// Core ASP.NET Core authorization handler that evaluates permission requirements against
+/// user role assignments, organization memberships, and hierarchical resource scopes.
+/// </summary>
 public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionRequirement, object>
 {
     private readonly OrbitDbContext _db;
     private readonly IPermissionService _permissionService;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="PermissionAuthorizationHandler"/>.
+    /// </summary>
+    /// <param name="db">The primary database context for querying roles, assignments, and entities.</param>
+    /// <param name="permissionService">The cached permission service for role permission lookups.</param>
     public PermissionAuthorizationHandler(OrbitDbContext db, IPermissionService permissionService)
     {
         _db = db;
         _permissionService = permissionService;
     }
 
+    /// <summary>
+    /// Evaluates if the calling user satisfies the specified permission requirement on the target resource.
+    /// Handles superuser bypass for organization owners, evaluates role assignments, and checks scope inheritance.
+    /// </summary>
+    /// <param name="context">The authorization handler context containing claims and status.</param>
+    /// <param name="requirement">The permission requirement to validate.</param>
+    /// <param name="resource">The optional resource context (e.g. ScopedResource) to validate scope against.</param>
     protected override async Task HandleRequirementAsync(AuthorizationHandlerContext context, PermissionRequirement requirement, object resource)
     {
         var userId = GetCurrentUserId(context.User);
@@ -56,19 +72,14 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             }
         }
 
-        // 2. Owner role bypass: Any user assigned RoleName.Owner automatically gets full permission
-        if (assignments.Any(a => a.Role != null && a.Role.Name == RoleName.Owner))
-        {
-            context.Succeed(requirement);
-            return;
-        }
-
         foreach (var assignment in assignments)
         {
             if (assignment.Role == null) continue;
 
-            // Use IPermissionService (DB-driven) instead of static mapping
-            if (!await _permissionService.RoleHasPermissionAsync(assignment.Role.Name, requirement.Permission))
+            // If the role is Owner, bypass the specific permission check, but WE MUST still verify the scope below
+            bool hasPermission = assignment.Role.Name == RoleName.Owner || await _permissionService.RoleHasPermissionAsync(assignment.Role.Name, requirement.Permission);
+            
+            if (!hasPermission)
                 continue;
 
             if (resource is ScopedResource scopedResource)
@@ -89,6 +100,11 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         context.Fail();
     }
 
+    /// <summary>
+    /// Extracts the integer User ID from the authenticated user's JWT claims.
+    /// </summary>
+    /// <param name="user">The ClaimsPrincipal representing the current user.</param>
+    /// <returns>The parsed integer User ID if valid; otherwise null.</returns>
     private int? GetCurrentUserId(ClaimsPrincipal? user)
     {
         var idValue = user?.FindFirst(JwtRegisteredClaimNames.Sub)?.Value
@@ -97,6 +113,13 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         return int.TryParse(idValue, out var id) ? id : null;
     }
 
+    /// <summary>
+    /// Determines whether an active role assignment's scope covers the target resource via hierarchical inheritance.
+    /// (Organization scope covers all child Workspaces and Projects; Workspace scope covers child Projects).
+    /// </summary>
+    /// <param name="assignment">The active role assignment holding scope level and ID.</param>
+    /// <param name="resource">The target resource being accessed.</param>
+    /// <returns>True if the assignment's scope encloses the requested resource.</returns>
     private async Task<bool> AssignmentCoversResourceAsync(RoleAssignment assignment, ScopedResource resource)
     {
         if (assignment.ScopeType == resource.ScopeType && assignment.ScopeId == resource.ScopeId)
@@ -111,6 +134,11 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         };
     }
 
+    /// <summary>
+    /// Checks if a given resource belongs to a specific workspace.
+    /// </summary>
+    /// <param name="resource">The target resource.</param>
+    /// <param name="workspaceId">The workspace identifier.</param>
     private Task<bool> ResourceBelongsToWorkspaceAsync(ScopedResource resource, int workspaceId)
     {
         return resource.ScopeType switch
@@ -121,6 +149,11 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         };
     }
 
+    /// <summary>
+    /// Checks if a given resource belongs to a specific organization.
+    /// </summary>
+    /// <param name="resource">The target resource.</param>
+    /// <param name="organizationId">The organization identifier.</param>
     private Task<bool> ResourceBelongsToOrganizationAsync(ScopedResource resource, int organizationId)
     {
         return resource.ScopeType switch
@@ -132,6 +165,11 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
         };
     }
 
+    /// <summary>
+    /// Checks if a given resource belongs to a specific project.
+    /// </summary>
+    /// <param name="resource">The target resource.</param>
+    /// <param name="projectId">The project identifier.</param>
     private Task<bool> ResourceBelongsToProjectAsync(ScopedResource resource, int projectId)
     {
         return resource.ScopeType switch

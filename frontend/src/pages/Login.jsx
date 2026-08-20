@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import GoogleSignIn from '../components/GoogleSignIn';
+import { parseApiResponse } from '../utils/toastHelper';
 
 export default function Login() {
   const [searchParams] = useSearchParams();
@@ -48,7 +49,7 @@ export default function Login() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         setMessage(text || 'Login failed');
         setStatus('error');
         if (text === 'Email not confirmed') {
@@ -86,7 +87,7 @@ export default function Login() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         setMessage(text || 'Failed to resend confirmation email');
         setStatus('error');
         setShowResend(true);
@@ -113,7 +114,7 @@ export default function Login() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         setMessage(text || 'Failed to process request');
         setStatus('error');
         return;
@@ -144,7 +145,7 @@ export default function Login() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         try {
           const errors = JSON.parse(text);
           if (Array.isArray(errors)) {

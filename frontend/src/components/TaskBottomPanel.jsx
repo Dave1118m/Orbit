@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import CommentSection from './CommentSection';
 import AttachmentList from './AttachmentList';
 import TaskVolunteersTab from './TaskVolunteersTab';
+import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/tasks`;
 
@@ -194,8 +195,8 @@ export default function TaskBottomPanel({ task, onClose }) {
         setAddDepTaskId('');
         fetchDependencies();
       } else {
-        const errText = await res.text();
-        alert(`Failed to add dependency: ${errText}`);
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Failed to add dependency: ${errText}`);
       }
     } catch (err) {
       console.error(err);
@@ -257,6 +258,26 @@ export default function TaskBottomPanel({ task, onClose }) {
     createdAt: h.changedAt
   }));
 
+  const handleGoogleCalendarSync = async () => {
+    try {
+      const res = await fetch(`${API_URL}/${task.id}/google-calendar-url`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token')}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.url) {
+          window.open(data.url, '_blank');
+        }
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleDownloadICal = () => {
+    window.open(`${API_URL}/${task.id}/ical`, '_blank');
+  };
+
   return (
     <div className="fixed inset-x-0 lg:left-[260px] bottom-0 z-40 flex h-96 flex-col border-t border-slate-200 bg-white shadow-2xl transition-all animate-in slide-in-from-bottom duration-200 max-w-7xl mx-auto rounded-t-3xl overflow-hidden">
       {/* Header & Tabs */}
@@ -266,8 +287,28 @@ export default function TaskBottomPanel({ task, onClose }) {
             {task.title}
           </h2>
           <span className="rounded-md bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">
-            Task #{task.id}
+            Active Task
           </span>
+          {/* Add to Calendar buttons (hidden for now) */}
+          {/*
+          <button
+            onClick={handleGoogleCalendarSync}
+            title="Add to Google Calendar"
+            className="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-600 border border-blue-200 hover:bg-blue-100 transition"
+          >
+            <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 4h-1V2h-2v2H8V2H6v2H5c-1.11 0-1.99.9-1.99 2L3 20c0 1.1.89 2 2 2h14c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 16H5V10h14v10zm0-12H5V6h14v2zm-7 5h5v5h-5z"/>
+            </svg>
+            Add to Calendar
+          </button>
+          <button
+            onClick={handleDownloadICal}
+            title="Download .ics Calendar File"
+            className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-200 transition"
+          >
+            .ics
+          </button>
+          */}
         </div>
         <div className="flex gap-2 overflow-x-auto">
           {['subtasks', 'dependencies', 'activity', 'attachments', 'members', 'volunteers'].map((tab) => (
@@ -289,6 +330,7 @@ export default function TaskBottomPanel({ task, onClose }) {
           </svg>
         </button>
       </div>
+
 
 
       {/* Tab Content */}
@@ -398,8 +440,7 @@ export default function TaskBottomPanel({ task, onClose }) {
                   <div key={dep.id} className="flex items-center justify-between p-3 rounded-xl border border-slate-200 bg-white shadow-2xs">
                     <div className="flex items-center gap-2 text-xs">
                       <span className="font-bold text-slate-400">🔗 Blocked by:</span>
-                      <span className="font-bold text-slate-900">Task #{dep.dependsOnTaskId}</span>
-                      <span className="text-slate-700 font-medium">{dep.dependsOnTaskTitle}</span>
+                      <span className="font-bold text-slate-900">{dep.dependsOnTaskTitle || 'Prerequisite Task'}</span>
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
                         dep.dependsOnTaskStatus === 'Done' ? 'bg-emerald-100 text-emerald-800' :
                         dep.dependsOnTaskStatus === 'InProgress' ? 'bg-blue-100 text-blue-800' : 'bg-amber-100 text-amber-800'

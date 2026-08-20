@@ -106,6 +106,31 @@ public class OrbitDbContext : DbContext
     {
         base.OnModelCreating(modelBuilder);
 
+        // Convert all enums to string globally
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+        {
+            foreach (var property in entityType.GetProperties())
+            {
+                if (property.ClrType.IsEnum)
+                {
+                    var type = typeof(Microsoft.EntityFrameworkCore.Storage.ValueConversion.EnumToStringConverter<>).MakeGenericType(property.ClrType);
+                    var converter = Activator.CreateInstance(type, new object[] { null }) as Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter;
+                    property.SetValueConverter(converter);
+                }
+                else if (Nullable.GetUnderlyingType(property.ClrType)?.IsEnum == true)
+                {
+                    var type = typeof(Microsoft.EntityFrameworkCore.Storage.ValueConversion.EnumToStringConverter<>).MakeGenericType(Nullable.GetUnderlyingType(property.ClrType));
+                    var converter = Activator.CreateInstance(type, new object[] { null }) as Microsoft.EntityFrameworkCore.Storage.ValueConversion.ValueConverter;
+                    property.SetValueConverter(converter);
+                }
+            }
+        }
+
+        // Global Query Filters for Soft Deletes
+        modelBuilder.Entity<Organization>().HasQueryFilter(o => !o.IsDeleted);
+        modelBuilder.Entity<Project>().HasQueryFilter(p => !p.IsDeleted);
+        modelBuilder.Entity<TaskItem>().HasQueryFilter(t => !t.IsDeleted);
+
         modelBuilder.Entity<RoleAssignment>()
             .HasOne(ra => ra.Role)
             .WithMany(r => r.RoleAssignments)
@@ -605,5 +630,12 @@ public class OrbitDbContext : DbContext
             .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt })
             .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedAt");
     }
+
+    protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)
+    {
+        optionsBuilder.ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
+    }
+
+
 }
 

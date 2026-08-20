@@ -48,15 +48,20 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpPost("revoke")]
-    public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequest req)
+    public async Task<IActionResult> RevokeToken()
     {
-        var adminCheck = User.FindFirst(ClaimTypes.Role)?.Value;
-        // In a real system, verify if admin or owner. For now, allow test.
+        var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
+        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        
+        if (string.IsNullOrEmpty(jti) || !int.TryParse(userIdStr, out var userId))
+        {
+            return BadRequest(new { message = "Invalid token claims." });
+        }
         
         var revoked = new RevokedToken
         {
-            TokenId = req.TokenId,
-            UserId = req.UserId,
+            TokenId = jti,
+            UserId = userId,
             RevokedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddDays(7)
         };
@@ -477,6 +482,46 @@ public class AuthController : ControllerBase
         return Ok();
     }
 
+    [HttpPost("admin-reset-password")]
+    [Authorize]
+    public async Task<IActionResult> AdminResetPassword([FromBody] AdminResetPasswordRequest req)
+    {
+        if (string.IsNullOrWhiteSpace(req.NewPassword) || req.NewPassword.Length < 6)
+        {
+            return BadRequest("Password must be at least 6 characters long.");
+        }
+
+        var dbUser = await _db.Users.FindAsync(req.UserId);
+        if (dbUser == null) return NotFound("User not found.");
+
+        var appUser = await _userManager.FindByEmailAsync(dbUser.Email);
+        if (appUser == null)
+        {
+            return NotFound("Application identity account not found for user.");
+        }
+
+        var token = await _userManager.GeneratePasswordResetTokenAsync(appUser);
+        var result = await _userManager.ResetPasswordAsync(appUser, token, req.NewPassword);
+
+        if (!result.Succeeded)
+        {
+            return BadRequest(result.Errors.Select(e => e.Description));
+        }
+
+        try
+        {
+            var subject = "Your Orbit Password Has Been Reset by Admin";
+            var body = $"<p>Hi {dbUser.Name},</p><p>An Organization Administrator has updated your Orbit account password.</p><p>Your new temporary password is: <strong>{req.NewPassword}</strong></p><p>Please log in and update your password immediately.</p>";
+            await _emailSender.SendEmailAsync(dbUser.Email, subject, body);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[AdminResetPassword] Email send notification warning: {ex.Message}");
+        }
+
+        return Ok(new { message = $"Password for {dbUser.Name} ({dbUser.Email}) was successfully reset." });
+    }
+
     [HttpPost("switch-persona")]
     [AllowAnonymous]
     public async Task<IActionResult> SwitchPersona([FromBody] SwitchPersonaDto dto)
@@ -635,21 +680,9 @@ public class AuthController : ControllerBase
                 userEntity = await _db.Users.FindAsync(appUser.Id);
             }
 
-            var defaultPhotoUrl = roleName switch
-            {
-                RoleName.Owner => "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80",
-                RoleName.Admin => "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80",
-                RoleName.Coordinator => "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?w=150&auto=format&fit=crop&q=80",
-                RoleName.Manager => "https://images.unsplash.com/photo-1560250097-0b93528c311a?w=150&auto=format&fit=crop&q=80",
-                RoleName.FinanceOfficer => "https://images.unsplash.com/photo-1580489944761-15a19d654956?w=150&auto=format&fit=crop&q=80",
-                RoleName.Member => "https://images.unsplash.com/photo-1519085360753-af0119f7cbe7?w=150&auto=format&fit=crop&q=80",
-                _ => "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150&auto=format&fit=crop&q=80"
-            };
-
             if (userEntity != null)
             {
                 userEntity.Name = cleanName;
-                if (string.IsNullOrEmpty(userEntity.PhotoUrl)) userEntity.PhotoUrl = defaultPhotoUrl;
                 await _db.SaveChangesAsync();
             }
 
@@ -743,4 +776,5 @@ public record RegisterRequest(string Email, string Password, string? FullName);
 public record LoginRequest(string Email, string Password);
 public record ForgotPasswordRequest(string Email);
 public record ResetPasswordRequest(string Email, string Token, string NewPassword);
+public record AdminResetPasswordRequest(int UserId, string NewPassword);
 public record SwitchPersonaDto(string RoleName, int? OrganizationId);

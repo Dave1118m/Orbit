@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
 import OrgRiskRollup from '../components/OrgRiskRollup';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/organizations`;
 
@@ -138,7 +139,7 @@ export default function Organizations() {
     try {
       const token = localStorage.getItem('token');
       if (!token) {
-        alert('You must be signed in to create an organization. Please sign in and try again.');
+        showSuccessToast('You must be signed in to create an organization. Please sign in and try again.');
         return;
       }
       const response = await fetch(API_URL, {
@@ -200,12 +201,12 @@ export default function Organizations() {
         setIsModalOpen(false);
         resetForm();
       } else {
-        const errorText = await response.text();
-        alert(`Failed to create organization: ${response.status} ${response.statusText}\n${errorText}`);
+        const errorText = await parseApiResponse(response);
+        showErrorToast(`Failed to create organization: ${response.status} ${response.statusText}\n${errorText}`);
       }
     } catch (err) {
       console.error(err);
-      alert(`Failed to create organization: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      showErrorToast(`Failed to create organization: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -226,7 +227,7 @@ export default function Organizations() {
   const handleTransferOwnership = async (e) => {
     e.preventDefault();
     if (!selectedOrgForTransfer || !selectedNewOwner) {
-      alert('Please select a new owner');
+      showSuccessToast('Please select a new owner');
       return;
     }
     try {
@@ -240,18 +241,18 @@ export default function Organizations() {
         body: JSON.stringify({ newOwnerUserId: selectedNewOwner.userId })
       });
       if (response.ok) {
-        alert('Ownership transfer request sent. The new owner will receive an email to confirm the transfer.');
+        showSuccessToast('Ownership transfer request sent. The new owner will receive an email to confirm the transfer.');
         setIsTransferModalOpen(false);
         setSelectedOrgForTransfer(null);
         setSelectedNewOwner(null);
         setOrgMembers([]);
       } else {
-        const error = await response.text();
-        alert('Failed to transfer ownership: ' + error);
+        const error = await parseApiResponse(response);
+        showErrorToast('Failed to transfer ownership: ' + error);
       }
     } catch (err) {
       console.error('Failed to transfer ownership', err);
-      alert('Failed to transfer ownership: ' + err.message);
+      showErrorToast('Failed to transfer ownership: ' + err.message);
     }
   };
 
@@ -310,11 +311,11 @@ export default function Organizations() {
         fetchPartners(selectedOrgForPartners.id);
         fetchOrganizations();
       } else {
-        const errText = await res.text();
-        alert(`Failed to add partner: ${errText}`);
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Failed to add partner: ${errText}`);
       }
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 

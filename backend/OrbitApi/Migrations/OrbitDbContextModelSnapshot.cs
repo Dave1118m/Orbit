@@ -68,8 +68,9 @@ namespace OrbitApi.Migrations
                     b.Property<long>("FileSizeBytes")
                         .HasColumnType("bigint");
 
-                    b.Property<int>("MediaType")
-                        .HasColumnType("int");
+                    b.Property<string>("MediaType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("MimeType")
                         .IsRequired()
@@ -189,8 +190,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("FiscalYear")
                         .HasColumnType("int");
 
-                    b.Property<int>("Level")
-                        .HasColumnType("int");
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("OrganizationId")
                         .HasColumnType("int");
@@ -198,8 +200,9 @@ namespace OrbitApi.Migrations
                     b.Property<int?>("ProjectId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int?>("TaskId")
                         .HasColumnType("int");
@@ -235,9 +238,6 @@ namespace OrbitApi.Migrations
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<int>("BudgetId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Category")
                         .HasColumnType("int");
 
                     b.Property<int?>("CategoryId")
@@ -398,8 +398,9 @@ namespace OrbitApi.Migrations
                     b.Property<string>("Country")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("DonorType")
-                        .HasColumnType("int");
+                    b.Property<string>("DonorType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("EmailAddress")
                         .HasColumnType("nvarchar(max)");
@@ -494,11 +495,13 @@ namespace OrbitApi.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("int");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -526,8 +529,9 @@ namespace OrbitApi.Migrations
                     b.Property<decimal>("Amount")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<int>("ApprovalStatus")
-                        .HasColumnType("int");
+                    b.Property<string>("ApprovalStatus")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<int?>("ApprovedByFinanceOfficerId")
                         .HasColumnType("int");
@@ -536,9 +540,6 @@ namespace OrbitApi.Migrations
                         .HasColumnType("int");
 
                     b.Property<int?>("BankAccountId")
-                        .HasColumnType("int");
-
-                    b.Property<int>("Category")
                         .HasColumnType("int");
 
                     b.Property<int?>("CategoryId")
@@ -561,8 +562,14 @@ namespace OrbitApi.Migrations
                     b.Property<DateTime?>("FinanceReviewedAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<decimal?>("GrossAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<DateTime?>("ManagerSignedOffAt")
                         .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("NetAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime?>("PaidAt")
                         .HasColumnType("datetime2");
@@ -596,6 +603,9 @@ namespace OrbitApi.Migrations
 
                     b.Property<int?>("TaskItemId")
                         .HasColumnType("int");
+
+                    b.Property<decimal?>("TaxAmount")
+                        .HasColumnType("decimal(18,2)");
 
                     b.HasKey("Id");
 
@@ -681,8 +691,9 @@ namespace OrbitApi.Migrations
                     b.Property<decimal?>("TargetBudgetLimit")
                         .HasColumnType("decimal(18,2)");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("int");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -767,8 +778,9 @@ namespace OrbitApi.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("int");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
 
                     b.HasKey("Id");
 
@@ -813,8 +825,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("GrantId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -835,14 +848,16 @@ namespace OrbitApi.Migrations
                     b.Property<int?>("DonorId")
                         .HasColumnType("int");
 
-                    b.Property<int>("ProjectId")
+                    b.Property<int?>("ProjectId")
                         .HasColumnType("int");
 
-                    b.Property<int>("ReportType")
-                        .HasColumnType("int");
+                    b.Property<string>("ReportType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime?>("SubmittedDate")
                         .HasColumnType("datetime2");
@@ -875,8 +890,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("EntityId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Level")
-                        .HasColumnType("int");
+                    b.Property<string>("Level")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Name")
                         .IsRequired()
@@ -1017,8 +1033,9 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("Channel")
-                        .HasColumnType("int");
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -1117,8 +1134,9 @@ namespace OrbitApi.Migrations
                     b.Property<DateTime?>("TaxExemptRenewalDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("TaxExemptStatus")
-                        .HasColumnType("int");
+                    b.Property<string>("TaxExemptStatus")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -1152,8 +1170,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("PreAssignedRoleId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Token")
                         .IsRequired()
@@ -1192,8 +1211,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("RoleId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
@@ -1267,8 +1287,9 @@ namespace OrbitApi.Migrations
                     b.Property<DateTime>("RequestedAt")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("ToUserId")
                         .HasColumnType("int");
@@ -1311,8 +1332,9 @@ namespace OrbitApi.Migrations
                     b.Property<DateTime?>("StartDate")
                         .HasColumnType("datetime2");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Title")
                         .IsRequired()
@@ -1537,6 +1559,12 @@ namespace OrbitApi.Migrations
                     b.Property<int>("LikelihoodScore")
                         .HasColumnType("int");
 
+                    b.Property<int?>("LogframeEntityId")
+                        .HasColumnType("int");
+
+                    b.Property<string>("LogframeLevel")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<string>("MitigationPlan")
                         .HasColumnType("nvarchar(max)");
 
@@ -1560,8 +1588,9 @@ namespace OrbitApi.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Type")
-                        .HasColumnType("int");
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -1583,8 +1612,9 @@ namespace OrbitApi.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("Name")
-                        .HasColumnType("int");
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -1605,8 +1635,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("ScopeId")
                         .HasColumnType("int");
 
-                    b.Property<int>("ScopeType")
-                        .HasColumnType("int");
+                    b.Property<string>("ScopeType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("UserId")
                         .HasColumnType("int");
@@ -1705,8 +1736,9 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("DependencyType")
-                        .HasColumnType("int");
+                    b.Property<string>("DependencyType")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("DependsOnTaskId")
                         .HasColumnType("int");
@@ -1731,6 +1763,9 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
+                    b.Property<int?>("CategoryId")
+                        .HasColumnType("int");
+
                     b.Property<DateTime?>("CompletedDate")
                         .HasColumnType("datetime2");
 
@@ -1743,20 +1778,24 @@ namespace OrbitApi.Migrations
                     b.Property<int?>("ParentTaskId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Priority")
-                        .HasColumnType("int");
+                    b.Property<string>("Priority")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<int>("ProjectId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(450)");
 
                     b.Property<string>("Title")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("CategoryId");
 
                     b.HasIndex("ParentTaskId")
                         .HasDatabaseName("IX_Tasks_ParentTaskId");
@@ -1955,8 +1994,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("InvitedByUserId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Status")
-                        .HasColumnType("int");
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Token")
                         .IsRequired()
@@ -1985,8 +2025,9 @@ namespace OrbitApi.Migrations
                     b.Property<string>("Availability")
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int>("BackgroundCheckStatus")
-                        .HasColumnType("int");
+                    b.Property<string>("BackgroundCheckStatus")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<string>("Email")
                         .HasColumnType("nvarchar(max)");
@@ -2024,8 +2065,9 @@ namespace OrbitApi.Migrations
 
                     SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
 
-                    b.Property<int>("ApprovalStatus")
-                        .HasColumnType("int");
+                    b.Property<string>("ApprovalStatus")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -2083,8 +2125,9 @@ namespace OrbitApi.Migrations
                     b.Property<int>("OrganizationId")
                         .HasColumnType("int");
 
-                    b.Property<int>("Visibility")
-                        .HasColumnType("int");
+                    b.Property<string>("Visibility")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
 
@@ -2435,9 +2478,7 @@ namespace OrbitApi.Migrations
 
                     b.HasOne("OrbitApi.Models.Project", "Project")
                         .WithMany()
-                        .HasForeignKey("ProjectId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
+                        .HasForeignKey("ProjectId");
 
                     b.Navigation("Donor");
 
@@ -2816,6 +2857,10 @@ namespace OrbitApi.Migrations
 
             modelBuilder.Entity("OrbitApi.Models.TaskItem", b =>
                 {
+                    b.HasOne("OrbitApi.Models.FinancialCategory", "Category")
+                        .WithMany()
+                        .HasForeignKey("CategoryId");
+
                     b.HasOne("OrbitApi.Models.TaskItem", "ParentTask")
                         .WithMany("Subtasks")
                         .HasForeignKey("ParentTaskId")
@@ -2826,6 +2871,8 @@ namespace OrbitApi.Migrations
                         .HasForeignKey("ProjectId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.Navigation("Category");
 
                     b.Navigation("ParentTask");
 

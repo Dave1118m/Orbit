@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Calendar, AlertCircle, RefreshCw, ArrowRight, ChevronDown, ChevronRight, Layers, SlidersHorizontal, ShieldAlert, CheckCircle2, Clock } from 'lucide-react';
+import TaskDetailsDrawer from './TaskDetailsDrawer';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/tasks`;
 const POSTPONEMENTS_URL = `${import.meta.env.VITE_API_URL}/projects`;
@@ -17,6 +18,8 @@ export default function GanttTimelineView({ projectId }) {
   const [zoomLevel, setZoomLevel] = useState('week'); // 'day' | 'week' | 'month'
   const [highlightCriticalPath, setHighlightCriticalPath] = useState(true);
   const [showPostponements, setShowPostponements] = useState(false);
+  const [taskLogframeMap, setTaskLogframeMap] = useState({});
+  const [selectedTask, setSelectedTask] = useState(null);
 
   // Fetch real backend data
   const fetchData = async () => {
@@ -56,9 +59,33 @@ export default function GanttTimelineView({ projectId }) {
         console.warn('Postponements endpoint error:', e);
       }
 
+      // Fetch Logframe to map Logframe Activities to Tasks
+      let lfMap = {};
+      try {
+        const lfRes = await fetch(`${import.meta.env.VITE_API_URL}/projects/${projectId}/logframe`, { headers });
+        if (lfRes.ok) {
+          const lfData = await lfRes.json();
+          // Extract activities
+          lfData.goals?.forEach(g => {
+            g.outcomes?.forEach(o => {
+              o.outputs?.forEach(p => {
+                p.activities?.forEach(a => {
+                  if (a.linkedTaskId) {
+                    lfMap[String(a.linkedTaskId)] = a.description;
+                  }
+                });
+              });
+            });
+          });
+        }
+      } catch (e) {
+        console.warn('Logframe fetch error:', e);
+      }
+
       setTasks(tasksData);
       setDependencies(allDeps);
       setPostponements(postData);
+      setTaskLogframeMap(lfMap);
     } catch (err) {
       setError(err.message || 'Error loading timeline data');
     } finally {
@@ -148,6 +175,24 @@ export default function GanttTimelineView({ projectId }) {
     return new Set(criticalPath);
   }, [tasks, dependencies, highlightCriticalPath]);
 
+  // Dependency conflict detection (Finish-to-Start violations)
+  const conflictingTaskIds = useMemo(() => {
+    const taskMap = new Map(tasks.map(t => [t.id, t]));
+    const conflicts = new Set();
+    dependencies.forEach(dep => {
+      const task = taskMap.get(dep.taskId);
+      const prereq = taskMap.get(dep.dependsOnTaskId);
+      if (task && prereq && task.startDate && prereq.deadline) {
+        const taskStart = new Date(task.startDate);
+        const prereqEnd = new Date(prereq.deadline);
+        if (taskStart < prereqEnd) {
+          conflicts.add(dep.taskId);
+        }
+      }
+    });
+    return conflicts;
+  }, [tasks, dependencies]);
+
   // Calculate Gantt bar positions
   const getBarPosition = (task) => {
     const start = task.createdAt ? new Date(task.createdAt) : minDate;
@@ -185,6 +230,7 @@ export default function GanttTimelineView({ projectId }) {
   }
 
   return (
+    <>
     <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden text-xs space-y-0">
       
       {/* ── Sleek Minimal Controls Bar (Pills & Dropdowns) ── */}
@@ -196,6 +242,15 @@ export default function GanttTimelineView({ projectId }) {
           <span className="bg-slate-200/70 text-slate-700 font-semibold px-2 py-0.5 rounded-full text-[11px]">
             {tasks.length} Tasks
           </span>
+          <span className="bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full text-[11px]">
+            {Object.keys(taskLogframeMap).length} Linked
+          </span>
+          {conflictingTaskIds.size > 0 && (
+            <span className="bg-orange-100 text-orange-700 font-semibold px-2 py-0.5 rounded-full text-[11px] flex items-center gap-1">
+              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+              {conflictingTaskIds.size} Date Conflict{conflictingTaskIds.size > 1 ? 's' : ''}
+            </span>
+          )}
 
           <div className="h-4 w-px bg-slate-200 mx-1" />
 
@@ -275,14 +330,28 @@ export default function GanttTimelineView({ projectId }) {
                 const isDone = t.status === 3 || t.status === 'Done';
 
                 return (
-                  <div key={t.id} className="flex items-center hover:bg-slate-50/80 p-1.5 rounded-xl transition group">
+                  <div key={t.id} className="flex items-center hover:bg-slate-50/80 p-1.5 rounded-xl transition group cursor-pointer" onClick={() => setSelectedTask(t)}>
                     
                     {/* Task Title Pill */}
-                    <div className="w-1/3 pr-2 flex items-center gap-1.5 overflow-hidden">
-                      <span className={`w-2 h-2 rounded-full shrink-0 ${isDone ? 'bg-emerald-500' : isCritical ? 'bg-amber-500' : 'bg-brand-500'}`} />
-                      <span className="font-semibold text-slate-800 truncate" title={t.title}>
-                        {t.title}
-                      </span>
+                  <div className="w-1/3 pr-2 flex flex-col justify-center overflow-hidden">
+                      <div className="flex items-center gap-1.5">
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${isDone ? 'bg-emerald-500' : isCritical ? 'bg-amber-500' : 'bg-brand-500'}`} />
+                        <span className="font-semibold text-slate-800 truncate" title={t.title}>
+                          {t.title}
+                        </span>
+                        {conflictingTaskIds.has(t.id) && (
+                          <span title="⚠ Date conflict: this task starts before its prerequisite ends" className="ml-auto shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-orange-600 bg-orange-50 border border-orange-200 rounded px-1 py-0.5">
+                            <svg className="w-2.5 h-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+                            Conflict
+                          </span>
+                        )}
+                      </div>
+                      {taskLogframeMap[String(t.id)] && (
+                        <div className="ml-3.5 mt-0.5 flex items-center gap-1 text-[9px] text-amber-600 font-medium bg-amber-50 rounded px-1 py-0.5 w-fit border border-amber-100 shadow-sm">
+                          <Layers className="w-2.5 h-2.5" />
+                          <span className="truncate">{taskLogframeMap[String(t.id)]}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Duration Badge */}
@@ -347,5 +416,9 @@ export default function GanttTimelineView({ projectId }) {
         </div>
       )}
     </div>
+      {selectedTask && (
+        <TaskDetailsDrawer task={selectedTask} onClose={() => setSelectedTask(null)} />
+      )}
+    </>
   );
 }

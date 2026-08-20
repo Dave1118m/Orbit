@@ -11,7 +11,8 @@ function buildGoogleAuthUrl(clientId, redirectUri) {
     client_id: clientId,
     redirect_uri: redirectUri,
     response_type: 'code',
-    scope: 'openid email profile',
+    scope: 'openid email profile https://www.googleapis.com/auth/calendar.events',
+
     access_type: 'online',
     prompt: 'select_account'
   });

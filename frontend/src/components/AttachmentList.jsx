@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import InAppFileViewer from './InAppFileViewer';
+import { parseApiResponse } from '../utils/toastHelper';
 
 export default function AttachmentList({ entityType, entityId }) {
   const [attachments, setAttachments] = useState([]);
@@ -37,7 +38,7 @@ export default function AttachmentList({ entityType, entityId }) {
           setAttachments([]);
         }
       } else {
-        const errorText = await res.text();
+        const errorText = await parseApiResponse(res);
         console.error('Failed to fetch attachments:', res.status, errorText);
         setAttachments([]);
       }
@@ -126,7 +127,7 @@ export default function AttachmentList({ entityType, entityId }) {
         });
 
         if (!res.ok) {
-          const text = await res.text();
+          const text = await parseApiResponse(res);
           console.error('Upload failed', res.status, text);
           hasError = true;
           setUploadError(prev => prev ? prev + ' | ' + (text || `Status ${res.status}`) : (text || `Status ${res.status}`));
@@ -183,7 +184,7 @@ export default function AttachmentList({ entityType, entityId }) {
       });
 
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         setUploadError(text || 'Cloud import failed');
         setUploading(false);
         return;
@@ -344,7 +345,7 @@ export default function AttachmentList({ entityType, entityId }) {
                 </label>
                 <input
                   type="text"
-                  placeholder={`e.g., USAID Grant Agreement (${cloudProvider})`}
+                  placeholder={`e.g., Donor Grant Agreement (${cloudProvider})`}
                   value={cloudFileNameInput}
                   onChange={(e) => setCloudFileNameInput(e.target.value)}
                   className="w-full text-xs bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"

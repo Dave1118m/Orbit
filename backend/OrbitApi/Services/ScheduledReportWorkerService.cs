@@ -3,17 +3,26 @@ using OrbitApi.Models;
 
 namespace OrbitApi.Services
 {
+    /// <summary>
+    /// Hosted background worker that checks for due grant/donor report schedules and emails automated report notifications.
+    /// </summary>
     public class ScheduledReportWorkerService : BackgroundService
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ScheduledReportWorkerService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="ScheduledReportWorkerService"/>.
+        /// </summary>
         public ScheduledReportWorkerService(IServiceProvider serviceProvider, ILogger<ScheduledReportWorkerService> logger)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
         }
 
+        /// <summary>
+        /// Periodic loop checking for pending reports every hour.
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -33,6 +42,9 @@ namespace OrbitApi.Services
             }
         }
 
+        /// <summary>
+        /// Queries the database for pending grant reports whose deadline date has passed, sends donor emails, and marks reports as submitted.
+        /// </summary>
         private async Task ProcessScheduledReportsAsync(CancellationToken stoppingToken)
         {
             using var scope = _serviceProvider.CreateScope();

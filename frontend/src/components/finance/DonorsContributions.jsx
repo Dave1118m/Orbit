@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import DonorProgressReportModal from './DonorProgressReportModal';
+import { COUNTRY_OPTIONS } from '../../lib/countries';
+import { parseApiResponse, showErrorToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -35,17 +37,17 @@ function formatCurrency(value, currency = 'USD') {
 }
 
 const DonorTypeMapping = {
-  0: 'Institutional',
-  1: 'Foundation',
-  2: 'Individual',
-  3: 'Corporate'
+  'Institutional': 'Institutional',
+  'Foundation': 'Foundation',
+  'Individual': 'Individual',
+  'Corporate': 'Corporate'
 };
 
 const DONOR_TYPE_OPTIONS = [
-  { value: 0, label: 'Institutional' },
-  { value: 1, label: 'Foundation' },
-  { value: 2, label: 'Individual' },
-  { value: 3, label: 'Corporate' }
+  { value: 'Institutional', label: 'Institutional' },
+  { value: 'Foundation', label: 'Foundation' },
+  { value: 'Individual', label: 'Individual' },
+  { value: 'Corporate', label: 'Corporate' }
 ];
 
 export default function DonorsContributions() {
@@ -68,8 +70,7 @@ export default function DonorsContributions() {
     donorType: 0,
     country: '',
     primaryContact: '',
-    emailAddress: '',
-    phoneNumber: ''
+    emailAddress: ''
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -150,7 +151,7 @@ export default function DonorsContributions() {
     return donors.filter(d => {
       const q = (donorSearch || '').trim().toLowerCase();
       const matchSearch = !q || (d.name || '').toLowerCase().includes(q) || (d.country || '').toLowerCase().includes(q) || (d.primaryContact || '').toLowerCase().includes(q);
-      const matchType = typeFilter === null || typeFilter === '' || d.donorType === parseInt(typeFilter);
+      const matchType = typeFilter === null || typeFilter === '' || d.donorType === typeFilter;
       return matchSearch && matchType;
     });
   }, [donors, donorSearch, typeFilter]);
@@ -159,7 +160,7 @@ export default function DonorsContributions() {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: name === 'donorType' ? parseInt(value, 10) : value
+      [name]: value
     }));
   };
 
@@ -169,10 +170,9 @@ export default function DonorsContributions() {
       setIsSubmitting(true);
       const payload = {
         name: formData.name.trim(),
-        donorType: parseInt(formData.donorType, 10),
+        donorType: formData.donorType,
         primaryContact: formData.primaryContact?.trim() || null,
         emailAddress: formData.emailAddress?.trim() || null,
-        phoneNumber: formData.phoneNumber?.trim() || null,
         country: formData.country?.trim() || null
       };
 
@@ -191,7 +191,7 @@ export default function DonorsContributions() {
           const errData = await response.json();
           errorMsg = errData.message || errData.title || JSON.stringify(errData);
         } catch {
-          const text = await response.text();
+          const text = await parseApiResponse(response);
           if (text) errorMsg = text;
         }
         throw new Error(errorMsg);
@@ -200,9 +200,9 @@ export default function DonorsContributions() {
       const newDonor = await response.json();
       setDonors(prev => [...prev, newDonor]);
       setIsModalOpen(false);
-      setFormData({ name: '', donorType: 0, country: '', primaryContact: '', emailAddress: '', phoneNumber: '' });
+      setFormData({ name: '', donorType: 'Institutional', country: '', primaryContact: '', emailAddress: '' });
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setIsSubmitting(false);
     }
@@ -218,12 +218,12 @@ export default function DonorsContributions() {
       if (res.ok) {
         fetchDonors();
       } else {
-        const errText = await res.text();
-        alert(`Failed to delete donor: ${errText || res.statusText}`);
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Failed to delete donor: ${errText || res.statusText}`);
       }
     } catch (err) {
       console.error(err);
-      alert('Error deleting donor.');
+      showErrorToast('Error deleting donor.');
     }
   };
 
@@ -246,22 +246,22 @@ export default function DonorsContributions() {
       </div>
 
       {/* Summary Stat Cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs">
           <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Donors</div>
           <div className="text-2xl font-black text-slate-900 mt-1">{totalDonors}</div>
         </div>
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Pledged</div>
-          <div className="text-2xl font-black text-slate-900 mt-1">{formatCurrency(totalFunding)}</div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Pledged (USD)</div>
+          <div className="text-2xl font-black text-slate-900 mt-1">{formatCurrency(totalFunding, 'USD')}</div>
         </div>
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Received</div>
-          <div className="text-2xl font-black text-emerald-600 mt-1">{formatCurrency(totalReceived)}</div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Total Received (USD)</div>
+          <div className="text-2xl font-black text-emerald-600 mt-1">{formatCurrency(totalReceived, 'USD')}</div>
         </div>
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs">
-          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Outstanding Tranches</div>
-          <div className="text-2xl font-black text-amber-600 mt-1">{formatCurrency(outstanding)}</div>
+          <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">Outstanding (USD)</div>
+          <div className="text-2xl font-black text-amber-600 mt-1">{formatCurrency(outstanding, 'USD')}</div>
         </div>
       </div>
 
@@ -415,7 +415,7 @@ export default function DonorsContributions() {
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Donor Type</label>
                 <SearchSelect
                   options={DONOR_TYPE_OPTIONS}
-                  value={parseInt(formData.donorType)}
+                  value={formData.donorType}
                   onChange={val => handleInputChange({ target: { name: 'donorType', value: val } })}
                   placeholder="Select Type..."
                   isClearable={false}
@@ -424,13 +424,12 @@ export default function DonorsContributions() {
 
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Country / Region</label>
-                <input
-                  type="text"
-                  name="country"
+                <SearchSelect
+                  options={COUNTRY_OPTIONS}
                   value={formData.country}
-                  onChange={handleInputChange}
-                  placeholder="e.g. Switzerland / Global"
-                  className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20"
+                  onChange={val => handleInputChange({ target: { name: 'country', value: val } })}
+                  placeholder="Select Country..."
+                  isClearable={true}
                 />
               </div>
 
@@ -492,8 +491,8 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
     amount: '',
     currency: 'USD',
     date: new Date().toISOString().split('T')[0],
-    type: 0,
-    status: 0,
+    type: 'Cash',
+    status: 'Pledged',
     allocatedProjectId: '',
     bankAccountId: '',
     notes: ''
@@ -535,8 +534,8 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
         amount: parseFloat(contributionFormData.amount),
         currency: contributionFormData.currency,
         date: new Date(contributionFormData.date).toISOString(),
-        type: parseInt(contributionFormData.type),
-        status: parseInt(contributionFormData.status),
+        type: contributionFormData.type,
+        status: contributionFormData.status,
         allocatedProjectId: contributionFormData.allocatedProjectId ? parseInt(contributionFormData.allocatedProjectId) : null,
         bankAccountId: contributionFormData.bankAccountId ? parseInt(contributionFormData.bankAccountId) : null,
         notes: contributionFormData.notes
@@ -548,7 +547,7 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         throw new Error(`Failed to record contribution: ${errText}`);
       }
       setIsContributionModalOpen(false);
@@ -556,8 +555,8 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
         amount: '',
         currency: 'USD',
         date: new Date().toISOString().split('T')[0],
-        type: 0,
-        status: 0,
+        type: 'Cash',
+        status: 'Pledged',
         allocatedProjectId: '',
         bankAccountId: '',
         notes: ''
@@ -565,7 +564,7 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
       fetchContributions();
       onUpdate();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -590,7 +589,7 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
       setLinkFormData({ projectId: '', allocatedAmount: '' });
       onUpdate();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -604,7 +603,6 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-2 text-xs text-slate-500">
             <div><span className="font-semibold text-slate-700">Contact:</span> {donor.primaryContact || '-'}</div>
             <div><span className="font-semibold text-slate-700">Email:</span> {donor.emailAddress || '-'}</div>
-            <div><span className="font-semibold text-slate-700">Phone:</span> {donor.phoneNumber || '-'}</div>
             <div><span className="font-semibold text-slate-700">Country:</span> {donor.country || '-'}</div>
           </div>
         </div>
@@ -667,12 +665,12 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
                   <tr key={c.id} className="hover:bg-slate-50">
                     <td className="px-4 py-3 font-medium">{new Date(c.date).toLocaleDateString()}</td>
                     <td className="px-4 py-3 font-bold text-slate-900">{formatCurrency(c.amount, c.currency)}</td>
-                    <td className="px-4 py-3">{['Cash', 'In-Kind', 'Equipment', 'Services'][c.type] || 'Cash'}</td>
+                    <td className="px-4 py-3">{typeof c.type === 'string' ? c.type.replace('InKind', 'In-Kind') : (['Cash', 'In-Kind', 'Equipment', 'Services'][c.type] || 'Cash')}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 rounded-full font-bold ${
-                        c.status === 0 ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
+                        (c.status === 0 || c.status === 'Pledged') ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
                       }`}>
-                        {['Pledged', 'Received'][c.status] || 'Pledged'}
+                        {typeof c.status === 'string' ? c.status : (['Pledged', 'Received'][c.status] || 'Pledged')}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">{c.allocatedProjectName || 'Unallocated'}</td>
@@ -771,10 +769,10 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
                     onChange={e => setContributionFormData({ ...contributionFormData, type: e.target.value })}
                     className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-xs bg-white"
                   >
-                    <option value={0}>Cash</option>
-                    <option value={1}>In-Kind</option>
-                    <option value={2}>Equipment</option>
-                    <option value={3}>Services</option>
+                    <option value="Cash">Cash</option>
+                    <option value="InKind">In-Kind</option>
+                    <option value="Equipment">Equipment</option>
+                    <option value="Services">Services</option>
                   </select>
                 </div>
                 <div>
@@ -784,8 +782,8 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
                     onChange={e => setContributionFormData({ ...contributionFormData, status: e.target.value })}
                     className="w-full rounded-2xl border border-slate-300 px-3 py-2 text-xs bg-white"
                   >
-                    <option value={0}>Pledged</option>
-                    <option value={1}>Received</option>
+                    <option value="Pledged">Pledged</option>
+                    <option value="Received">Received</option>
                   </select>
                 </div>
               </div>

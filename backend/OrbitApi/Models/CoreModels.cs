@@ -213,6 +213,9 @@ public class TaskItem
     public int? ParentTaskId { get; set; }
     public bool IsDeleted { get; set; }
 
+    public int? CategoryId { get; set; }
+    public FinancialCategory? Category { get; set; }
+
     public Project? Project { get; set; }
     public TaskItem? ParentTask { get; set; }
     public ICollection<TaskItem> Subtasks { get; set; } = new List<TaskItem>();
@@ -394,9 +397,14 @@ public class Expense
     public int? ProjectId { get; set; }
     public int? TaskId { get; set; }
     public int SubmittedByUserId { get; set; }
-    public ExpenseCategory Category { get; set; } = ExpenseCategory.Operations;
     public int? CategoryId { get; set; }
     public decimal Amount { get; set; }
+    
+    // Tax tracking fields
+    public decimal? GrossAmount { get; set; }
+    public decimal? TaxAmount { get; set; }
+    public decimal? NetAmount { get; set; }
+
     public string Currency { get; set; } = "ETB";
     public DateTime Date { get; set; }
     public string Description { get; set; } = string.Empty;
@@ -525,6 +533,9 @@ public class RiskIssue
     public DateTime? ResolvedAt { get; set; }
     public int? ResolvedByUserId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public LogframeLevel? LogframeLevel { get; set; }
+    public int? LogframeEntityId { get; set; }
 
     public Project? Project { get; set; }
     public User? ResolvedByUser { get; set; }
@@ -823,7 +834,6 @@ public class BudgetLineItem
     [Key]
     public int Id { get; set; }
     public int BudgetId { get; set; }
-    public BudgetCategory Category { get; set; } = BudgetCategory.Other;
     public int? CategoryId { get; set; }
     public string Description { get; set; } = string.Empty;
     public decimal Amount { get; set; }
@@ -855,7 +865,7 @@ public class GrantReportSchedule
 {
     [Key]
     public int Id { get; set; }
-    public int ProjectId { get; set; }
+    public int? ProjectId { get; set; }
     public int? DonorId { get; set; }
     public ReportType ReportType { get; set; } = ReportType.Financial;
     public DateTime DeadlineDate { get; set; }

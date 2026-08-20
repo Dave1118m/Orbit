@@ -4,17 +4,26 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Services
 {
+    /// <summary>
+    /// Hosted background worker that monitors NGO organization registration and tax-exempt renewal dates and dispatches reminder notices.
+    /// </summary>
     public class ComplianceReminderService : BackgroundService
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<ComplianceReminderService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="ComplianceReminderService"/>.
+        /// </summary>
         public ComplianceReminderService(IServiceProvider serviceProvider, ILogger<ComplianceReminderService> logger)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
         }
 
+        /// <summary>
+        /// Daily evaluation loop checking for compliance deadlines approaching within 30 days.
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -40,6 +49,9 @@ namespace OrbitApi.Services
             }
         }
 
+        /// <summary>
+        /// Identifies organizations with regulatory renewal dates within 30 days, sends alert notifications and emails to the organization owner.
+        /// </summary>
         private async Task ProcessRemindersAsync(CancellationToken stoppingToken)
         {
             using var scope = _serviceProvider.CreateScope();

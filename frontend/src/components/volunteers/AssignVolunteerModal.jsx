@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useUser } from '../../contexts/UserContext';
 import SearchSelect from '../SearchSelect';
+import { parseApiResponse, showErrorToast } from '../../utils/toastHelper';
 
 export default function AssignVolunteerModal({ isOpen, onClose, taskId, onAssigned }) {
   const { user } = useUser();
@@ -43,13 +44,13 @@ export default function AssignVolunteerModal({ isOpen, onClose, taskId, onAssign
         body: JSON.stringify({ volunteerId: parseInt(selectedVolunteerId, 10) })
       });
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         throw new Error(text);
       }
       onAssigned();
       onClose();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setLoading(false);
     }

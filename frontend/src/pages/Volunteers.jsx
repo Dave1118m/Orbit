@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useUser } from '../contexts/UserContext';
 import SearchSelect from '../components/SearchSelect';
 import { AutoText } from '../contexts/TranslationContext';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -45,7 +46,7 @@ export default function Volunteers() {
   const storedOrgId = localStorage.getItem('selectedOrganizationId');
   const orgId = (storedOrgId && storedOrgId !== 'undefined' && storedOrgId !== 'null') 
     ? storedOrgId 
-    : (user?.organizationId || user?.primaryOrganizationId || 1);
+    : (user?.organizationId || user?.primaryOrganizationId || 0);
 
   // Master List State
   const [volunteers, setVolunteers] = useState([]);
@@ -123,13 +124,13 @@ export default function Volunteers() {
       });
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        const text = errJson.message || (await res.text().catch(() => ''));
+        const text = errJson.message || (await parseApiResponse(res).catch(() => ''));
         throw new Error(text || 'Failed to update hour log');
       }
       setEditingHourLog(null);
       if (selectedVolunteer) fetchVolunteerHours(selectedVolunteer.id);
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setUpdatingHours(false);
     }
@@ -145,10 +146,10 @@ export default function Volunteers() {
       if (res.ok) {
         if (selectedVolunteer) fetchVolunteerHours(selectedVolunteer.id);
       } else {
-        alert('Failed to delete hour log.');
+        showErrorToast('Failed to delete hour log.');
       }
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -184,11 +185,11 @@ export default function Volunteers() {
           emailStatusMsg: null
         });
       } else {
-        const errText = await res.text();
-        alert(`Notice: ${errText}`);
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Notice: ${errText}`);
       }
     } catch (err) {
-      alert(`Error generating setup link: ${err.message}`);
+      showErrorToast(`Error generating setup link: ${err.message}`);
     }
   };
 
@@ -222,7 +223,13 @@ export default function Volunteers() {
       const res = await fetch(`${API_BASE}/volunteers/${orgId}`, {
         headers: { Authorization: `Bearer ${token}` }
       });
-      if (!res.ok) throw new Error('Failed to fetch volunteer registry.');
+      if (!res.ok) {
+        if (res.status === 403 || res.status === 404) {
+          setVolunteers([]);
+          return;
+        }
+        throw new Error('Failed to fetch volunteer registry.');
+      }
       const data = await res.json();
       setVolunteers(data);
       if (data.length > 0 && !selectedVolunteer) {
@@ -359,7 +366,7 @@ export default function Volunteers() {
       setNewVolunteerData({ name: '', email: '', phoneNumber: '', skills: '', availability: '', backgroundCheckStatus: 'Pending', userId: '' });
       fetchVolunteers();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -381,10 +388,10 @@ export default function Volunteers() {
         body: JSON.stringify(payload)
       });
       if (!res.ok) throw new Error('Failed to update volunteer profile');
-      alert('Volunteer profile updated successfully!');
+      showSuccessToast('Volunteer profile updated successfully!');
       fetchVolunteers();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -399,7 +406,7 @@ export default function Volunteers() {
       setSelectedVolunteer(null);
       fetchVolunteers();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -424,15 +431,15 @@ export default function Volunteers() {
         body: JSON.stringify(payload)
       });
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         throw new Error(text || 'Failed to log hours');
       }
-      alert(`Logged ${logHoursForm.hours} hours for ${selectedVolunteer.name}!`);
+      showSuccessToast(`Logged ${logHoursForm.hours} hours for ${selectedVolunteer.name}!`);
       setLogHoursForm({ taskId: '', hours: '', date: new Date().toISOString().split('T')[0], notes: '' });
       fetchVolunteerHours(selectedVolunteer.id);
       setActiveTab('view-hours');
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setSubmittingHours(false);
     }
@@ -452,14 +459,14 @@ export default function Volunteers() {
         body: JSON.stringify({ volunteerId: selectedVolunteer.id })
       });
       if (!res.ok) {
-        const text = await res.text();
+        const text = await parseApiResponse(res);
         throw new Error(text || 'Failed to assign task');
       }
-      alert(`Assigned ${selectedVolunteer.name} to task successfully!`);
+      showSuccessToast(`Assigned ${selectedVolunteer.name} to task successfully!`);
       setAssignTaskId('');
       fetchVolunteerAssignments(selectedVolunteer.id);
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setSubmittingAssign(false);
     }
@@ -474,10 +481,10 @@ export default function Volunteers() {
         headers: { Authorization: `Bearer ${token}` }
       });
       if (!res.ok) throw new Error('Failed to unassign task.');
-      alert('Task unassigned successfully!');
+      showSuccessToast('Task unassigned successfully!');
       fetchVolunteerAssignments(selectedVolunteer.id);
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -512,10 +519,10 @@ export default function Volunteers() {
             <div className="flex gap-1.5">
               <button
                 onClick={() => {
-                  const orgId = localStorage.getItem('selectedOrganizationId') || '1';
+                  const orgId = localStorage.getItem('selectedOrganizationId') || '0';
                   const link = `${window.location.origin}/apply-volunteer?orgId=${orgId}`;
                   navigator.clipboard.writeText(link);
-                  alert(`Public Application Link copied to clipboard:\n${link}`);
+                  showSuccessToast(`Public Application Link copied to clipboard:\n${link}`);
                 }}
                 className="rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center gap-1 shadow-sm"
                 title="Copy Public Volunteer Application URL"
@@ -641,14 +648,14 @@ export default function Volunteers() {
                               body: JSON.stringify({ backgroundCheckStatus: 'Passed' })
                             });
                             if (res.ok) {
-                              alert(`Approved & Verified ${selectedVolunteer.name}!`);
+                              showSuccessToast(`Approved & Verified ${selectedVolunteer.name}!`);
                               fetchVolunteers();
                               setSelectedVolunteer({ ...selectedVolunteer, backgroundCheckStatus: 'Passed' });
                             } else {
-                              const errText = await res.text();
-                              alert(`Notice: ${errText || 'Failed to approve volunteer application.'}`);
+                              const errText = await parseApiResponse(res);
+                              showErrorToast(`Notice: ${errText || 'Failed to approve volunteer application.'}`);
                             }
-                          } catch (err) { alert(`Error: ${err.message}`); }
+                          } catch (err) { showErrorToast(`Error: ${err.message}`); }
                         }}
                         className="px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition shadow-sm flex items-center gap-1 cursor-pointer"
                       >
@@ -663,7 +670,7 @@ export default function Volunteers() {
                               body: JSON.stringify({ backgroundCheckStatus: 'Failed' })
                             });
                             if (res.ok) {
-                              alert(`Declined application for ${selectedVolunteer.name}.`);
+                              showSuccessToast(`Declined application for ${selectedVolunteer.name}.`);
                               fetchVolunteers();
                               setSelectedVolunteer({ ...selectedVolunteer, backgroundCheckStatus: 'Failed' });
                             }
@@ -686,10 +693,10 @@ export default function Volunteers() {
                           if (res.ok) {
                             const data = await res.json();
                             navigator.clipboard.writeText(data.inviteUrl);
-                            alert(`Password Setup Link copied for ${selectedVolunteer.name}:\n\n${data.inviteUrl}\n\nSend this link to ${selectedVolunteer.name} so they can set their password and log in!`);
+                            showSuccessToast(`Password Setup Link copied for ${selectedVolunteer.name}:\n\n${data.inviteUrl}\n\nSend this link to ${selectedVolunteer.name} so they can set their password and log in!`);
                           } else {
-                            const errText = await res.text();
-                            alert(`Notice: ${errText}`);
+                            const errText = await parseApiResponse(res);
+                            showErrorToast(`Notice: ${errText}`);
                           }
                         } catch (err) {
                           console.error(err);
@@ -974,7 +981,7 @@ export default function Volunteers() {
                             {assignmentsList.map(a => (
                               <tr key={a.id || a.taskId} className="hover:bg-slate-50 transition-colors">
                                 <td className="px-5 py-3 font-semibold text-slate-900 text-xs">
-                                  {a.taskTitle || `Task #${a.taskId}`}
+                                  {a.taskTitle || a.title || 'Assigned Project Task'}
                                 </td>
                                 <td className="px-5 py-3 text-slate-500 text-xs">
                                   {new Date(a.assignedAt || Date.now()).toLocaleDateString()}

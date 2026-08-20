@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import { useUser } from '../../contexts/UserContext';
+import { parseApiResponse, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -33,10 +34,15 @@ function formatCurrency(value, currency = 'USD') {
 const levelLabels = { 0: 'Organization', 1: 'Workspace', 2: 'Project', 3: 'Task' };
 const statusConfig = {
   0: { label: 'Draft', color: 'bg-slate-100 text-slate-700' },
+  'Draft': { label: 'Draft', color: 'bg-slate-100 text-slate-700' },
   1: { label: 'Pending Approval', color: 'bg-amber-100 text-amber-800' },
+  'PendingApproval': { label: 'Pending Approval', color: 'bg-amber-100 text-amber-800' },
   2: { label: 'Approved', color: 'bg-lime-100 text-lime-800' },
+  'Approved': { label: 'Approved', color: 'bg-lime-100 text-lime-800' },
   3: { label: 'Active', color: 'bg-emerald-100 text-emerald-800' },
-  4: { label: 'Closed', color: 'bg-[#5A45FF]/10 text-[#5A45FF]' }
+  'Active': { label: 'Active', color: 'bg-emerald-100 text-emerald-800' },
+  4: { label: 'Closed', color: 'bg-[#5A45FF]/10 text-[#5A45FF]' },
+  'Closed': { label: 'Closed', color: 'bg-[#5A45FF]/10 text-[#5A45FF]' }
 };
 
 const categoryLabels = {
@@ -72,12 +78,12 @@ export default function Budgets() {
   const userRolesList = (user?.roles || []).map(r => r.name);
 
   const canApproveBudget = 
-    ['Manager', 'Admin', 'Owner', 'Coordinator'].includes(primaryRole) ||
-    userRolesList.some(r => ['Manager', 'Admin', 'Owner', 'Coordinator'].includes(r));
+    ['FinanceOfficer', 'Finance Officer', 'Admin', 'Owner'].includes(primaryRole) ||
+    userRolesList.some(r => ['FinanceOfficer', 'Finance Officer', 'Admin', 'Owner'].includes(r));
 
   const canReviseOrDraftBudget = 
-    ['FinanceOfficer', 'Finance Officer', 'Admin', 'Owner', 'Manager', 'Coordinator', 'User'].includes(primaryRole) ||
-    userRolesList.some(r => ['FinanceOfficer', 'Finance Officer', 'Admin', 'Owner', 'Manager', 'Coordinator', 'User'].includes(r));
+    ['Manager', 'Coordinator', 'Admin', 'Owner'].includes(primaryRole) ||
+    userRolesList.some(r => ['Manager', 'Coordinator', 'Admin', 'Owner'].includes(r));
 
   // Entity lists for dropdowns
   const [projects, setProjects] = useState([]);
@@ -86,7 +92,7 @@ export default function Budgets() {
   // Create modal
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [createForm, setCreateForm] = useState({ level: 2, entityId: '', totalAmount: '', currency: 'USD', fiscalYear: new Date().getFullYear() });
+  const [createForm, setCreateForm] = useState({ level: 'Project', entityId: '', totalAmount: '', currency: 'USD', fiscalYear: new Date().getFullYear(), logframeLevel: '', logframeEntityId: '' });
 
   // Revise modal
   const [reviseTarget, setReviseTarget] = useState(null);
@@ -134,7 +140,7 @@ export default function Budgets() {
 
   async function fetchDynamicCategories() {
     try {
-      const res = await fetch(`${API_BASE}/FinancialCategories`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/FinancialCategories/flat`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data)) setDynamicCategories(data);
@@ -171,20 +177,22 @@ export default function Budgets() {
     try {
       setIsSubmitting(true);
       const payload = {
-        level: parseInt(createForm.level),
+        level: createForm.level,
         totalAmount: parseFloat(createForm.totalAmount),
         currency: createForm.currency || 'USD',
-        fiscalYear: parseInt(createForm.fiscalYear) || new Date().getFullYear()
+        fiscalYear: parseInt(createForm.fiscalYear) || new Date().getFullYear(),
+        logframeLevel: createForm.logframeLevel || null,
+        logframeEntityId: createForm.logframeEntityId ? parseInt(createForm.logframeEntityId, 10) : null
       };
       const storedOrgId = parseInt(localStorage.getItem('selectedOrganizationId') || '0');
       
-      if (payload.level === 0) {
+      if (payload.level === 'Organization' || payload.level === 0) {
         payload.organizationId = storedOrgId;
-      } else if (payload.level === 1) {
+      } else if (payload.level === 'Workspace' || payload.level === 1) {
         payload.workspaceId = parseInt(createForm.workspaceId || createForm.entityId);
-      } else if (payload.level === 2) {
+      } else if (payload.level === 'Project' || payload.level === 2) {
         payload.projectId = parseInt(createForm.projectId || createForm.entityId);
-      } else if (payload.level === 3) {
+      } else if (payload.level === 'Task' || payload.level === 3) {
         payload.taskId = parseInt(createForm.taskId || createForm.entityId);
       }
 
@@ -198,9 +206,9 @@ export default function Budgets() {
         throw new Error(errJson.message || 'Failed to create budget');
       }
       setIsCreateOpen(false);
-      setCreateForm({ level: 2, entityId: '', projectId: '', workspaceId: '', taskId: '', totalAmount: '', currency: 'USD', fiscalYear: new Date().getFullYear() });
+      setCreateForm({ level: 'Project', entityId: '', projectId: '', workspaceId: '', taskId: '', totalAmount: '', currency: 'USD', fiscalYear: new Date().getFullYear(), logframeLevel: '', logframeEntityId: '' });
       fetchBudgets();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -209,7 +217,7 @@ export default function Budgets() {
       const res = await fetch(`${API_BASE}/budgets/${id}/approve`, { method: 'POST', headers: authHeaders() });
       if (!res.ok) throw new Error((await res.json()).message || 'Failed to approve');
       fetchBudgets();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   async function handleReturnRemainingSubmit(e) {
@@ -223,13 +231,13 @@ export default function Budgets() {
         body: JSON.stringify({ notes: returnNotes })
       });
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         throw new Error(errText || 'Failed to return remaining budget');
       }
       setReturnTarget(null);
       setReturnNotes('');
       fetchBudgets();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -240,7 +248,7 @@ export default function Budgets() {
       if (!res.ok) {
         let errMsg = 'Failed to delete';
         try {
-          const errText = await res.text();
+          const errText = await parseApiResponse(res);
           try {
             const errJson = JSON.parse(errText);
             errMsg = errJson.message || errText;
@@ -252,7 +260,7 @@ export default function Budgets() {
       }
       setBudgets(prev => prev.filter(b => b.id !== id));
       if (expandedId === id) setExpandedId(null);
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   function openRevise(budget) {
@@ -272,7 +280,7 @@ export default function Budgets() {
       if (!res.ok) throw new Error('Failed to revise budget');
       setReviseTarget(null);
       fetchBudgets();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -295,7 +303,8 @@ export default function Budgets() {
 
   function openAddLineItem(budget) {
     setLineItemTarget(budget);
-    setLineItemForm({ category: 0, description: '', amount: '' });
+    const initialCategory = dynamicCategories.length > 0 ? dynamicCategories[0].id : 0;
+    setLineItemForm({ category: initialCategory, description: '', amount: '' });
   }
 
   async function handleAddLineItem(e) {
@@ -305,12 +314,12 @@ export default function Budgets() {
       const res = await fetch(`${API_BASE}/budgets/${lineItemTarget.id}/line-items`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: parseInt(lineItemForm.category), description: lineItemForm.description, amount: parseFloat(lineItemForm.amount) })
+        body: JSON.stringify({ categoryId: parseInt(lineItemForm.category), description: lineItemForm.description, amount: parseFloat(lineItemForm.amount) })
       });
       if (!res.ok) throw new Error('Failed to add line item');
       setLineItemTarget(null);
       fetchBudgets();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -320,7 +329,7 @@ export default function Budgets() {
       const res = await fetch(`${API_BASE}/budgets/${budgetId}/line-items/${lineItemId}`, { method: 'DELETE', headers: authHeaders() });
       if (!res.ok) throw new Error('Failed to delete line item');
       fetchBudgets();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   // KPIs
@@ -352,16 +361,16 @@ export default function Budgets() {
           <p className="text-3xl font-extrabold text-slate-900">{totalBudgetsCount}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Allocated</p>
-          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalBudgeted)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Allocated (USD eq.)</p>
+          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalBudgeted, 'USD')}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Expended</p>
-          <p className="text-3xl font-extrabold text-rose-600">{formatCurrency(totalSpent)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Expended (USD eq.)</p>
+          <p className="text-3xl font-extrabold text-rose-600">{formatCurrency(totalSpent, 'USD')}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Unspent Pool</p>
-          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(remainingOverall)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Unspent Pool (USD eq.)</p>
+          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(remainingOverall, 'USD')}</p>
         </div>
       </div>
 
@@ -455,7 +464,7 @@ export default function Budgets() {
                         </td>
                         <td className="px-6 py-4 text-right text-xs">
                           <div className="flex flex-wrap items-center justify-end gap-1.5">
-                            {unspentRemaining > 0 && b.status !== 4 && (
+                            {unspentRemaining > 0 && b.status !== 4 && b.status !== 'Closed' && (
                               <button
                                 onClick={() => {
                                   setReturnTarget(b);
@@ -482,7 +491,7 @@ export default function Budgets() {
                             >
                               📋 History
                             </button>
-                            {(b.status === 0 || b.status === 1) && canApproveBudget && (
+                            {(b.status === 0 || b.status === 'Draft' || b.status === 1 || b.status === 'PendingApproval') && canApproveBudget && (
                               <button
                                 onClick={() => handleApprove(b.id)}
                                 className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-xs"
@@ -551,7 +560,7 @@ export default function Budgets() {
                                       {b.lineItems.map((item) => (
                                         <tr key={item.id} className="hover:bg-slate-50">
                                           <td className="px-4 py-2.5 font-bold text-slate-700">
-                                            {getCategoryDisplayName(item.category, dynamicCategories)}
+                                            {item.categoryName || 'General'}
                                           </td>
                                           <td className="px-4 py-2.5 text-slate-600">{item.description}</td>
                                           <td className="px-4 py-2.5 font-bold text-slate-900">{formatCurrency(item.amount, b.currency)}</td>
@@ -599,9 +608,9 @@ export default function Budgets() {
                 <div className="grid grid-cols-3 gap-1.5 p-1 border border-slate-100 rounded-lg bg-slate-50/50">
                   <button
                     type="button"
-                    onClick={() => setCreateForm({ ...createForm, level: 0 })}
+                    onClick={() => setCreateForm({ ...createForm, level: 'Organization' })}
                     className={`py-1 text-[11px] font-semibold rounded-md border transition ${
-                      parseInt(createForm.level) === 0
+                      createForm.level === 'Organization'
                         ? 'bg-brand-600 text-white border-brand-600 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
@@ -610,9 +619,9 @@ export default function Budgets() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCreateForm({ ...createForm, level: 1 })}
+                    onClick={() => setCreateForm({ ...createForm, level: 'Workspace' })}
                     className={`py-1 text-[11px] font-semibold rounded-md border transition ${
-                      parseInt(createForm.level) === 1
+                      createForm.level === 'Workspace'
                         ? 'bg-brand-600 text-white border-brand-600 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
@@ -621,9 +630,9 @@ export default function Budgets() {
                   </button>
                   <button
                     type="button"
-                    onClick={() => setCreateForm({ ...createForm, level: 2 })}
+                    onClick={() => setCreateForm({ ...createForm, level: 'Project' })}
                     className={`py-1 text-[11px] font-semibold rounded-md border transition ${
-                      parseInt(createForm.level) === 2
+                      createForm.level === 'Project'
                         ? 'bg-brand-600 text-white border-brand-600 shadow-xs'
                         : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
                     }`}
@@ -633,7 +642,7 @@ export default function Budgets() {
                 </div>
               </div>
 
-              {parseInt(createForm.level) === 1 && (
+              {createForm.level === 'Workspace' && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Select Workspace *</label>
                   <select
@@ -650,7 +659,7 @@ export default function Budgets() {
                 </div>
               )}
 
-              {parseInt(createForm.level) === 2 && (
+              {createForm.level === 'Project' && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Select Project *</label>
                   <select
@@ -677,6 +686,9 @@ export default function Budgets() {
                   className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                 />
               </div>
+
+
+
 
               <div className="grid grid-cols-2 gap-3">
                 <div>

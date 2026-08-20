@@ -2,7 +2,7 @@ using System;
 
 namespace OrbitApi.DTOs
 {
-    public enum WorkspaceVisibility { Private = 0, Public = 1 }
+    using OrbitApi.Models;
 
     public class WorkspaceDto
     {
@@ -10,7 +10,7 @@ namespace OrbitApi.DTOs
         public int OrganizationId { get; set; }
         public string Name { get; set; } = null!;
         public string? Description { get; set; }
-        public WorkspaceVisibility Visibility { get; set; }
+        public VisibilityLevel Visibility { get; set; }
         public decimal? BudgetCeiling { get; set; }
         public bool IsArchived { get; set; }
         public byte[]? RowVersion { get; set; }
@@ -21,7 +21,7 @@ namespace OrbitApi.DTOs
         public int OrganizationId { get; set; }
         public string Name { get; set; } = null!;
         public string? Description { get; set; }
-        public WorkspaceVisibility Visibility { get; set; }
+        public VisibilityLevel Visibility { get; set; }
         public decimal? BudgetCeiling { get; set; }
         public bool? IsArchived { get; set; }
     }
@@ -30,7 +30,7 @@ namespace OrbitApi.DTOs
     {
         public string? Name { get; set; }
         public string? Description { get; set; }
-        public WorkspaceVisibility? Visibility { get; set; }
+        public VisibilityLevel? Visibility { get; set; }
         public decimal? BudgetCeiling { get; set; }
         public bool? IsArchived { get; set; }
         public byte[]? RowVersion { get; set; }

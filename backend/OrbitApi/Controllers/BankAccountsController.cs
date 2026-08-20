@@ -9,18 +9,26 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 
+using OrbitApi.Services;
+
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing organizational bank accounts, treasury balances,
+    /// account number validations, inter-account transfers, and unified transaction ledgers.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
     public class BankAccountsController : ControllerBase
     {
         private readonly OrbitDbContext _db;
+        private readonly ICurrencyService _currencyService;
 
-        public BankAccountsController(OrbitDbContext db)
+        public BankAccountsController(OrbitDbContext db, ICurrencyService currencyService)
         {
             _db = db;
+            _currencyService = currencyService;
         }
 
         private int? GetActiveOrganizationId()
@@ -33,18 +41,37 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id;
+            return firstOrg?.Id ?? 0;
         }
 
-        private static BankAccountDto MapToDto(BankAccount b)
+        private string ValidateEthiopianBankAccount(string bankName, string accountNumber)
         {
-            var totalReceived = b.Contributions
-                .Where(c => c.Status == ContributionStatus.Received)
-                .Sum(c => c.Amount);
+            if (string.IsNullOrWhiteSpace(accountNumber)) return "Account number is required.";
+            if (!accountNumber.All(char.IsDigit)) return "Account number must contain only digits.";
 
-            var totalExpended = b.Expenses
-                .Where(e => e.ApprovalStatus == ApprovalStatus.Paid)
-                .Sum(e => e.Amount);
+            if (accountNumber.Length < 6 || accountNumber.Length > 20)
+            {
+                return "Bank account numbers must be between 6 and 20 digits.";
+            }
+
+            return null;
+        }
+
+        private async Task<BankAccountDto> MapToDtoAsync(BankAccount b)
+        {
+            var baseCurrency = b.Currency; // Bank accounts have their own base currency for their own balances
+            
+            decimal totalReceived = 0;
+            foreach (var c in b.Contributions.Where(x => x.Status == ContributionStatus.Received))
+            {
+                totalReceived += await _currencyService.ConvertAsync(c.Amount, c.Currency, baseCurrency);
+            }
+
+            decimal totalExpended = 0;
+            foreach (var e in b.Expenses.Where(x => x.ApprovalStatus == ApprovalStatus.Paid))
+            {
+                totalExpended += await _currencyService.ConvertAsync(e.Amount, e.Currency, baseCurrency);
+            }
 
             return new BankAccountDto
             {
@@ -53,7 +80,6 @@ namespace OrbitApi.Controllers
                 BankName = b.BankName,
                 AccountName = b.AccountName,
                 AccountNumber = b.AccountNumber,
-                SwiftCode = b.SwiftCode,
                 Currency = b.Currency,
                 IsActive = b.IsActive,
                 TotalReceived = totalReceived,
@@ -62,6 +88,10 @@ namespace OrbitApi.Controllers
             };
         }
 
+        /// <summary>
+        /// Retrieves all bank accounts for the active organization with real-time balance calculations.
+        /// </summary>
+        /// <returns>Collection of bank account DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<BankAccountDto>>> GetBankAccounts()
         {
@@ -74,9 +104,20 @@ namespace OrbitApi.Controllers
                 .Include(b => b.Expenses)
                 .ToListAsync();
 
-            return Ok(accounts.Select(MapToDto).ToList());
+            var dtos = new List<BankAccountDto>();
+            foreach (var a in accounts)
+            {
+                dtos.Add(await MapToDtoAsync(a));
+            }
+
+            return Ok(dtos);
         }
 
+        /// <summary>
+        /// Retrieves a single bank account by ID with current balance metrics.
+        /// </summary>
+        /// <param name="id">Bank account ID.</param>
+        /// <returns>Bank account DTO.</returns>
         [HttpGet("{id}")]
         public async Task<ActionResult<BankAccountDto>> GetBankAccount(int id)
         {
@@ -91,9 +132,14 @@ namespace OrbitApi.Controllers
 
             if (account == null) return NotFound();
 
-            return Ok(MapToDto(account));
+            return Ok(await MapToDtoAsync(account));
         }
 
+        /// <summary>
+        /// Registers a new bank account for the organization with format validation.
+        /// </summary>
+        /// <param name="dto">Bank account creation payload.</param>
+        /// <returns>Created bank account DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<BankAccountDto>> CreateBankAccount(BankAccountCreateDto dto)
         {
@@ -116,13 +162,18 @@ namespace OrbitApi.Controllers
                 return BadRequest(new { message = $"A bank account with number '{accountNumber}' already exists in your organization." });
             }
 
+            var validationError = ValidateEthiopianBankAccount(bankName, accountNumber);
+            if (validationError != null)
+            {
+                return BadRequest(new { message = validationError });
+            }
+
             var account = new BankAccount
             {
                 OrganizationId = orgId.Value,
                 BankName = bankName,
                 AccountName = accountName,
                 AccountNumber = accountNumber,
-                SwiftCode = dto.SwiftCode?.Trim() ?? string.Empty,
                 Currency = currency,
                 IsActive = true
             };
@@ -136,9 +187,15 @@ namespace OrbitApi.Controllers
                 .Include(b => b.Expenses)
                 .FirstAsync();
 
-            return Ok(MapToDto(created));
+            return Ok(await MapToDtoAsync(created));
         }
 
+        /// <summary>
+        /// Updates bank account details or active status.
+        /// </summary>
+        /// <param name="id">Bank account ID.</param>
+        /// <param name="dto">Updated fields.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateBankAccount(int id, BankAccountUpdateDto dto)
         {
@@ -164,10 +221,16 @@ namespace OrbitApi.Controllers
                 return BadRequest(new { message = $"Another bank account with number '{accountNumber}' already exists in your organization." });
             }
 
+            var bankName = dto.BankName.Trim();
+            var validationError = ValidateEthiopianBankAccount(bankName, accountNumber);
+            if (validationError != null)
+            {
+                return BadRequest(new { message = validationError });
+            }
+
             account.BankName = dto.BankName.Trim();
             account.AccountName = dto.AccountName.Trim();
             account.AccountNumber = accountNumber;
-            account.SwiftCode = dto.SwiftCode?.Trim() ?? string.Empty;
             account.Currency = string.IsNullOrWhiteSpace(dto.Currency) ? "USD" : dto.Currency.Trim().ToUpper();
             account.IsActive = dto.IsActive;
 
@@ -175,6 +238,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Deletes a bank account and unlinks dependent transactions.
+        /// </summary>
+        /// <param name="id">Bank account ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteBankAccount(int id)
         {
@@ -231,7 +299,6 @@ namespace OrbitApi.Controllers
                 {
                     BankAccountId = fromAccount.Id,
                     SubmittedByUserId = userId,
-                    Category = ExpenseCategory.Operations,
                     Amount = dto.TransferAmount,
                     Currency = fromAccount.Currency,
                     Date = DateTime.UtcNow,
@@ -312,6 +379,7 @@ namespace OrbitApi.Controllers
                 .Where(e => e.BankAccountId == id && (e.ApprovalStatus == ApprovalStatus.Approved || e.ApprovalStatus == ApprovalStatus.Paid))
                 .Include(e => e.Project)
                 .Include(e => e.SubmittedByUser)
+                .Include(e => e.FinancialCategory)
                 .ToListAsync();
 
             var transactions = new List<BankAccountTransactionDto>();
@@ -343,7 +411,7 @@ namespace OrbitApi.Controllers
                     Description = exp.Description,
                     DonorName = null,
                     ProjectName = exp.Project?.Title,
-                    ExpenseCategory = exp.Category.ToString(),
+                    ExpenseCategory = exp.FinancialCategory?.Name ?? "General Expense",
                     Status = exp.ApprovalStatus == ApprovalStatus.Paid ? "Paid" : "Approved"
                 });
             }

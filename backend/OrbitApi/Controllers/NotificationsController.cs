@@ -6,6 +6,10 @@ using OrbitApi.Models;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// In-app notification hub controller managing user alerts, unread counts,
+    /// read status acknowledgments, and notification clearing.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -18,6 +22,12 @@ namespace OrbitApi.Controllers
             _db = db;
         }
 
+        /// <summary>
+        /// Lists notification alerts for the current user.
+        /// </summary>
+        /// <param name="limit">Max results to return.</param>
+        /// <param name="unreadOnly">Filter only unread messages.</param>
+        /// <returns>Collection of notification DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<NotificationDto>>> List([FromQuery] int? limit, [FromQuery] bool? unreadOnly)
         {
@@ -52,6 +62,10 @@ namespace OrbitApi.Controllers
             return Ok(notifications);
         }
 
+        /// <summary>
+        /// Retrieves the current count of unread notifications for badge counters.
+        /// </summary>
+        /// <returns>Unread count payload.</returns>
         [HttpGet("unread-count")]
         public async Task<ActionResult<UnreadCountDto>> GetUnreadCount()
         {
@@ -68,6 +82,11 @@ namespace OrbitApi.Controllers
             return Ok(new UnreadCountDto { UnreadCount = unreadCount });
         }
 
+        /// <summary>
+        /// Marks specified notifications or all notifications as read.
+        /// </summary>
+        /// <param name="req">Notification IDs or mark-all flag.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpPut("mark-read")]
         public async Task<IActionResult> MarkRead([FromBody] MarkNotificationsReadRequest req)
         {
@@ -107,6 +126,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Deletes an individual notification.
+        /// </summary>
+        /// <param name="id">Notification ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
@@ -122,6 +146,10 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Clears all notifications for the current user.
+        /// </summary>
+        /// <returns>Cleared confirmation.</returns>
         [HttpDelete("clear-all")]
         public async Task<IActionResult> ClearAll()
         {

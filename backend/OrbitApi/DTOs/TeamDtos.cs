@@ -53,6 +53,7 @@ namespace OrbitApi.DTOs
     {
         public int Id { get; set; }
         public int ProjectId { get; set; }
+        public string? ProjectTitle { get; set; }
         public int TeamId { get; set; }
         public DateTime AssignedAt { get; set; }
     }
@@ -66,6 +67,7 @@ namespace OrbitApi.DTOs
     {
         public int Id { get; set; }
         public int ProjectId { get; set; }
+        public string? ProjectTitle { get; set; }
         public int TeamId { get; set; }
         public DateTime AssignedAt { get; set; }
         public DateTime? RemovedAt { get; set; }

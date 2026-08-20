@@ -1,10 +1,16 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { createOrGetConnection, joinProjectGroup, leaveProjectGroup, onEvent, offEvent } from '../lib/signalrClient';
 import { useUser } from '../contexts/UserContext';
+import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
 
 const rawApiUrl = import.meta.env.VITE_API_BASE_URL || import.meta.env.VITE_API_URL || 'https://localhost:7065';
 const API_BASE = rawApiUrl.replace(/\/api\/v1\/?$/, '');
 
+/**
+ * Interactive Risk and Issue Register component providing a 5x5 probability vs. impact matrix heatmap,
+ * real-time SignalR synchronization, mitigation plan tracking, and Logframe integration.
+ * @param {{ projectId: number|string }} props
+ */
 export default function RiskRegister({ projectId }) {
   const { hasPermission } = useUser();
   const canEditRisk = hasPermission('RiskLogEdit');
@@ -12,6 +18,7 @@ export default function RiskRegister({ projectId }) {
 
   const [activeTab, setActiveTab] = useState('Risk'); // 'Risk' | 'Issue'
   const [items, setItems] = useState([]);
+  const [logframe, setLogframe] = useState({ goals: [], outcomes: [], outputs: [], activities: [] });
   const [loading, setLoading] = useState(true);
   const [connectionStatus, setConnectionStatus] = useState('disconnected');
   const [expandedId, setExpandedId] = useState(null);
@@ -22,6 +29,11 @@ export default function RiskRegister({ projectId }) {
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(getInitialForm('Risk'));
 
+  /**
+   * Generates a blank form template for a new Risk or Issue.
+   * @param {'Risk'|'Issue'} type - The entity type.
+   * @returns {Object} Initial form object.
+   */
   function getInitialForm(type) {
     return {
       type: type,
@@ -34,6 +46,8 @@ export default function RiskRegister({ projectId }) {
       owner: '',
       status: 'Open',
       resolutionNotes: '',
+      logframeLevel: '',
+      logframeEntityId: ''
     };
   }
 
@@ -50,6 +64,14 @@ export default function RiskRegister({ projectId }) {
         if (res.ok) {
           const data = await res.json();
           if (mounted) setItems(data);
+        }
+
+        const lfRes = await fetch(`${API_BASE}/api/v1/projects/${projectId}/logframe`, {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        if (lfRes.ok) {
+          const lfData = await lfRes.json();
+          if (mounted) setLogframe(lfData);
         }
 
         const conn = await createOrGetConnection(token);
@@ -107,6 +129,8 @@ export default function RiskRegister({ projectId }) {
       owner: r.Owner ?? r.owner,
       status: r.Status ?? r.status,
       resolutionNotes: r.ResolutionNotes ?? r.resolutionNotes,
+      logframeLevel: r.LogframeLevel ?? r.logframeLevel ?? '',
+      logframeEntityId: r.LogframeEntityId ?? r.logframeEntityId ?? '',
       resolvedAt: r.ResolvedAt ?? r.resolvedAt,
       resolvedByUserId: r.ResolvedByUserId ?? r.resolvedByUserId,
       createdAt: r.CreatedAt ?? r.createdAt
@@ -114,8 +138,15 @@ export default function RiskRegister({ projectId }) {
   }
 
   const handleChange = (e) => {
-    const val = e.target.type === 'number' || e.target.type === 'range' ? parseInt(e.target.value) : e.target.value;
-    setForm({ ...form, [e.target.name]: val });
+    let val = e.target.type === 'number' || e.target.type === 'range' ? parseInt(e.target.value) : e.target.value;
+    if (e.target.name === 'logframeEntityId' && val === '') val = null;
+    if (e.target.name === 'logframeLevel' && val === '') val = null;
+    
+    setForm(prev => {
+      const next = { ...prev, [e.target.name]: val };
+      if (e.target.name === 'logframeLevel') next.logframeEntityId = ''; // reset entity when level changes
+      return next;
+    });
   };
 
   const openCreateForm = () => {
@@ -142,11 +173,17 @@ export default function RiskRegister({ projectId }) {
       : `${API_BASE}/api/v1/projects/${projectId}/risks`;
     const method = editingId ? 'PUT' : 'POST';
 
+    const payload = {
+      ...form,
+      logframeEntityId: form.logframeEntityId ? parseInt(form.logframeEntityId, 10) : null,
+      logframeLevel: form.logframeLevel === 'None' ? null : form.logframeLevel
+    };
+
     try {
       const res = await fetch(url, {
         method,
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify(form)
+        body: JSON.stringify(payload)
       });
       if (res.ok) {
         setIsFormOpen(false);
@@ -157,12 +194,12 @@ export default function RiskRegister({ projectId }) {
           setItems(prev => prev.map(r => r.id === editingId ? normalizeServerRisk(data) : r));
         }
       } else {
-        const errText = await res.text();
-        alert(`Operation failed (${res.status}): ${errText || 'Check permissions or input fields.'}`);
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Operation failed (${res.status}): ${errText || 'Check permissions or input fields.'}`);
       }
     } catch (err) {
       console.error(err);
-      alert('Operation failed');
+      showErrorToast('Operation failed');
     }
   };
 
@@ -208,6 +245,22 @@ export default function RiskRegister({ projectId }) {
   const filteredItems = items.filter(i => i.type === activeTab);
 
   if (loading) return <div className="text-sm text-slate-500 p-4">Loading register...</div>;
+
+  // Helper for Logframe Dropdown
+  const getLogframeEntities = (level) => {
+    if (!level || !logframe.goals) return [];
+    if (level === 'Goal') return logframe.goals;
+    if (level === 'Outcome') return logframe.goals.flatMap(g => g.outcomes || []);
+    if (level === 'Output') return logframe.goals.flatMap(g => g.outcomes || []).flatMap(o => o.outputs || []);
+    if (level === 'Activity') return logframe.goals.flatMap(g => g.outcomes || []).flatMap(o => o.outputs || []).flatMap(p => p.activities || []);
+    return [];
+  };
+
+  const getLogframeEntityName = (level, id) => {
+    const entities = getLogframeEntities(level);
+    const entity = entities.find(e => e.id === id);
+    return entity ? entity.description : 'Unknown Entity';
+  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -306,6 +359,34 @@ export default function RiskRegister({ projectId }) {
                   </select>
                 </div>
               </div>
+
+              <div className="grid grid-cols-2 gap-4 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Link to Logframe Level (Optional)</label>
+                  <select name="logframeLevel" value={form.logframeLevel || ''} onChange={handleChange} className="w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-brand-500 focus:outline-none bg-white">
+                    <option value="">-- No Link --</option>
+                    <option value="Goal">Goal</option>
+                    <option value="Outcome">Outcome</option>
+                    <option value="Output">Output</option>
+                    <option value="Activity">Activity</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Linked Logframe Entity</label>
+                  <select 
+                    name="logframeEntityId" 
+                    value={form.logframeEntityId || ''} 
+                    onChange={handleChange} 
+                    disabled={!form.logframeLevel}
+                    className="w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-brand-500 focus:outline-none bg-white disabled:bg-slate-100 disabled:text-slate-400"
+                  >
+                    <option value="">-- Select Entity --</option>
+                    {getLogframeEntities(form.logframeLevel).map(e => (
+                      <option key={e.id} value={e.id}>{e.description}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
               
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
                 <button type="button" onClick={() => setIsFormOpen(false)} className="px-5 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-100 rounded-lg transition">Cancel</button>
@@ -383,6 +464,18 @@ export default function RiskRegister({ projectId }) {
                             <span className="font-semibold">{item.impact || '-'}</span> <span className="text-slate-400">({item.impactScore}/5)</span>
                           </div>
                         </div>
+
+                        {item.logframeLevel && item.logframeEntityId && (
+                          <div className="mt-4">
+                            <h5 className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Linked Logframe Element</h5>
+                            <div className="bg-brand-50 border border-brand-100 p-3 rounded-lg flex flex-col gap-1">
+                              <span className="text-[10px] font-bold text-brand-600 uppercase">{item.logframeLevel}</span>
+                              <span className="text-xs font-semibold text-slate-800">
+                                {getLogframeEntityName(item.logframeLevel, item.logframeEntityId)}
+                              </span>
+                            </div>
+                          </div>
+                        )}
                       </div>
                       
                       {item.type === 'Risk' && (

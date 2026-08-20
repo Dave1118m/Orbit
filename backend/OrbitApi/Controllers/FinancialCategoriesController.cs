@@ -3,9 +3,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OrbitApi.DTOs;
 using OrbitApi.Models;
+using OrbitApi.Services;
 
 namespace OrbitApi.Controllers;
 
+/// <summary>
+/// Chart of Accounts (CoA) and Financial Categories Controller managing account classification structures,
+/// hierarchical categories, USAID allowability flags, and target budget limits.
+/// </summary>
 [ApiController]
 [Route("api/v1/[controller]")]
 [Route("api/[controller]")]
@@ -13,10 +18,12 @@ namespace OrbitApi.Controllers;
 public class FinancialCategoriesController : ControllerBase
 {
     private readonly OrbitDbContext _context;
+    private readonly ICurrencyService _currencyService;
 
-    public FinancialCategoriesController(OrbitDbContext context)
+    public FinancialCategoriesController(OrbitDbContext context, ICurrencyService currencyService)
     {
         _context = context;
+        _currencyService = currencyService;
     }
 
     private int? GetActiveOrganizationId()
@@ -26,7 +33,7 @@ public class FinancialCategoriesController : ControllerBase
             return orgId;
         }
         var firstOrg = _context.Organizations.FirstOrDefault(o => !o.IsDeleted);
-        return firstOrg?.Id;
+        return firstOrg?.Id ?? 0;
     }
 
     [HttpGet]
@@ -35,6 +42,14 @@ public class FinancialCategoriesController : ControllerBase
         var orgId = GetActiveOrganizationId();
         if (!orgId.HasValue) return Ok(new List<FinancialCategoryDto>());
         return await GetByOrganization(orgId.Value, includeInactive);
+    }
+
+    [HttpGet("flat")]
+    public async Task<IActionResult> GetFlatAll([FromQuery] FinancialCategoryType? type = null)
+    {
+        var orgId = GetActiveOrganizationId();
+        if (!orgId.HasValue) return Ok(new List<object>());
+        return await GetFlatByOrganization(orgId.Value, type);
     }
 
     /// <summary>
@@ -52,9 +67,10 @@ public class FinancialCategoriesController : ControllerBase
                 return Ok(new List<FinancialCategoryDto>());
             orgId = org.Id;
         }
-
         var existingCount = await _context.FinancialCategories.CountAsync(c => c.OrganizationId == orgId);
-        if (existingCount == 0)
+        var hasHierarchical = await _context.FinancialCategories.AnyAsync(c => c.OrganizationId == orgId && c.ParentCategoryId != null);
+        
+        if (existingCount == 0 || hasHierarchical)
         {
             await SeedStandardCoATemplate(orgId);
         }
@@ -82,7 +98,11 @@ public class FinancialCategoriesController : ControllerBase
             .OrderBy(c => c.Code ?? c.Name)
             .ToList();
 
-        var dtos = parentCategories.Select(p => MapToDto(p, allCategories, allTransactions)).ToList();
+        var dtos = new List<FinancialCategoryDto>();
+        foreach (var p in parentCategories)
+        {
+            dtos.Add(await MapToDtoAsync(p, allCategories, allTransactions));
+        }
 
         return Ok(dtos);
     }
@@ -147,7 +167,7 @@ public class FinancialCategoriesController : ControllerBase
             .Where(c => c.OrganizationId == category.OrganizationId)
             .ToListAsync();
 
-        var dto = MapToDto(category, allCategories);
+        var dto = await MapToDtoAsync(category, allCategories);
         return Ok(dto);
     }
 
@@ -215,7 +235,7 @@ public class FinancialCategoriesController : ControllerBase
         _context.FinancialCategories.Add(category);
         await _context.SaveChangesAsync();
 
-        return CreatedAtAction(nameof(GetById), new { id = category.Id }, MapToDto(category, new List<FinancialCategory>()));
+        return CreatedAtAction(nameof(GetById), new { id = category.Id }, await MapToDtoAsync(category, new List<FinancialCategory>()));
     }
 
     /// <summary>
@@ -274,7 +294,7 @@ public class FinancialCategoriesController : ControllerBase
 
         await _context.SaveChangesAsync();
 
-        return Ok(MapToDto(category, new List<FinancialCategory>()));
+        return Ok(await MapToDtoAsync(category, new List<FinancialCategory>()));
     }
 
     /// <summary>
@@ -407,26 +427,55 @@ public class FinancialCategoriesController : ControllerBase
         return createdList;
     }
 
-    private static FinancialCategoryDto MapToDto(FinancialCategory category, List<FinancialCategory> allCategories, List<FinancialTransaction>? allTransactions = null)
+    private async Task<FinancialCategoryDto> MapToDtoAsync(FinancialCategory category, List<FinancialCategory> allCategories, List<FinancialTransaction>? allTransactions = null)
     {
-        var subcats = allCategories
-            .Where(c => c.ParentCategoryId == category.Id)
-            .OrderBy(c => c.Name)
-            .Select(s => MapToDto(s, allCategories, allTransactions))
-            .ToList();
+        var subcats = new List<FinancialCategoryDto>();
+        foreach (var s in allCategories.Where(c => c.ParentCategoryId == category.Id).OrderBy(c => c.Name))
+        {
+            subcats.Add(await MapToDtoAsync(s, allCategories, allTransactions));
+        }
 
-        var expFromEntities = category.Expenses?.Sum(e => e.Amount) ?? 0m;
-        var expFromTxns = allTransactions?
-            .Where(t => t.CategoryId == category.Id && t.Type == FinancialTransactionType.Expense)
-            .Sum(t => t.Amount) ?? 0m;
+        // Avoid double counting: When an expense is Paid, it generates a transaction. 
+        // Adding them together doubles the amount. Instead, we take the highest value 
+        // (or just rely on the entities as the primary source of incurred costs).
+        var expFromEntities = 0m;
+        if (category.Expenses != null)
+        {
+            foreach (var e in category.Expenses.Where(e => e.ApprovalStatus != ApprovalStatus.Rejected))
+            {
+                expFromEntities += await _currencyService.ConvertAsync(e.Amount, e.Currency, "USD");
+            }
+        }
+        
+        var expFromTxns = 0m;
+        if (allTransactions != null)
+        {
+            foreach (var t in allTransactions.Where(t => t.CategoryId == category.Id && t.Type == FinancialTransactionType.Expense))
+            {
+                expFromTxns += await _currencyService.ConvertAsync(t.Amount, t.Currency, "USD");
+            }
+        }
 
-        var incFromEntities = category.DonorContributions?.Sum(d => d.Amount) ?? 0m;
-        var incFromTxns = allTransactions?
-            .Where(t => t.CategoryId == category.Id && t.Type == FinancialTransactionType.Income)
-            .Sum(t => t.Amount) ?? 0m;
+        var incFromEntities = 0m;
+        if (category.DonorContributions != null)
+        {
+            foreach (var d in category.DonorContributions)
+            {
+                incFromEntities += await _currencyService.ConvertAsync(d.Amount, d.Currency, "USD");
+            }
+        }
 
-        var finalExpenses = expFromEntities + expFromTxns;
-        var finalIncome = incFromEntities + incFromTxns;
+        var incFromTxns = 0m;
+        if (allTransactions != null)
+        {
+            foreach (var t in allTransactions.Where(t => t.CategoryId == category.Id && t.Type == FinancialTransactionType.Income))
+            {
+                incFromTxns += await _currencyService.ConvertAsync(t.Amount, t.Currency, "USD");
+            }
+        }
+
+        var finalExpenses = Math.Max(expFromEntities, expFromTxns);
+        var finalIncome = Math.Max(incFromEntities, incFromTxns);
 
         return new FinancialCategoryDto
         {
@@ -467,118 +516,23 @@ public class FinancialCategoriesController : ControllerBase
 
     private async Task SeedStandardCoATemplate(int orgId)
     {
-        // 1. Root Level 1 Account Types
-        var revRoot = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            Name = "4000 - Grant Revenue & Donor Income",
-            Code = "4000",
-            Description = "All incoming grant awards and donor contributions",
-            Type = FinancialCategoryType.Income,
-            AccountType = "Revenue",
-            HierarchyLevel = 1,
-            IsUSAIDAllowable = true,
-            IsSystem = true,
-            Color = "#059669"
-        };
-        var expRoot = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            Name = "5000 - Direct Program & Operating Expenses",
-            Code = "5000",
-            Description = "All operating and program expenditure line items",
-            Type = FinancialCategoryType.Expense,
-            AccountType = "Expense",
-            HierarchyLevel = 1,
-            IsUSAIDAllowable = true,
-            IsSystem = true,
-            Color = "#DC2626"
-        };
-
-        _context.FinancialCategories.AddRange(revRoot, expRoot);
+        var existing = await _context.FinancialCategories.Where(c => c.OrganizationId == orgId).ToListAsync();
+        foreach (var c in existing) c.ParentCategoryId = null;
+        await _context.SaveChangesAsync();
+        _context.FinancialCategories.RemoveRange(existing);
         await _context.SaveChangesAsync();
 
-        // 2. Level 2 Major Categories under 5000 Expenses
-        var catPersonnel = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            ParentCategoryId = expRoot.Id,
-            Name = "5100 - Personnel & Staff Salaries",
-            Code = "5100",
-            Description = "Salaries, wages, fringe benefits, and staff pensions",
-            Type = FinancialCategoryType.Expense,
-            AccountType = "Expense",
-            HierarchyLevel = 2,
-            IsUSAIDAllowable = true,
-            Color = "#4F46E5"
-        };
-        var catTravel = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            ParentCategoryId = expRoot.Id,
-            Name = "5200 - Travel & Field Transportation",
-            Code = "5200",
-            Description = "Airfare, vehicle fuel, per diem, and field logistics",
-            Type = FinancialCategoryType.Expense,
-            AccountType = "Expense",
-            HierarchyLevel = 2,
-            IsUSAIDAllowable = true,
-            Color = "#2563EB"
-        };
-        var catSupplies = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            ParentCategoryId = expRoot.Id,
-            Name = "5300 - Program Supplies & Procurement",
-            Code = "5300",
-            Description = "Medical supplies, relief goods, and equipment",
-            Type = FinancialCategoryType.Expense,
-            AccountType = "Expense",
-            HierarchyLevel = 2,
-            IsUSAIDAllowable = true,
-            Color = "#0891B2"
-        };
-        var catOps = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            ParentCategoryId = expRoot.Id,
-            Name = "5400 - Office Operations & Facilities",
-            Code = "5400",
-            Description = "Rent, utilities, IT, communication, and admin overhead",
-            Type = FinancialCategoryType.Expense,
-            AccountType = "Expense",
-            HierarchyLevel = 2,
-            IsUSAIDAllowable = true,
-            Color = "#EA580C"
-        };
-        var catUnallowable = new FinancialCategory
-        {
-            OrganizationId = orgId,
-            ParentCategoryId = expRoot.Id,
-            Name = "5900 - Restricted & Unallowable Costs",
-            Code = "5900",
-            Description = "Entertainment, fines, unapproved alcohol, and non-USAID allowable costs",
-            Type = FinancialCategoryType.Expense,
-            AccountType = "Expense",
-            HierarchyLevel = 2,
-            IsUSAIDAllowable = false,
-            Color = "#991B1B"
-        };
+        var catPersonnel = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Personnel", Code = "5100", Description = "All staff salaries", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#4F46E5", IsSystem = true };
+        var catFringe = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Fringe Benefits", Code = "5150", Description = "Insurance, taxes, pensions", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#4338CA", IsSystem = true };
+        var catTravel = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Travel", Code = "5200", Description = "Flights, hotels, per diem", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#2563EB", IsSystem = true };
+        var catEquipment = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Equipment", Code = "5300", Description = "High-value assets", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#0891B2", IsSystem = true };
+        var catSupplies = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Supplies", Code = "5400", Description = "Office and project materials", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#0D9488", IsSystem = true };
+        var catContractual = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Contractual", Code = "5500", Description = "Consultants and sub-awards", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#059669", IsSystem = true };
+        var catOther = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Other Direct Costs", Code = "5600", Description = "Rent, utilities, comms", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#EA580C", IsSystem = true };
+        var catIndirect = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Indirect Costs", Code = "5700", Description = "Overhead/NICRA", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = true, Color = "#7C3AED", IsSystem = true };
+        var catUnallowable = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = null, Name = "Unallowable Costs", Code = "5900", Description = "Alcohol, fines, entertainment", Type = FinancialCategoryType.Expense, AccountType = "Expense", HierarchyLevel = 1, IsUSAIDAllowable = false, Color = "#991B1B", IsSystem = true };
 
-        _context.FinancialCategories.AddRange(catPersonnel, catTravel, catSupplies, catOps, catUnallowable);
-        await _context.SaveChangesAsync();
-
-        // 3. Level 3 Sub-categories
-        var sub1 = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = catPersonnel.Id, Name = "5110 - Local Field Staff Salaries", Code = "5110", AccountType = "Expense", HierarchyLevel = 3, IsUSAIDAllowable = true };
-        var sub2 = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = catPersonnel.Id, Name = "5120 - Staff Fringe Benefits & Pension", Code = "5120", AccountType = "Expense", HierarchyLevel = 3, IsUSAIDAllowable = true };
-
-        var sub3 = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = catTravel.Id, Name = "5210 - Vehicle Fuel & Maintenance", Code = "5210", AccountType = "Expense", HierarchyLevel = 3, IsUSAIDAllowable = true };
-        var sub4 = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = catTravel.Id, Name = "5220 - Staff Field Per Diem & Lodging", Code = "5220", AccountType = "Expense", HierarchyLevel = 3, IsUSAIDAllowable = true };
-
-        var sub5 = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = catSupplies.Id, Name = "5310 - Emergency Medical & Relief Goods", Code = "5310", AccountType = "Expense", HierarchyLevel = 3, IsUSAIDAllowable = true };
-        var sub6 = new FinancialCategory { OrganizationId = orgId, ParentCategoryId = catOps.Id, Name = "5410 - Office Rent & Utilities", Code = "5410", AccountType = "Expense", HierarchyLevel = 3, IsUSAIDAllowable = true };
-
-        _context.FinancialCategories.AddRange(sub1, sub2, sub3, sub4, sub5, sub6);
+        _context.FinancialCategories.AddRange(catPersonnel, catFringe, catTravel, catEquipment, catSupplies, catContractual, catOther, catIndirect, catUnallowable);
         await _context.SaveChangesAsync();
     }
 }

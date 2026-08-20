@@ -51,11 +51,14 @@ export default function CategoriesManagement() {
     name: '',
     code: '',
     description: '',
-    type: 0, // 0 = Expense, 1 = Income, 2 = Both
+    type: 'Expense', // 'Expense', 'Income', 'Both'
     parentCategoryId: '',
     color: '#4F46E5',
     icon: 'Folder',
-    targetBudgetLimit: ''
+    targetBudgetLimit: '',
+    isUSAIDAllowable: true,
+    logframeLevel: '',
+    logframeEntityId: ''
   });
   const [submitting, setSubmitting] = useState(false);
 
@@ -104,11 +107,14 @@ export default function CategoriesManagement() {
         name: category.name || '',
         code: category.code || '',
         description: category.description || '',
-        type: category.type ?? 0,
+        type: category.type ?? 'Expense',
         parentCategoryId: category.parentCategoryId ? String(category.parentCategoryId) : '',
         color: category.color || '#4F46E5',
         icon: category.icon || 'Folder',
-        targetBudgetLimit: category.targetBudgetLimit ? String(category.targetBudgetLimit) : ''
+        targetBudgetLimit: category.targetBudgetLimit ? String(category.targetBudgetLimit) : '',
+        isUSAIDAllowable: category.isUSAIDAllowable ?? true,
+        logframeLevel: category.logframeLevel ?? '',
+        logframeEntityId: category.logframeEntityId ? String(category.logframeEntityId) : ''
       });
     } else {
       setEditingCategory(null);
@@ -116,11 +122,14 @@ export default function CategoriesManagement() {
         name: '',
         code: '',
         description: '',
-        type: 0,
+        type: 'Expense',
         parentCategoryId: '',
         color: PRESET_COLORS[Math.floor(Math.random() * PRESET_COLORS.length)],
         icon: 'Folder',
-        targetBudgetLimit: ''
+        targetBudgetLimit: '',
+        isUSAIDAllowable: true,
+        logframeLevel: '',
+        logframeEntityId: ''
       });
     }
     setIsModalOpen(true);
@@ -142,11 +151,14 @@ export default function CategoriesManagement() {
       name: formData.name.trim(),
       code: formData.code.trim() || null,
       description: formData.description.trim() || null,
-      type: parseInt(formData.type, 10),
+      type: formData.type,
       parentCategoryId: formData.parentCategoryId ? parseInt(formData.parentCategoryId, 10) : null,
       color: formData.color,
       icon: formData.icon,
-      targetBudgetLimit: formData.targetBudgetLimit ? parseFloat(formData.targetBudgetLimit) : null
+      targetBudgetLimit: formData.targetBudgetLimit ? parseFloat(formData.targetBudgetLimit) : null,
+      isUSAIDAllowable: formData.isUSAIDAllowable,
+      logframeLevel: formData.logframeLevel || null,
+      logframeEntityId: formData.logframeEntityId ? parseInt(formData.logframeEntityId, 10) : null
     };
 
     try {
@@ -217,17 +229,17 @@ export default function CategoriesManagement() {
 
     if (!matchesSearch) return false;
 
-    if (filterType === 'EXPENSE') return cat.type === 0 || cat.type === 2;
-    if (filterType === 'INCOME') return cat.type === 1 || cat.type === 2;
+    if (filterType === 'EXPENSE') return cat.type === 0 || cat.type === 2 || cat.type === 'Expense' || cat.type === 'Both';
+    if (filterType === 'INCOME') return cat.type === 1 || cat.type === 2 || cat.type === 'Income' || cat.type === 'Both';
     return true;
   });
 
   const getTypeBadge = (type, isAllowable = true) => {
     return (
       <div className="flex items-center gap-1.5 flex-wrap">
-        {type === 0 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200"><ArrowDownRight className="w-3 h-3" /> Expense</span>}
-        {type === 1 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"><ArrowUpRight className="w-3 h-3" /> Grant Revenue</span>}
-        {type === 2 && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200"><Layers className="w-3 h-3" /> Expense & Revenue</span>}
+        {(type === 0 || type === 'Expense') && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-rose-50 text-rose-700 border border-rose-200"><ArrowDownRight className="w-3 h-3" /> Expense</span>}
+        {(type === 1 || type === 'Income') && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200"><ArrowUpRight className="w-3 h-3" /> Grant Revenue</span>}
+        {(type === 2 || type === 'Both') && <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded bg-blue-50 text-blue-700 border border-blue-200"><Layers className="w-3 h-3" /> Expense & Revenue</span>}
         {isAllowable ? (
           <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
             ✓ Allowable Cost
@@ -481,13 +493,52 @@ export default function CategoriesManagement() {
                   onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                   className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 bg-white"
                 >
-                  <option value={0}>Expense Only</option>
-                  <option value={1}>Grant Revenue Only</option>
-                  <option value={2}>Both Revenue & Expense</option>
+                  <option value="Expense">Expense Only</option>
+                  <option value="Income">Grant Revenue Only</option>
+                  <option value="Both">Both Revenue & Expense</option>
                 </select>
               </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 uppercase mb-1">Donor Allowable</label>
+                <div className="flex items-center gap-2 mt-2">
+                  <input
+                    type="checkbox"
+                    checked={formData.isUSAIDAllowable}
+                    onChange={(e) => setFormData({ ...formData, isUSAIDAllowable: e.target.checked })}
+                    className="w-4 h-4 text-brand-600 rounded border-slate-300 focus:ring-brand-500"
+                  />
+                  <span className="text-sm text-slate-600">Yes, this category is allowable for donor funding</span>
+                </div>
+              </div>
 
+              <div>
+                <label className="block font-semibold text-slate-700 uppercase mb-1">Logframe Link (Level)</label>
+                <select
+                  value={formData.logframeLevel}
+                  onChange={(e) => setFormData({ ...formData, logframeLevel: e.target.value, logframeEntityId: '' })}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20 bg-white"
+                >
+                  <option value="">None</option>
+                  <option value="Goal">Goal</option>
+                  <option value="Outcome">Outcome</option>
+                  <option value="Output">Output</option>
+                  <option value="Activity">Activity</option>
+                </select>
+              </div>
+
+              {formData.logframeLevel && (
+                <div>
+                  <label className="block font-semibold text-slate-700 uppercase mb-1">Logframe Entity ID</label>
+                  <input
+                    type="number"
+                    placeholder={`e.g. 10 (ID of the ${formData.logframeLevel})`}
+                    value={formData.logframeEntityId}
+                    onChange={(e) => setFormData({ ...formData, logframeEntityId: e.target.value })}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
+                  />
+                </div>
+              )}
 
               <div>
                 <label className="block font-semibold text-slate-700 uppercase mb-1">Target Budget Limit ($)</label>

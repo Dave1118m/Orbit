@@ -247,7 +247,7 @@ export default function FinancialOverview() {
 
     const payload = {
       organizationId: orgId,
-      type: parseInt(txnData.type, 10),
+      type: txnData.type,
       amount: parseFloat(txnData.amount) || 0,
       currency: (txnData.currency || 'USD').trim().toUpperCase(),
       exchangeRate: parseFloat(txnData.exchangeRate) || 1.0,
@@ -285,7 +285,7 @@ export default function FinancialOverview() {
       setTimeout(() => setSuccessMsg(''), 4000);
       setIsTxnModalOpen(false);
       setTxnData({
-        type: '0',
+        type: 'Expense',
         amount: '',
         currency: 'USD',
         exchangeRate: '1.0',
@@ -309,7 +309,7 @@ export default function FinancialOverview() {
     const fromTxns = transactions
       .filter(t => (t.type === 0 || t.type === 'Expense' || t.type === 'expense'))
       .reduce((sum, t) => {
-        if (t.categoryId === cat.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (t.categoryId === cat.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
         return sum;
       }, 0);
     return Math.max(fromEntity, fromTxns, fromEntity + fromTxns);
@@ -397,7 +397,7 @@ export default function FinancialOverview() {
             <TrendingUp className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Grant Revenue</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Grant Revenue (USD eq.)</span>
             <h3 className="text-xl font-bold text-slate-900 mt-0.5">
               ${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </h3>
@@ -409,7 +409,7 @@ export default function FinancialOverview() {
             <TrendingDown className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Expenditures</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Expenditures (USD eq.)</span>
             <h3 className="text-xl font-bold text-slate-900 mt-0.5">
               ${(summary?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </h3>
@@ -421,7 +421,7 @@ export default function FinancialOverview() {
             <DollarSign className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Net Surplus / Cash Flow</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Net Surplus / Cash Flow (USD eq.)</span>
             <h3 className={`text-xl font-bold mt-0.5 ${(summary?.netCashFlow || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
               ${(summary?.netCashFlow || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
             </h3>
@@ -456,8 +456,8 @@ export default function FinancialOverview() {
                     <span className="text-xs font-bold text-slate-800 block">{acc.bankName}</span>
                     <span className="text-xs text-slate-500">{acc.accountName} ({acc.accountNumber})</span>
                   </div>
-                  <span className="text-sm font-bold text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
-                    ${acc.calculatedBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} {acc.currency}
+                  <span className="font-semibold text-slate-900 text-sm">
+                    {acc.currency === 'USD' ? '$' : ''}{acc.calculatedBalance.toLocaleString(undefined, { minimumFractionDigits: 2 })} {acc.currency}
                   </span>
                 </div>
               ))}
@@ -778,9 +778,9 @@ export default function FinancialOverview() {
                     onChange={(e) => setTxnData({ ...txnData, type: e.target.value })}
                     className="w-full px-3 py-1.5 border border-slate-300 rounded-lg bg-white focus:border-brand-500 focus:outline-none"
                   >
-                    <option value="0">Expense Entry</option>
-                    <option value="1">Income / Grant Revenue</option>
-                    <option value="3">Adjustment Entry</option>
+                    <option value="Expense">Expense Entry</option>
+                    <option value="Income">Income / Grant Revenue</option>
+                    <option value="Adjustment">Adjustment Entry</option>
                   </select>
                 </div>
                 <div>

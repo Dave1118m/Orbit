@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SearchSelect from '../SearchSelect';
+import { useUser } from '../../contexts/UserContext';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -36,11 +38,11 @@ const categoryLabels = {
 };
 
 const statusConfig = {
-  0: { label: 'Pending Finance Review', color: 'bg-amber-100 text-amber-800 border-amber-300' },
-  1: { label: 'Pending Manager Sign-off', color: 'bg-blue-100 text-blue-800 border-blue-300' },
-  2: { label: 'Approved', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
-  3: { label: 'Rejected', color: 'bg-rose-100 text-rose-800 border-rose-300' },
-  4: { label: 'Paid / Disbursed', color: 'bg-[#5A45FF]/10 text-[#5A45FF] border-[#5A45FF]/30' }
+  'Pending': { label: 'Pending Finance Review', color: 'bg-amber-100 text-amber-800 border-amber-300' },
+  'FinanceReviewed': { label: 'Pending Manager Sign-off', color: 'bg-blue-100 text-blue-800 border-blue-300' },
+  'Approved': { label: 'Approved', color: 'bg-emerald-100 text-emerald-800 border-emerald-300' },
+  'Rejected': { label: 'Rejected', color: 'bg-rose-100 text-rose-800 border-rose-300' },
+  'Paid': { label: 'Paid / Disbursed', color: 'bg-[#5A45FF]/10 text-[#5A45FF] border-[#5A45FF]/30' }
 };
 
 export default function Expenses() {
@@ -54,12 +56,17 @@ export default function Expenses() {
   const [error, setError] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
 
+  const { user, hasRole } = useUser();
+  const isFinanceOfficerOrAdmin = hasRole('FinanceOfficer') || hasRole('Admin') || hasRole('Owner');
+  const isManagerOrAdmin = hasRole('Manager') || hasRole('Admin') || hasRole('Owner');
+
   // Drawer modal
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 130 });
   const [form, setForm] = useState({
     projectId: '', taskId: '', donorId: '', bankAccountId: '',
-    category: 2, amount: '', currency: 'USD',
+    category: '', amount: '', grossAmount: '', taxAmount: '', hasVat: false, currency: 'USD',
     date: new Date().toISOString().split('T')[0], description: ''
   });
 
@@ -132,11 +139,78 @@ export default function Expenses() {
   const [selectedParentId, setSelectedParentId] = useState('');
   const [subCategories, setSubCategories] = useState([]);
 
+  // Budget UX state
+  const [formError, setFormError] = useState('');
+  const [budgetInfo, setBudgetInfo] = useState(null); // { lineItemAmount, alreadySpent, remaining, currency }
+  const [budgetLoading, setBudgetLoading] = useState(false);
+
+  async function fetchBudgetInfo(projectId, categoryId) {
+    if (!projectId || !categoryId) { setBudgetInfo(null); return; }
+    try {
+      setBudgetLoading(true);
+      const res = await fetch(`${API_BASE}/budgets?projectId=${projectId}`, { headers: authHeaders() });
+      if (!res.ok) { setBudgetInfo(null); return; }
+      const budgets = await res.json();
+      const projectBudget = Array.isArray(budgets)
+        ? budgets.find(b => b.level === 'Project' || b.level === 0)
+        : budgets;
+      if (!projectBudget) { setBudgetInfo(null); return; }
+
+      const lineItem = (projectBudget.lineItems || []).find(
+        li => String(li.categoryId) === String(categoryId)
+      );
+      if (!lineItem) { setBudgetInfo({ noLineItem: true }); return; }
+
+      // Fetch current spend for this project+category
+      const expRes = await fetch(`${API_BASE}/expenses`, { headers: authHeaders() });
+      let alreadySpent = 0;
+      if (expRes.ok) {
+        const allExp = await expRes.json();
+        const budgetCurrency = projectBudget.currency || 'USD';
+        alreadySpent = allExp
+          .filter(e =>
+            String(e.projectId) === String(projectId) &&
+            String(e.categoryId) === String(categoryId) &&
+            e.approvalStatus !== 'Rejected'
+          )
+          .reduce((sum, e) => {
+            let amt = e.amount || 0;
+            const expCurrency = e.currency || 'USD';
+            if (expCurrency !== budgetCurrency) {
+              // Convert to budget currency
+              if (budgetCurrency === 'USD' && expCurrency === 'ETB') amt = amt / (exchangeRates['ETB'] || 130);
+              else if (budgetCurrency === 'ETB' && expCurrency === 'USD') amt = amt * (exchangeRates['ETB'] || 130);
+            }
+            return sum + amt;
+          }, 0);
+      }
+
+      setBudgetInfo({
+        lineItemAmount: lineItem.amount,
+        alreadySpent,
+        remaining: lineItem.amount - alreadySpent,
+        currency: projectBudget.currency || 'USD',
+        noLineItem: false
+      });
+    } catch { setBudgetInfo(null); }
+    finally { setBudgetLoading(false); }
+  }
+
+  async function fetchExchangeRates() {
+    try {
+      const res = await fetch(`${API_BASE}/currency/rates?baseCurrency=USD`, { headers: authHeaders() });
+      if (res.ok) {
+        setExchangeRates(await res.json());
+      }
+    } catch {}
+  }
+
   useEffect(() => {
     fetchExpenses();
     fetchBankAccounts();
     fetchProjects();
     fetchDynamicCategories();
+    fetchExchangeRates();
   }, []);
 
   function getOrgId() {
@@ -238,6 +312,12 @@ export default function Expenses() {
     const matchedProj = projects.find(p => String(p.id) === String(projId));
     setSelectedProjectInfo(matchedProj || null);
     fetchTasks(projId);
+    
+    // Also trigger budget fetch if a category is already selected
+    const currentCatId = form.categoryId || form.category || selectedParentId;
+    if (currentCatId) {
+      fetchBudgetInfo(projId, currentCatId);
+    }
 
     try {
       const res = await fetch(`${API_BASE}/projects/${projId}/donors`, { headers: authHeaders() });
@@ -265,14 +345,29 @@ export default function Expenses() {
 
   async function handleCreate(e) {
     e.preventDefault();
+    setFormError('');
     try {
       setIsSubmitting(true);
+      const selectedCategoryId = form.categoryId || form.category || selectedParentId;
+
+      let finalAmount = parseFloat(form.amount || 0);
+      let payloadGross = null;
+      let payloadTax = null;
+      
+      if (form.hasVat) {
+        payloadGross = parseFloat(form.grossAmount || 0);
+        payloadTax = parseFloat(form.taxAmount || 0);
+        finalAmount = payloadGross - payloadTax;
+      }
+
       const payload = {
         projectId: form.projectId ? parseInt(form.projectId) : null,
         taskId: form.taskId ? parseInt(form.taskId) : null,
         bankAccountId: form.bankAccountId ? parseInt(form.bankAccountId) : null,
-        category: parseInt(form.category),
-        amount: parseFloat(form.amount),
+        categoryId: selectedCategoryId ? parseInt(selectedCategoryId) : null,
+        amount: finalAmount,
+        grossAmount: payloadGross,
+        taxAmount: payloadTax,
         currency: form.currency,
         date: form.date,
         description: form.description
@@ -284,18 +379,25 @@ export default function Expenses() {
       });
       if (!res.ok) {
         const msg = await parseErrorMessage(res, 'Failed to record expense');
-        throw new Error(msg);
+        setFormError(msg);
+        return;
       }
       setIsDrawerOpen(false);
-      setForm({ projectId: '', taskId: '', bankAccountId: '', category: 2, amount: '', currency: 'USD', date: new Date().toISOString().split('T')[0], description: '' });
+      setBudgetInfo(null);
+      setFormError('');
+      setForm({ 
+        projectId: '', taskId: '', bankAccountId: '', category: '', categoryId: '', 
+        amount: '', grossAmount: '', taxAmount: '', hasVat: false, currency: 'USD', 
+        date: new Date().toISOString().split('T')[0], description: '' 
+      });
       fetchExpenses();
-    } catch (e) { alert(e.message); }
+    } catch (e) { setFormError(e.message); }
     finally { setIsSubmitting(false); }
   }
 
   async function parseErrorMessage(res, defaultMsg) {
     try {
-      const text = await res.text();
+      const text = await parseApiResponse(res);
       try {
         const json = JSON.parse(text);
         return json.message || json.error || text;
@@ -315,7 +417,7 @@ export default function Expenses() {
         throw new Error(msg);
       }
       fetchExpenses();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   async function handleManagerSignoff(id) {
@@ -326,7 +428,7 @@ export default function Expenses() {
         throw new Error(msg);
       }
       fetchExpenses();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   async function handlePay(id) {
@@ -337,7 +439,7 @@ export default function Expenses() {
         throw new Error(msg);
       }
       fetchExpenses();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   async function handleRejectSubmit(e) {
@@ -353,36 +455,22 @@ export default function Expenses() {
       setRejectTarget(null);
       setRejectReason('');
       fetchExpenses();
-    } catch (e) { alert(e.message); }
+    } catch (e) { showSuccessToast(e.message); }
   }
 
   async function handleDeleteExpense(expenseId) {
-    if (!window.confirm("Are you sure you want to remove this expense record?")) return;
+    if (!window.confirm("Are you sure you want to completely remove this expense record from the database?")) return;
     try {
-      const res = await fetch(`${API_BASE}/expenses/${expenseId}/reject`, {
-        method: 'POST',
-        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Removed during testing reset' })
+      const res = await fetch(`${API_BASE}/expenses/${expenseId}`, {
+        method: 'DELETE',
+        headers: authHeaders()
       });
       fetchExpenses();
     } catch (e) { console.error(e); }
   }
 
-  async function handleClearFinancialData() {
-    if (!window.confirm("Are you sure you want to clear all test financial data (Expenses, Contributions, Budgets) so you can start testing fresh?")) return;
-    try {
-      const res = await fetch(`${API_BASE}/expenses/clear-financial-data`, {
-        method: 'POST',
-        headers: authHeaders()
-      });
-      if (res.ok) {
-        alert("All test financial data cleared successfully!");
-        fetchExpenses();
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  }
+
+
 
   async function handleReceiptUpload(e) {
     const file = e.target.files?.[0];
@@ -394,19 +482,19 @@ export default function Expenses() {
       
       const response = await fetch(`${API_BASE}/expenses/${receiptTarget.id}/receipt`, {
         method: 'POST',
-        headers: authHeaders(),
+        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
         body: fd
       });
 
       if (!response.ok) {
-        const errText = await response.text();
+        const errText = await parseApiResponse(response);
         throw new Error(errText || 'Failed to upload receipt file');
       }
 
       setReceiptTarget(null);
       fetchExpenses();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setUploadingReceipt(false);
     }
@@ -421,19 +509,29 @@ export default function Expenses() {
       });
       if (response.ok) {
         fetchExpenses();
-        alert('All financial test data has been cleared to 0! You can now start testing the workflow from scratch.');
+        showSuccessToast('All financial test data has been cleared to 0! You can now start testing the workflow from scratch.');
       } else {
-        alert('Failed to clear financial data.');
+        showErrorToast('Failed to clear financial data.');
       }
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   }
 
+  const calculateBaseTotal = (expenseList) => {
+    return expenseList.reduce((sum, e) => {
+      let amt = e.amount || 0;
+      if (e.currency && e.currency !== 'USD') {
+        if (e.currency === 'ETB') amt = amt / (exchangeRates['ETB'] || 130);
+      }
+      return sum + amt;
+    }, 0);
+  };
+
   const totalExpenses = expenses.length;
-  const totalAmount = expenses.reduce((sum, e) => sum + (e.amount || 0), 0);
-  const pendingCount = expenses.filter(e => e.approvalStatus === 0 || e.approvalStatus === 1).length;
-  const paidAmount = expenses.filter(e => e.approvalStatus === 4).reduce((sum, e) => sum + (e.amount || 0), 0);
+  const totalAmount = calculateBaseTotal(expenses);
+  const pendingCount = expenses.filter(e => e.approvalStatus === 'Pending' || e.approvalStatus === 'FinanceReviewed').length;
+  const paidAmount = calculateBaseTotal(expenses.filter(e => e.approvalStatus === 'Paid'));
 
   return (
     <div className="space-y-6">
@@ -451,7 +549,7 @@ export default function Expenses() {
             <span>🗑️ Reset / Clear Test Data</span>
           </button>
           <button
-            onClick={() => setIsDrawerOpen(true)}
+            onClick={() => { setIsDrawerOpen(true); setFormError(''); setBudgetInfo(null); }}
             className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm"
           >
             + Record New Expense
@@ -466,16 +564,16 @@ export default function Expenses() {
           <p className="text-3xl font-extrabold text-slate-900">{totalExpenses}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Amount Claimed</p>
-          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalAmount)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Amount Claimed (USD)</p>
+          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalAmount, 'USD')}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
           <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Pending Approvals</p>
           <p className="text-3xl font-extrabold text-amber-600">{pendingCount}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Disbursed (Paid)</p>
-          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(paidAmount)}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Disbursed (USD)</p>
+          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(paidAmount, 'USD')}</p>
         </div>
       </div>
 
@@ -524,7 +622,7 @@ export default function Expenses() {
                           {new Date(eItem.date).toLocaleDateString()}
                         </div>
                         <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 mt-0.5">
-                          {categoryLabels[eItem.category] || 'Other'}
+                          {eItem.categoryName || 'General Expense'}
                         </span>
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-700 max-w-xs truncate" title={eItem.description}>
@@ -541,8 +639,16 @@ export default function Expenses() {
                           <span className="text-slate-400">General Operational</span>
                         )}
                       </td>
-                      <td className="px-6 py-4 text-sm font-extrabold text-slate-900">
-                        {formatCurrency(eItem.amount, eItem.currency)}
+                      <td className="px-6 py-4">
+                        <div className="text-sm font-extrabold text-slate-900">
+                          {formatCurrency(eItem.amount, eItem.currency)}
+                        </div>
+                        {eItem.taxAmount > 0 && (
+                          <div className="mt-1 text-[10px] text-slate-500 font-semibold border-t border-slate-100 pt-1">
+                            <div className="flex justify-between gap-2"><span>Gross:</span> <span>{formatCurrency(eItem.grossAmount, eItem.currency)}</span></div>
+                            <div className="flex justify-between gap-2 text-rose-600"><span>Tax:</span> <span>-{formatCurrency(eItem.taxAmount, eItem.currency)}</span></div>
+                          </div>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <div className="flex flex-col gap-1">
@@ -570,6 +676,11 @@ export default function Expenses() {
                               ⚠️ Budget Warning
                             </span>
                           )}
+                          {eItem.complianceWarningMessage && (
+                            <span className="text-[10px] font-bold text-rose-600 flex items-center gap-1 mt-0.5" title={eItem.complianceWarningMessage}>
+                              ⚠️ Compliance Warning
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -578,7 +689,7 @@ export default function Expenses() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right text-xs font-semibold space-x-2">
-                        {eItem.approvalStatus === 0 && (
+                        {eItem.approvalStatus === 'Pending' && isFinanceOfficerOrAdmin && eItem.submittedByUserId !== user?.id && (
                           <button
                             onClick={() => handleFinanceReview(eItem.id)}
                             className="text-[#5A45FF] hover:underline"
@@ -586,7 +697,7 @@ export default function Expenses() {
                             Finance Review
                           </button>
                         )}
-                        {eItem.approvalStatus === 1 && (
+                        {eItem.approvalStatus === 'FinanceReviewed' && isManagerOrAdmin && eItem.submittedByUserId !== user?.id && eItem.approvedByFinanceOfficerId !== user?.id && (
                           <button
                             onClick={() => handleManagerSignoff(eItem.id)}
                             className="text-[#5A45FF] hover:underline"
@@ -594,7 +705,7 @@ export default function Expenses() {
                             Manager Sign-off
                           </button>
                         )}
-                        {eItem.approvalStatus === 2 && (
+                        {eItem.approvalStatus === 'Approved' && isFinanceOfficerOrAdmin && (
                           <button
                             onClick={() => handlePay(eItem.id)}
                             className="text-emerald-600 hover:underline font-bold"
@@ -602,7 +713,7 @@ export default function Expenses() {
                             Disburse / Pay
                           </button>
                         )}
-                        {eItem.approvalStatus < 2 && (
+                        {(eItem.approvalStatus === 'Pending' || eItem.approvalStatus === 'FinanceReviewed') && (
                           <button
                             onClick={() => setRejectTarget(eItem)}
                             className="text-rose-600 hover:underline"
@@ -674,6 +785,17 @@ export default function Expenses() {
               <h3 className="text-base font-bold text-slate-900">Record Expense Claim</h3>
               <button onClick={() => setIsDrawerOpen(false)} className="text-slate-400 hover:text-slate-600 p-1">✕</button>
             </div>
+
+            {formError && (
+              <div className="mb-3 p-2.5 rounded-xl bg-rose-50 border border-rose-200 flex items-start gap-2">
+                <span className="text-rose-600">⚠️</span>
+                <div>
+                  <h4 className="text-xs font-bold text-rose-800">Cannot Record Expense</h4>
+                  <p className="text-[10px] font-medium text-rose-700 mt-0.5">{formError}</p>
+                </div>
+              </div>
+            )}
+
             <form onSubmit={handleCreate} className="flex flex-col gap-3">
               <div>
                 <div className="flex items-center justify-between mb-1">
@@ -734,16 +856,50 @@ export default function Expenses() {
                 </div>
               )}
 
+              <div>
+                <label className="block font-semibold text-slate-700 mb-1">Financial Category</label>
+                <select
+                  value={form.categoryId || form.category}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setForm({ ...form, categoryId: val, category: val, taskId: '' });
+                    fetchBudgetInfo(form.projectId, val);
+                  }}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
+                >
+                  <option value="">Select Category (General)</option>
+                  {dynamicCategories.map(cat => (
+                    <option key={cat.id} value={cat.id}>
+                      {cat.fullName || cat.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               {form.projectId && (
                 <div>
                   <label className="block font-semibold text-slate-700 mb-1">Task</label>
                   <select
                     value={form.taskId}
-                    onChange={(e) => setForm({ ...form, taskId: e.target.value })}
+                    onChange={(e) => {
+                      const selectedTask = tasks.find(t => String(t.id) === String(e.target.value));
+                      setForm({ 
+                        ...form, 
+                        taskId: e.target.value,
+                        // Auto-select category if they select a task that has a category
+                        ...(selectedTask?.categoryId ? { categoryId: String(selectedTask.categoryId), category: String(selectedTask.categoryId) } : {})
+                      });
+                    }}
                     className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
                   >
                     <option value="">General Project Expense</option>
-                    {tasks.map((t) => (
+                    {tasks
+                      .filter(t => {
+                        const currentCat = form.categoryId || form.category;
+                        if (!currentCat) return true; // show all if no category selected
+                        return String(t.categoryId) === String(currentCat); // only show matching tasks
+                      })
+                      .map((t) => (
                       <option key={t.id} value={t.id}>{t.title}</option>
                     ))}
                   </select>
@@ -764,53 +920,124 @@ export default function Expenses() {
                 </select>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Parent Category</label>
-                  <select
-                    value={selectedParentId}
-                    onChange={(e) => handleParentCategoryChange(e.target.value)}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
-                  >
-                    <option value="">Select Parent</option>
-                    {parentCategories.map(cat => (
-                      <option key={cat.id} value={cat.id}>
-                        {cat.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Subcategory</label>
-                  <select
-                    value={form.category}
-                    onChange={(e) => setForm({ ...form, category: e.target.value })}
-                    disabled={!selectedParentId || subCategories.length === 0}
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white disabled:bg-slate-100 disabled:text-slate-400"
-                  >
-                    <option value="">{subCategories.length > 0 ? 'Select Subcategory' : 'No Subcategories'}</option>
-                    {subCategories.map(sub => (
-                      <option key={sub.id} value={sub.id}>
-                        {sub.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+              <div className="flex items-center gap-2 px-1">
+                <input
+                  type="checkbox"
+                  id="hasVat"
+                  checked={form.hasVat}
+                  onChange={(e) => setForm({ ...form, hasVat: e.target.checked, amount: '', grossAmount: '', taxAmount: '' })}
+                  className="rounded border-slate-300 text-brand-600 focus:ring-brand-500 w-3.5 h-3.5"
+                />
+                <label htmlFor="hasVat" className="text-xs font-semibold text-slate-700 select-none">
+                  Does this receipt include VAT / Tax?
+                </label>
               </div>
 
+              {form.hasVat && (
+                <div className="grid grid-cols-2 gap-3 p-3 bg-slate-50 border border-slate-100 rounded-xl mb-1">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Gross Amount *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required={form.hasVat}
+                      value={form.grossAmount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const gross = parseFloat(val || 0);
+                        const tax = parseFloat(form.taxAmount || 0);
+                        setForm({ ...form, grossAmount: val, amount: String(Math.max(0, gross - tax)) });
+                      }}
+                      placeholder="Total on receipt"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-1">Tax / VAT *</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      required={form.hasVat}
+                      value={form.taxAmount}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        const tax = parseFloat(val || 0);
+                        const gross = parseFloat(form.grossAmount || 0);
+                        setForm({ ...form, taxAmount: val, amount: String(Math.max(0, gross - tax)) });
+                      }}
+                      placeholder="Tax portion"
+                      className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Amount *</label>
+                  <label className="block font-semibold text-slate-700 mb-1">
+                    {form.hasVat ? 'Net Amount (Claimable)' : 'Amount *'}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
                     required
+                    readOnly={form.hasVat}
                     value={form.amount}
-                    onChange={(e) => setForm({ ...form, amount: e.target.value })}
+                    onChange={(e) => !form.hasVat && setForm({ ...form, amount: e.target.value })}
                     placeholder="0.00"
-                    className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className={`w-full rounded-lg border px-3 py-1.5 text-xs focus:outline-none focus:ring-1 ${
+                      form.hasVat ? 'bg-slate-100 text-slate-700 font-bold border-slate-200' : 
+                      (budgetInfo && !budgetInfo.noLineItem && (() => {
+                        const amt = parseFloat(form.amount || 0);
+                        let convertedAmt = amt;
+                        if (form.currency !== budgetInfo.currency) {
+                           if (budgetInfo.currency === 'USD' && form.currency === 'ETB') convertedAmt = amt / (exchangeRates['ETB'] || 130);
+                           else if (budgetInfo.currency === 'ETB' && form.currency === 'USD') convertedAmt = amt * (exchangeRates['ETB'] || 130);
+                        }
+                        return convertedAmt > budgetInfo.remaining;
+                      })()
+                        ? 'border-rose-300 focus:border-rose-500 focus:ring-rose-500 bg-rose-50'
+                        : 'border-slate-300 focus:border-brand-500 focus:ring-brand-500')
+                    }`}
                   />
+                  {budgetLoading && (
+                    <p className="text-[10px] text-slate-400 mt-1 animate-pulse">Checking budget...</p>
+                  )}
+                  {budgetInfo && !budgetInfo.noLineItem && (
+                    <div className="mt-1 flex items-center justify-between text-[10px] font-medium border border-slate-100 bg-slate-50 p-1.5 rounded">
+                      <span className="text-slate-500">Remaining Budget:</span>
+                      <span className={
+                        (() => {
+                          const amt = parseFloat(form.amount || 0);
+                          let convertedAmt = amt;
+                          if (form.currency !== budgetInfo.currency) {
+                             if (budgetInfo.currency === 'USD' && form.currency === 'ETB') convertedAmt = amt / (exchangeRates['ETB'] || 130);
+                             else if (budgetInfo.currency === 'ETB' && form.currency === 'USD') convertedAmt = amt * (exchangeRates['ETB'] || 130);
+                          }
+                          return convertedAmt > budgetInfo.remaining;
+                        })()
+                        ? 'text-rose-600 font-bold' 
+                        : 'text-emerald-600 font-bold'
+                      }>
+                        {formatCurrency(budgetInfo.remaining, budgetInfo.currency)}
+                        {form.currency !== budgetInfo.currency && parseFloat(form.amount || 0) > 0 && (
+                          <span className="ml-1 opacity-70">
+                            (cost: {formatCurrency((() => {
+                              const amt = parseFloat(form.amount || 0);
+                              if (budgetInfo.currency === 'USD' && form.currency === 'ETB') return amt / (exchangeRates['ETB'] || 130);
+                              if (budgetInfo.currency === 'ETB' && form.currency === 'USD') return amt * (exchangeRates['ETB'] || 130);
+                              return amt;
+                            })(), budgetInfo.currency)})
+                          </span>
+                        )}
+                      </span>
+                    </div>
+                  )}
+                  {budgetInfo && budgetInfo.noLineItem && (
+                    <p className="text-[10px] font-semibold text-rose-600 mt-1 flex items-center gap-1">
+                      ⚠️ No budget line item exists for this category
+                    </p>
+                  )}
                 </div>
 
                 <div>
@@ -864,7 +1091,7 @@ export default function Expenses() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setRejectTarget(null)} />
           <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-6">
-            <h3 className="text-xl font-bold text-slate-900 mb-4">Reject Expense Claim</h3>
+            <h3 className="text-xl font-bold text-slate-900 mb-6">Reject Expense Claim</h3>
             <form onSubmit={handleRejectSubmit} className="flex flex-col gap-4">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Rejection Reason *</label>

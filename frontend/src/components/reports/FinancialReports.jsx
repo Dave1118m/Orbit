@@ -67,23 +67,7 @@ export default function FinancialReports() {
     const catSpentFromTxns = transactions
       .filter(t => (t.type === 0 || t.type === 'Expense' || t.type === 'expense'))
       .reduce((sum, t) => {
-        if (t.categoryId === cat.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
-        const catNameLower = cat.name.toLowerCase();
-        const tDesc = (t.description || '').toLowerCase();
-        const tCat = (t.category || t.categoryName || '').toLowerCase();
-        if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || t.baseCurrencyAmount || 0);
-        if (catNameLower.includes('equipment') && (tDesc.includes('equipment') || tDesc.includes('solar') || tDesc.includes('water') || tDesc.includes('pump') || tCat.includes('equipment'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
-        }
-        if (catNameLower.includes('travel') && (tDesc.includes('travel') || tDesc.includes('flight') || tCat.includes('travel'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
-        }
-        if (catNameLower.includes('personnel') && (tDesc.includes('payroll') || tDesc.includes('salary') || tDesc.includes('personnel') || tCat.includes('personnel'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
-        }
-        if (catNameLower.includes('operations') && (tDesc.includes('office') || tDesc.includes('admin') || tDesc.includes('ops') || tCat.includes('operations'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
-        }
+        if (t.categoryId === cat.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
         return sum;
       }, 0);
     return Math.max(catSpentFromEntity, catSpentFromTxns);
@@ -94,14 +78,7 @@ export default function FinancialReports() {
     const catIncomeFromTxns = transactions
       .filter(t => (t.type === 1 || t.type === 'Income' || t.type === 'income'))
       .reduce((sum, t) => {
-        if (t.categoryId === cat.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
-        const catNameLower = cat.name.toLowerCase();
-        const tDesc = (t.description || '').toLowerCase();
-        const tCat = (t.category || t.categoryName || '').toLowerCase();
-        if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || 0);
-        if (catNameLower.includes('grant') || catNameLower.includes('revenue') || catNameLower.includes('donor')) {
-          return sum + (t.amount || 0);
-        }
+        if (t.categoryId === cat.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
         return sum;
       }, 0);
     return Math.max(catIncomeFromEntity, catIncomeFromTxns);
@@ -208,7 +185,7 @@ export default function FinancialReports() {
                   {/* Revenue Breakdown */}
                   <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3">
                     <h4 className="text-xs font-extrabold uppercase tracking-wide text-emerald-800 flex items-center justify-between">
-                      <span>Grant Revenues & Donor Contributions</span>
+                      <span>Grant Revenues & Donor Contributions (USD eq.)</span>
                       <span>+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </h4>
                     <div className="divide-y divide-slate-200 bg-white rounded-lg border border-slate-200 overflow-hidden">
@@ -231,7 +208,7 @@ export default function FinancialReports() {
                   {/* Programmatic & Operational Expenditures Breakdown */}
                   <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3">
                     <h4 className="text-xs font-extrabold uppercase tracking-wide text-rose-800 flex items-center justify-between">
-                      <span>Programmatic & Operating Expenditures</span>
+                      <span>Programmatic & Operating Expenditures (USD eq.)</span>
                       <span>-${(summary?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
                     </h4>
                     <div className="divide-y divide-slate-200 bg-white rounded-lg border border-slate-200 overflow-hidden">
@@ -256,7 +233,7 @@ export default function FinancialReports() {
                 <div className="p-6 rounded-xl bg-slate-900 text-white flex items-center justify-between shadow-sm">
                   <div>
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Net Change in Unrestricted & Restricted Assets (Surplus / Deficit)
+                      Net Change in Unrestricted & Restricted Assets (Surplus / Deficit) (USD eq.)
                     </span>
                     <p className="text-xs text-slate-400 mt-0.5">
                       Calculated as Total Grant Revenue minus Total Programmatic Expenditures
@@ -269,6 +246,7 @@ export default function FinancialReports() {
               </div>
             )}
 
+
             {/* TAB 2: Budget vs Actual Variance */}
             {activeReportTab === 'variance' && (
               <div className="space-y-4">
@@ -278,9 +256,9 @@ export default function FinancialReports() {
                       <tr>
                         <th className="px-4 py-3">Category Name</th>
                         <th className="px-4 py-3">Classification</th>
-                        <th className="px-4 py-3 text-right">Target Grant Limit</th>
-                        <th className="px-4 py-3 text-right">Actual Expended</th>
-                        <th className="px-4 py-3 text-right">Remaining Fund ($)</th>
+                        <th className="px-4 py-3 text-right">Target Grant Limit (USD eq.)</th>
+                        <th className="px-4 py-3 text-right">Actual Expended (USD eq.)</th>
+                        <th className="px-4 py-3 text-right">Remaining Fund (USD eq.)</th>
                         <th className="px-4 py-3 text-center">Burn %</th>
                       </tr>
                     </thead>
@@ -346,7 +324,7 @@ export default function FinancialReports() {
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                   <div className="bg-slate-900 px-5 py-3 text-white text-xs font-bold uppercase tracking-wider flex justify-between items-center">
                     <span>Cash Flow Activity Section</span>
-                    <span>Amount (USD)</span>
+                    <span>Amount (USD eq.)</span>
                   </div>
                   <div className="divide-y divide-slate-100 text-xs">
                     {/* Operating Inflows */}
@@ -411,7 +389,7 @@ export default function FinancialReports() {
                           <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
                             <span className="text-[11px] text-slate-500 font-semibold">Available Liquidity:</span>
                             <span className="text-base font-black text-slate-900 font-mono">
-                              ${(acc.calculatedBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              {acc.currency === 'USD' ? '$' : ''}{(acc.calculatedBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                             </span>
                           </div>
                         </div>
@@ -435,7 +413,7 @@ export default function FinancialReports() {
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <div className="flex items-center justify-between font-bold text-slate-900 border-b border-slate-200 pb-2 mb-2">
                     <span>Total Allocated Donor Grants & Contributions</span>
-                    <span className="text-emerald-600">+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} USD</span>
+                    <span className="text-emerald-600">+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} USD eq.</span>
                   </div>
                   <p className="text-[11px] text-slate-400">
                     All donor contributions are tracked to donor agreements and linked bank accounts.
@@ -449,3 +427,4 @@ export default function FinancialReports() {
     </div>
   );
 }
+

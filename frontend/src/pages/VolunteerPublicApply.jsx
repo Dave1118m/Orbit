@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
 import { Heart, Sparkles, CheckCircle2, User, Mail, Phone, Calendar, Briefcase, Building2, ArrowRight } from 'lucide-react';
+import { parseApiResponse } from '../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -116,7 +117,7 @@ export default function VolunteerPublicApply() {
       });
 
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         throw new Error(errText || 'Application submission failed.');
       }
 

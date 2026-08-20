@@ -19,6 +19,8 @@ namespace OrbitApi.DTOs
         public DateTime? CompletedDate { get; set; }
         public int? ParentTaskId { get; set; }
         public List<int>? AssignedUserIds { get; set; }
+        public int? CategoryId { get; set; }
+        public string? CategoryName { get; set; }
         public List<SubtaskDto>? Subtasks { get; set; }
         public byte[]? RowVersion { get; set; }
     }
@@ -33,6 +35,7 @@ namespace OrbitApi.DTOs
         public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public int? ParentTaskId { get; set; }
+        public int? CategoryId { get; set; }
         public List<int>? AssignedUserIds { get; set; }
     }
 
@@ -45,6 +48,7 @@ namespace OrbitApi.DTOs
         public DateTime? StartDate { get; set; }
         public DateTime? Deadline { get; set; }
         public int? ParentTaskId { get; set; }
+        public int? CategoryId { get; set; }
         public List<int>? AssignedUserIds { get; set; }
         public byte[]? RowVersion { get; set; }
     }

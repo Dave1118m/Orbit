@@ -1,9 +1,15 @@
 import { useEffect, useState, useRef } from 'react';
 import Modal from '../components/Modal';
 import SearchSelect from '../components/SearchSelect';
+import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/organizations`;
 
+/**
+ * Global Workspace & Organization Administration Settings page.
+ * Manages organization metadata, member invitations, ownership transfers,
+ * RBAC permission matrix grids, workspace management, API security, and partner relationships.
+ */
 export default function Settings() {
   const fileInputRef = useRef(null);
   const editOrgLogoInputRef = useRef(null);
@@ -20,8 +26,8 @@ export default function Settings() {
   const [isWorkspaceCreateOpen, setIsWorkspaceCreateOpen] = useState(false);
   const [isWorkspaceEditOpen, setIsWorkspaceEditOpen] = useState(false);
   const [selectedWorkspace, setSelectedWorkspace] = useState(null);
-  const [wsFormData, setWsFormData] = useState({ name: '', description: '', visibility: 0, budgetCeiling: '', isArchived: false });
-  const [wsEditData, setWsEditData] = useState({ name: '', description: '', visibility: 0, budgetCeiling: '', isArchived: false });
+  const [wsFormData, setWsFormData] = useState({ name: '', description: '', visibility: 'Public', budgetCeiling: '', isArchived: false });
+  const [wsEditData, setWsEditData] = useState({ name: '', description: '', visibility: 'Public', budgetCeiling: '', isArchived: false });
 
   // ── Activity Feed state ──
   const [activityFeed, setActivityFeed] = useState([]);
@@ -228,11 +234,11 @@ export default function Settings() {
         fetchOrgPartners(selectedOrgId);
         fetchOrganizations();
       } else {
-        const errText = await res.text();
-        alert(`Failed to link partner: ${errText}`);
+        const errText = await parseApiResponse(res);
+        showErrorToast(`Failed to link partner: ${errText}`);
       }
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -276,14 +282,14 @@ export default function Settings() {
           organizationId: selectedOrgId,
           name: wsFormData.name,
           description: wsFormData.description || null,
-          visibility: parseInt(wsFormData.visibility),
+          visibility: wsFormData.visibility,
           budgetCeiling: wsFormData.budgetCeiling ? parseFloat(wsFormData.budgetCeiling) : null,
           isArchived: wsFormData.isArchived,
         }),
       });
       if (res.ok) {
         setIsWorkspaceCreateOpen(false);
-        setWsFormData({ name: '', description: '', visibility: 0, budgetCeiling: '', isArchived: false });
+        setWsFormData({ name: '', description: '', visibility: 'Public', budgetCeiling: '', isArchived: false });
         fetchWorkspaces(selectedOrgId);
         showStatus('success', 'Workspace created successfully.');
       } else {
@@ -303,7 +309,7 @@ export default function Settings() {
         body: JSON.stringify({
           name: wsEditData.name,
           description: wsEditData.description || null,
-          visibility: parseInt(wsEditData.visibility),
+          visibility: wsEditData.visibility,
           budgetCeiling: wsEditData.budgetCeiling ? parseFloat(wsEditData.budgetCeiling) : null,
           isArchived: wsEditData.isArchived,
         }),
@@ -324,7 +330,7 @@ export default function Settings() {
     setWsEditData({
       name: ws.name || '',
       description: ws.description || '',
-      visibility: ws.visibility ?? 0,
+      visibility: ws.visibility || 'Public',
       budgetCeiling: ws.budgetCeiling != null ? String(ws.budgetCeiling) : '',
       isArchived: ws.isArchived || false,
     });
@@ -565,7 +571,7 @@ export default function Settings() {
         setSelectedNewOwner(null);
         fetchOrganizations();
       } else {
-        const error = await response.text();
+        const error = await parseApiResponse(response);
         showStatus('error', 'Failed to transfer ownership: ' + error);
       }
     } catch (err) {
@@ -1362,7 +1368,7 @@ export default function Settings() {
                                               showStatus('success', 'Permissions dynamically updated!');
                                               fetchAbacData();
                                             } else {
-                                              const errText = await res.text();
+                                              const errText = await parseApiResponse(res);
                                               showStatus('error', errText || 'Failed to update permissions.');
                                             }
                                           } catch(err) {
@@ -1520,9 +1526,9 @@ export default function Settings() {
                     <label className="mb-1 block text-sm font-medium text-slate-700">Visibility</label>
                     <select value={wsFormData.visibility} onChange={e => setWsFormData({...wsFormData, visibility: e.target.value})}
                       className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-violet-500 focus:outline-none">
-                      <option value={0}>Public</option>
-                      <option value={1}>Private</option>
-                      <option value={2}>Restricted</option>
+                      <option value="Public">Public</option>
+                      <option value="Private">Private</option>
+                      <option value="Restricted">Restricted</option>
                     </select>
                   </div>
                   <div className="flex justify-end gap-3 pt-2">
@@ -1549,9 +1555,9 @@ export default function Settings() {
                     <label className="mb-1 block text-sm font-medium text-slate-700">Visibility</label>
                     <select value={wsEditData.visibility} onChange={e => setWsEditData({...wsEditData, visibility: e.target.value})}
                       className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-violet-500 focus:outline-none">
-                      <option value={0}>Public</option>
-                      <option value={1}>Private</option>
-                      <option value={2}>Restricted</option>
+                      <option value="Public">Public</option>
+                      <option value="Private">Private</option>
+                      <option value="Restricted">Restricted</option>
                     </select>
                   </div>
                   <div className="flex items-center gap-3">

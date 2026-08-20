@@ -4,6 +4,7 @@ import MultiSelectMembers from '../components/MultiSelectMembers';
 import SearchSelect from '../components/SearchSelect';
 import { useUser } from '../contexts/UserContext';
 import { AutoText } from '../contexts/TranslationContext';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -12,15 +13,31 @@ const AVATAR_COLORS = [
   'bg-violet-500','bg-blue-500','bg-emerald-500','bg-rose-500',
   'bg-amber-500','bg-cyan-500','bg-pink-500','bg-indigo-500',
 ];
+
+/**
+ * Deterministically generates an avatar background color from a string hash.
+ * @param {string} str - User or team name.
+ * @returns {string} Tailwind CSS background color class.
+ */
 function avatarColor(str = '') {
   let hash = 0;
   for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
   return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
+
+/**
+ * Extracts 2-letter uppercase initials from full name.
+ * @param {string} name - Full name string.
+ * @returns {string} Two-letter initials.
+ */
 function initials(name = '') {
   return name.split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase() || '?';
 }
 
+/**
+ * Team and Workforce Management page component supporting roster views, capacity/workload analytics,
+ * multi-user assignments, project linkages, and audit histories.
+ */
 export default function Teams() {
   const token = localStorage.getItem('token');
   const { user, hasPermission } = useUser();
@@ -70,6 +87,11 @@ export default function Teams() {
   const [replaceData, setReplaceData] = useState({ projectId: '', newTeamId: '', reason: '', newEndDate: '' });
   const [isMoving, setIsMoving] = useState(false);
   const [moveProjectId, setMoveProjectId] = useState('');
+  
+  // ── Admin Reset Password State ──
+  const [resetUserModal, setResetUserModal] = useState(null);
+  const [adminNewPassword, setAdminNewPassword] = useState('');
+  const [resetLoading, setResetLoading] = useState(false);
 
   // ── Initialization ──
   useEffect(() => {
@@ -182,7 +204,7 @@ export default function Teams() {
     e.preventDefault();
     const targetWsId = selectedWorkspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
     if (!targetWsId) {
-      alert('Please select or create a workspace first.');
+      showSuccessToast('Please select or create a workspace first.');
       return;
     }
     try {
@@ -197,7 +219,7 @@ export default function Teams() {
         fetchTeams(selectedWorkspaceId);
       } else {
         const err = await res.json();
-        alert(err.title || err.message || 'Failed to create team.');
+        showErrorToast(err.title || err.message || 'Failed to create team.');
       }
     } catch (err) { console.error(err); }
   };
@@ -276,9 +298,38 @@ export default function Teams() {
         fetchTeams(selectedWorkspaceId);
       } else {
         const err = await res.json();
-        alert(err.title || err.message || 'Failed to assign team to project.');
+        showErrorToast(err.title || err.message || 'Failed to assign team to project.');
       }
     } catch (err) { console.error(err); }
+  };
+
+  const handleAdminResetPassword = async (e) => {
+    e.preventDefault();
+    if (!adminNewPassword || adminNewPassword.trim().length < 6) {
+      showSuccessToast('Password must be at least 6 characters long.');
+      return;
+    }
+    setResetLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/auth/admin-reset-password`, {
+        method: 'POST',
+        headers: getHeaders(),
+        body: JSON.stringify({ userId: resetUserModal.userId, newPassword: adminNewPassword.trim() })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        showSuccessToast(data.message || `Password for ${resetUserModal.userName} reset successfully! Notification sent via SendGrid.`);
+        setResetUserModal(null);
+        setAdminNewPassword('');
+      } else {
+        const text = await parseApiResponse(res);
+        showErrorToast(`Failed to reset password: ${text}`);
+      }
+    } catch (err) {
+      showErrorToast(`Error resetting password: ${err.message}`);
+    } finally {
+      setResetLoading(false);
+    }
   };
 
   const handleReplaceTeam = async (e) => {
@@ -303,7 +354,7 @@ export default function Teams() {
         fetchTeams(selectedWorkspaceId);
       } else {
         const err = await res.json();
-        alert(err.title || err.message || 'Failed to replace team.');
+        showErrorToast(err.title || err.message || 'Failed to replace team.');
       }
     } catch (err) { console.error(err); }
   };
@@ -324,7 +375,7 @@ export default function Teams() {
         fetchTeams(selectedWorkspaceId);
       } else {
         const err = await res.json();
-        alert(err.title || err.message || 'Failed to move team.');
+        showErrorToast(err.title || err.message || 'Failed to move team.');
       }
     } catch (err) { console.error(err); }
   };
@@ -597,7 +648,14 @@ export default function Teams() {
                                 </div>
                               </td>
                               {canManageMembers && (
-                                <td className="px-5 py-3 text-right">
+                                <td className="px-5 py-3 text-right shrink-0 whitespace-nowrap">
+                                  <button
+                                    onClick={() => { setResetUserModal({ userId: member.userId, userName: member.userName, email: member.userEmail }); setAdminNewPassword(''); }}
+                                    className="text-xs font-semibold text-amber-600 hover:text-amber-800 hover:underline mr-3 transition"
+                                    title="Admin Direct Password Reset"
+                                  >
+                                    🔑 Reset Password
+                                  </button>
                                   <button onClick={() => handleRemoveMember(member.userId)} className="text-xs font-semibold text-red-500 hover:text-red-700 hover:underline">
                                     Remove
                                   </button>
@@ -644,12 +702,6 @@ export default function Teams() {
                     {canAssignProject && (
                       <div className="flex gap-2">
                         <button
-                          onClick={() => setIsAssigning(true)}
-                          className="rounded-lg bg-brand-500 text-white px-3.5 py-1.5 text-xs font-semibold hover:bg-brand-600 transition shadow-sm"
-                        >
-                          + Assign to Project
-                        </button>
-                        <button
                           onClick={() => setIsMoving(true)}
                           className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
                         >
@@ -667,11 +719,12 @@ export default function Teams() {
                   {selectedTeam.projects && selectedTeam.projects.length > 0 ? (
                     <div className="grid gap-4 sm:grid-cols-2">
                       {selectedTeam.projects.map(proj => {
-                        const projInfo = allProjects.find(p => p.id === proj.projectId);
+                        const projInfo = allProjects.find(p => Number(p.id) === Number(proj.projectId));
+                        const projectTitle = proj.projectTitle || projInfo?.title || 'Active Project';
                         return (
                           <div key={proj.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm flex items-start justify-between">
                             <div>
-                              <p className="font-semibold text-slate-900">{projInfo ? projInfo.title : `Project #${proj.projectId}`}</p>
+                              <p className="font-semibold text-slate-900">{projectTitle}</p>
                               <p className="text-xs text-slate-500 mt-0.5">Assigned Date: {new Date(proj.assignedAt).toLocaleDateString()}</p>
                             </div>
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700">Active Assignment</span>
@@ -716,14 +769,15 @@ export default function Teams() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {historyData.map(record => {
-                            const projInfo = allProjects.find(p => p.id === record.projectId);
+                            const projInfo = allProjects.find(p => Number(p.id) === Number(record.projectId));
+                            const projectTitle = record.projectTitle || projInfo?.title || 'Project';
                             const replacedByTeam = record.replacedByTeamId ? teams.find(t => t.id === record.replacedByTeamId) : null;
                             const isActive = !record.removedAt;
                             return (
                               <tr key={record.id} className="hover:bg-slate-50 transition-colors">
                                 <td className="px-5 py-3">
                                   <span className="font-medium text-slate-900">
-                                    {projInfo ? projInfo.title : `Project #${record.projectId}`}
+                                    {projectTitle}
                                   </span>
                                 </td>
                                 <td className="px-5 py-3 text-slate-600 text-xs">
@@ -865,17 +919,20 @@ export default function Teams() {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Target Project *</label>
                 <SearchSelect
-                  options={allProjects.map(p => ({ value: p.id, label: p.title }))}
+                  options={(selectedTeam?.projects || []).map(p => {
+                    const info = allProjects.find(ap => Number(ap.id) === Number(p.projectId));
+                    return { value: p.projectId, label: p.projectTitle || info?.title || `Project #${p.projectId}` };
+                  })}
                   value={replaceData.projectId ? parseInt(replaceData.projectId) : null}
                   onChange={val => setReplaceData({...replaceData, projectId: val || ''})}
-                  placeholder="Select project..."
+                  placeholder="Select assigned project..."
                 />
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Replacement Team *</label>
                 <SearchSelect
-                  options={teams.filter(t => t.id !== selectedTeam?.id && !t.isArchived).map(t => ({ value: t.id, label: t.name }))}
+                  options={teams.filter(t => Number(t.id) !== Number(selectedTeam?.id) && !t.isArchived).map(t => ({ value: t.id, label: t.name }))}
                   value={replaceData.newTeamId ? parseInt(replaceData.newTeamId) : null}
                   onChange={val => setReplaceData({...replaceData, newTeamId: val || ''})}
                   placeholder="Select replacement team..."
@@ -951,7 +1008,10 @@ export default function Teams() {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Destination Project *</label>
                 <SearchSelect
-                  options={allProjects.map(p => ({ value: p.id, label: p.title }))}
+                  options={allProjects
+                    .filter(ap => !(selectedTeam?.projects || []).some(pt => Number(pt.projectId) === Number(ap.id)))
+                    .map(p => ({ value: p.id, label: p.title }))
+                  }
                   value={moveProjectId ? parseInt(moveProjectId) : null}
                   onChange={val => setMoveProjectId(val || '')}
                   placeholder="Select destination project..."
@@ -972,6 +1032,66 @@ export default function Teams() {
                   className="px-6 py-2.5 rounded-xl bg-brand-500 hover:bg-brand-600 text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
                 >
                   Confirm Move
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Admin Password Reset Modal ── */}
+      {resetUserModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5">
+              <div>
+                <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <span>🔑</span> Admin Direct Password Reset
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Set a new password for <span className="font-semibold text-slate-800">{resetUserModal.userName}</span> ({resetUserModal.email})
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setResetUserModal(null); setAdminNewPassword(''); }}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handleAdminResetPassword} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">New Temporary Password *</label>
+                <input
+                  type="password"
+                  required
+                  minLength={6}
+                  placeholder="Enter new password (min 6 chars)..."
+                  value={adminNewPassword}
+                  onChange={e => setAdminNewPassword(e.target.value)}
+                  className={inputClass}
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  💡 A notification email containing this new password will automatically be sent to {resetUserModal.email} via SendGrid.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100 mt-5">
+                <button
+                  type="button"
+                  onClick={() => { setResetUserModal(null); setAdminNewPassword(''); }}
+                  className="px-5 py-2.5 rounded-xl border border-slate-300 bg-white text-xs font-bold text-slate-700 hover:bg-slate-50 transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={resetLoading || !adminNewPassword || adminNewPassword.length < 6}
+                  className="px-6 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold shadow-sm transition disabled:opacity-50"
+                >
+                  {resetLoading ? 'Resetting...' : 'Reset Password'}
                 </button>
               </div>
             </form>

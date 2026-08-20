@@ -10,6 +10,10 @@ using System.Security.Claims;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing user profiles, role introspection, preferences,
+    /// dynamic permissions, and profile picture avatar uploads.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -49,44 +53,63 @@ namespace OrbitApi.Controllers
         private async Task<User> EnsureAppUserExistsAsync(int userId)
         {
             var user = await _db.Users.FindAsync(userId);
-            if (user != null)
+            if (user == null)
             {
-                return user;
-            }
-
-            var email = GetCurrentUserEmail() ?? string.Empty;
-            var name = GetCurrentUserName();
-            if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(email))
-            {
-                name = email.Split('@')[0];
-            }
-
-            if (string.IsNullOrWhiteSpace(name))
-            {
-                name = $"user{userId}";
-            }
-
-            await _db.Database.OpenConnectionAsync();
-            try
-            {
-                await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] ON");
-                _db.Users.Add(new User
+                var email = GetCurrentUserEmail() ?? string.Empty;
+                var name = GetCurrentUserName();
+                if (string.IsNullOrWhiteSpace(name) && !string.IsNullOrWhiteSpace(email))
                 {
-                    Id = userId,
-                    Name = name,
-                    Email = email
-                });
-                await _db.SaveChangesAsync();
-                await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] OFF");
+                    name = email.Split('@')[0];
+                }
+
+                if (string.IsNullOrWhiteSpace(name))
+                {
+                    name = $"user{userId}";
+                }
+
+                await _db.Database.OpenConnectionAsync();
+                try
+                {
+                    await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] ON");
+                    user = new User
+                    {
+                        Id = userId,
+                        Name = name,
+                        Email = email
+                    };
+                    _db.Users.Add(user);
+                    await _db.SaveChangesAsync();
+                    await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] OFF");
+                }
+                finally
+                {
+                    await _db.Database.CloseConnectionAsync();
+                }
             }
-            finally
+            else if (string.IsNullOrWhiteSpace(user.Name) && !string.IsNullOrWhiteSpace(user.Email))
             {
-                await _db.Database.CloseConnectionAsync();
+                user.Name = user.Email.Split('@')[0];
+                _db.Users.Update(user);
+                await _db.SaveChangesAsync();
             }
 
-            return await _db.Users.FindAsync(userId)!;
+            await EnsureUserHasOwnerAccessAsync(userId);
+            return user;
         }
 
+        private async Task EnsureUserHasOwnerAccessAsync(int userId)
+        {
+            // Removed automatic organization creation and blind Owner assignments.
+            // This was causing duplicate "Orbit Global Organization" and making every new user
+            // an Owner of all existing organizations. 
+            // Organization creation should be explicitly requested by users.
+            await Task.CompletedTask;
+        }
+
+        /// <summary>
+        /// Lists all registered users along with their role assignments.
+        /// </summary>
+        /// <returns>Collection of user DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<UserDto>>> List()
         {
@@ -100,6 +123,10 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Returns profile and permission matrix details for the currently authenticated user.
+        /// </summary>
+        /// <returns>Current user DTO.</returns>
         [HttpGet("me")]
         public async Task<ActionResult<UserDto>> Me()
         {
@@ -121,6 +148,11 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(user, roles, dbPermissions));
         }
 
+        /// <summary>
+        /// Retrieves a user by ID.
+        /// </summary>
+        /// <param name="id">User ID.</param>
+        /// <returns>User DTO.</returns>
         [HttpGet("{id}")]
         public async Task<ActionResult<UserDto>> Get(int id)
         {
@@ -145,6 +177,12 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(user, roles));
         }
 
+        /// <summary>
+        /// Updates profile information, preferred language, MFA status, or avatar URL.
+        /// </summary>
+        /// <param name="id">User ID.</param>
+        /// <param name="req">Updated user parameters.</param>
+        /// <returns>Updated user DTO.</returns>
         [HttpPut("{id}")]
         public async Task<ActionResult<UserDto>> Update(int id, [FromBody] UpdateUserRequest req)
         {
@@ -176,6 +214,12 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(user, roles));
         }
 
+        /// <summary>
+        /// Uploads and sets a custom profile avatar photo for a user.
+        /// </summary>
+        /// <param name="id">User ID.</param>
+        /// <param name="file">Image file payload.</param>
+        /// <returns>Photo download path and updated user record.</returns>
         [HttpPost("{id}/photo")]
         public async Task<ActionResult> UploadPhoto(int id, IFormFile file)
         {
@@ -219,6 +263,12 @@ namespace OrbitApi.Controllers
             return Ok(new { PhotoUrl = relativePath, User = MapToDto(user, roles, dynamicPermissions) });
         }
 
+        /// <summary>
+        /// Serves the avatar photo image file stream.
+        /// </summary>
+        /// <param name="id">User ID.</param>
+        /// <param name="filename">File name.</param>
+        /// <returns>Image file stream.</returns>
         [HttpGet("{id}/photo/download")]
         [AllowAnonymous]
         public ActionResult DownloadPhoto(int id, [FromQuery] string filename)

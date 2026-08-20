@@ -12,6 +12,10 @@ using System.Threading.Tasks;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing workspace teams, member rosters, workload analytics,
+    /// project assignment, team replacements, team migrations, and team duplication.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -49,28 +53,28 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id ?? 2003;
+            if (firstOrg != null) return firstOrg.Id;
+            
+            return 0;
         }
 
         private async Task<bool> IsAuthorizedForWorkspaceAsync(int workspaceId, Permission permission)
         {
-            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
-                ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
-            if (int.TryParse(userIdClaim, out var userId) && userId > 0)
-            {
-                var workspace = await _db.Workspaces.FindAsync(workspaceId);
-                if (workspace != null)
-                {
-                    var isOwnerOrMember = await _db.Organizations.AnyAsync(o => o.Id == workspace.OrganizationId && o.OwnerId == userId && !o.IsDeleted)
-                        || await _db.OrganizationMembers.AnyAsync(m => m.OrganizationId == workspace.OrganizationId && m.UserId == userId && m.Status == OrgMemberStatus.Active);
-                    if (isOwnerOrMember) return true;
-                }
-            }
-
-            var teamResource = new ScopedResource(ScopeType.Workspace, workspaceId);
-            return (await _authorizationService.AuthorizeAsync(User, teamResource, new PermissionRequirement(permission))).Succeeded;
+            var workspaceResource = new ScopedResource(ScopeType.Workspace, workspaceId);
+            return (await _authorizationService.AuthorizeAsync(User, workspaceResource, new PermissionRequirement(permission))).Succeeded;
         }
 
+        private async Task<bool> IsAuthorizedForProjectAsync(int projectId, Permission permission)
+        {
+            var projectResource = new ScopedResource(ScopeType.Project, projectId);
+            return (await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(permission))).Succeeded;
+        }
+
+        /// <summary>
+        /// Lists all teams within the active organization or filtered by workspace.
+        /// </summary>
+        /// <param name="workspaceId">Optional workspace ID filter.</param>
+        /// <returns>Collection of team DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<TeamDto>>> List([FromQuery] int? workspaceId)
         {
@@ -105,13 +109,16 @@ namespace OrbitApi.Controllers
                         UserId = m.UserId,
                         JoinedAt = m.JoinedAt
                     }).ToList(),
-                    Projects = t.ProjectTeams.Select(p => new ProjectTeamDto
-                    {
-                        Id = p.Id,
-                        ProjectId = p.ProjectId,
-                        TeamId = p.TeamId,
-                        AssignedAt = p.AssignedAt
-                    }).ToList()
+                    Projects = t.ProjectTeams
+                        .Where(p => p.Project != null && !p.Project.IsDeleted)
+                        .Select(p => new ProjectTeamDto
+                        {
+                            Id = p.Id,
+                            ProjectId = p.ProjectId,
+                            ProjectTitle = p.Project!.Title,
+                            TeamId = p.TeamId,
+                            AssignedAt = p.AssignedAt
+                        }).ToList()
                 }).ToListAsync();
 
             return Ok(teams);
@@ -123,6 +130,7 @@ namespace OrbitApi.Controllers
             var team = await _db.Teams
                 .Include(t => t.TeamMembers)
                 .Include(t => t.ProjectTeams)
+                .ThenInclude(pt => pt.Project)
                 .FirstOrDefaultAsync(t => t.Id == id);
 
             if (team == null) return NotFound();
@@ -147,13 +155,16 @@ namespace OrbitApi.Controllers
                     UserId = m.UserId,
                     JoinedAt = m.JoinedAt
                 }).ToList(),
-                Projects = team.ProjectTeams.Select(p => new ProjectTeamDto
-                {
-                    Id = p.Id,
-                    ProjectId = p.ProjectId,
-                    TeamId = p.TeamId,
-                    AssignedAt = p.AssignedAt
-                }).ToList()
+                Projects = team.ProjectTeams
+                    .Where(p => p.Project != null && !p.Project.IsDeleted)
+                    .Select(p => new ProjectTeamDto
+                    {
+                        Id = p.Id,
+                        ProjectId = p.ProjectId,
+                        ProjectTitle = p.Project!.Title,
+                        TeamId = p.TeamId,
+                        AssignedAt = p.AssignedAt
+                    }).ToList()
             };
 
             return Ok(dto);
@@ -199,6 +210,12 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = team.Id }, dto);
         }
 
+        /// <summary>
+        /// Updates team name, description, designated lead, or archived status.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <param name="req">Updated fields.</param>
+        /// <returns>Updated team DTO.</returns>
         [HttpPut("{id}")]
         public async Task<ActionResult<TeamDto>> Update(int id, [FromBody] UpdateTeamRequest req)
         {
@@ -250,6 +267,11 @@ namespace OrbitApi.Controllers
             return Ok(new TeamDto { Id = team.Id, WorkspaceId = team.WorkspaceId, Name = team.Name, Description = team.Description, TeamLeadUserId = team.TeamLeadUserId, IsArchived = team.IsArchived });
         }
 
+        /// <summary>
+        /// Soft-deletes/archives a team.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<IActionResult> Delete(int id)
         {
@@ -268,6 +290,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Adds an individual member to a team.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <param name="req">User ID to add.</param>
+        /// <returns>Created team member record.</returns>
         [HttpPost("{id}/members")]
         public async Task<ActionResult<TeamMemberDto>> AddMember(int id, [FromBody] AddTeamMemberRequest req)
         {
@@ -290,6 +318,12 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = id }, dto);
         }
 
+        /// <summary>
+        /// Bulk-adds multiple users to a team roster.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <param name="req">List of user IDs.</param>
+        /// <returns>Count of members added.</returns>
         [HttpPost("{id}/members/bulk")]
         public async Task<ActionResult> AddMembersBulk(int id, [FromBody] BulkAddTeamMembersRequest req)
         {
@@ -311,7 +345,12 @@ namespace OrbitApi.Controllers
                 .Select(tm => tm.UserId)
                 .ToListAsync();
 
-            var newUsers = req.UserIds.Except(existingMemberIds).Distinct().ToList();
+            var validUserIds = await _db.Users
+                .Where(u => req.UserIds.Contains(u.Id))
+                .Select(u => u.Id)
+                .ToListAsync();
+
+            var newUsers = validUserIds.Except(existingMemberIds).Distinct().ToList();
 
             foreach (var userId in newUsers)
             {
@@ -323,6 +362,12 @@ namespace OrbitApi.Controllers
             return Ok(new { addedCount = newUsers.Count });
         }
 
+        /// <summary>
+        /// Removes a member from a team.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <param name="userId">User ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}/members/{userId}")]
         public async Task<IActionResult> RemoveMember(int id, int userId)
         {
@@ -342,6 +387,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Assigns a team as a cohesive unit to a project.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <param name="req">Target project ID.</param>
+        /// <returns>Project team linkage record.</returns>
         [HttpPost("{id}/assign-project")]
         public async Task<ActionResult<ProjectTeamDto>> AssignProject(int id, [FromBody] AssignTeamToProjectRequest req)
         {
@@ -371,6 +422,11 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = id }, dto);
         }
 
+        /// <summary>
+        /// Retrieves the complete historical project assignment log for a team.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <returns>List of past and current project assignments.</returns>
         [HttpGet("{id}/history")]
         public async Task<ActionResult<List<ProjectTeamHistoryDto>>> GetTeamHistory(int id)
         {
@@ -382,27 +438,47 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            var list = await _db.ProjectTeamHistories.Where(h => h.TeamId == id).Select(h => new ProjectTeamHistoryDto
-            {
-                Id = h.Id,
-                ProjectId = h.ProjectId,
-                TeamId = h.TeamId,
-                AssignedAt = h.AssignedAt,
-                RemovedAt = h.RemovedAt,
-                ReplacedByTeamId = h.ReplacedByTeamId
-            }).ToListAsync();
+            var list = await _db.ProjectTeamHistories
+                .Include(h => h.Project)
+                .Where(h => h.TeamId == id && h.Project != null && !h.Project.IsDeleted)
+                .Select(h => new ProjectTeamHistoryDto
+                {
+                    Id = h.Id,
+                    ProjectId = h.ProjectId,
+                    ProjectTitle = h.Project!.Title,
+                    TeamId = h.TeamId,
+                    AssignedAt = h.AssignedAt,
+                    RemovedAt = h.RemovedAt,
+                    ReplacedByTeamId = h.ReplacedByTeamId
+                }).ToListAsync();
 
             return Ok(list);
         }
 
+        /// <summary>
+        /// Replaces a team on a project with a new team, recording historical audit records and optional deadline extension.
+        /// </summary>
+        /// <param name="id">Current Team ID.</param>
+        /// <param name="req">Replacement parameters including new team ID, reason, and new end date.</param>
+        /// <returns>Replacement status.</returns>
         [HttpPost("{id}/replace-on-project")]
         public async Task<ActionResult> ReplaceTeam(int id, [FromBody] ReplaceTeamRequest req)
         {
+            if (req.NewTeamId == id)
+            {
+                return BadRequest("The replacement team cannot be the current team.");
+            }
+
             var currentTeam = await _db.Teams.FindAsync(id);
             if (currentTeam == null) return NotFound("Current team not found");
 
             var newTeam = await _db.Teams.FindAsync(req.NewTeamId);
-            if (newTeam == null) return BadRequest("New team not found");
+            if (newTeam == null) return BadRequest("Replacement team not found");
+
+            if (newTeam.IsArchived)
+            {
+                return BadRequest("Cannot replace with an archived team.");
+            }
 
             if (currentTeam.WorkspaceId != newTeam.WorkspaceId)
                 return BadRequest("Teams must be in the same workspace");
@@ -412,14 +488,27 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            var currentProjectTeam = await _db.ProjectTeams.FirstOrDefaultAsync(pt => pt.TeamId == id && pt.ProjectId == req.ProjectId);
-            if (currentProjectTeam != null)
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == req.ProjectId && !p.IsDeleted);
+            if (project == null) return BadRequest("Target project not found or has been deleted.");
+
+            if (!(await IsAuthorizedForProjectAsync(project.Id, Permission.ProjectEdit)))
             {
-                _db.ProjectTeams.Remove(currentProjectTeam);
+                return Forbid();
+            }
+
+            if (!(await IsAuthorizedForWorkspaceAsync(newTeam.WorkspaceId, Permission.TeamAssignProject)))
+            {
+                return Forbid();
+            }
+
+            var currentProjectTeam = await _db.ProjectTeams.FirstOrDefaultAsync(pt => pt.TeamId == id && pt.ProjectId == req.ProjectId);
+            if (currentProjectTeam == null)
+            {
+                return BadRequest("The current team is not currently assigned to this project.");
             }
 
             var alreadyAssigned = await _db.ProjectTeams.FirstOrDefaultAsync(pt => pt.TeamId == req.NewTeamId && pt.ProjectId == req.ProjectId);
-            if (alreadyAssigned != null) return Conflict("New team is already assigned to this project");
+            if (alreadyAssigned != null) return Conflict("The replacement team is already assigned to this project.");
 
             _db.ProjectTeams.Remove(currentProjectTeam);
 
@@ -442,7 +531,6 @@ namespace OrbitApi.Controllers
 
             if (req.NewEndDate.HasValue)
             {
-                var project = await _db.Projects.FindAsync(req.ProjectId);
                 if (project != null)
                 {
                     var currentEnd = project.EndDate ?? project.StartDate ?? DateTime.UtcNow;
@@ -474,6 +562,11 @@ namespace OrbitApi.Controllers
             return Ok(new { message = "Team replaced successfully", replacedAt = DateTime.UtcNow, postponementLogged = req.NewEndDate.HasValue });
         }
 
+        /// <summary>
+        /// Retrieves detailed roster metrics for a team including open and overdue task counts per member.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <returns>List of team roster member DTOs.</returns>
         [HttpGet("{id}/roster")]
         public async Task<ActionResult<List<TeamRosterDto>>> GetTeamRoster(int id)
         {
@@ -487,6 +580,11 @@ namespace OrbitApi.Controllers
 
             var roster = new List<TeamRosterDto>();
 
+            var teamProjectIds = await _db.ProjectTeams
+                .Where(pt => pt.TeamId == id)
+                .Select(pt => pt.ProjectId)
+                .ToListAsync();
+
             foreach (var member in team.TeamMembers)
             {
                 var user = await _db.Users.FindAsync(member.UserId);
@@ -495,13 +593,13 @@ namespace OrbitApi.Controllers
                 var openTasks = await _db.TaskMembers
                     .Where(tm => tm.UserId == member.UserId)
                     .Join(_db.Tasks, tm => tm.TaskId, t => t.Id, (tm, t) => t)
-                    .Where(t => t.Status != OrbitApi.Models.TaskStatus.Done && !t.IsDeleted)
+                    .Where(t => teamProjectIds.Contains(t.ProjectId) && t.Status != OrbitApi.Models.TaskStatus.Done && !t.IsDeleted)
                     .CountAsync();
 
                 var overdueTasks = await _db.TaskMembers
                     .Where(tm => tm.UserId == member.UserId)
                     .Join(_db.Tasks, tm => tm.TaskId, t => t.Id, (tm, t) => t)
-                    .Where(t => t.Status != OrbitApi.Models.TaskStatus.Done && !t.IsDeleted && t.Deadline < DateTime.UtcNow)
+                    .Where(t => teamProjectIds.Contains(t.ProjectId) && t.Status != OrbitApi.Models.TaskStatus.Done && !t.IsDeleted && t.Deadline < DateTime.UtcNow)
                     .CountAsync();
 
                 roster.Add(new TeamRosterDto
@@ -522,6 +620,11 @@ namespace OrbitApi.Controllers
             return Ok(roster);
         }
 
+        /// <summary>
+        /// Computes comprehensive team workload distribution and task capacity metrics.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <returns>Team workload analytics DTO.</returns>
         [HttpGet("{id}/workload")]
         public async Task<ActionResult<TeamWorkloadDto>> GetTeamWorkload(int id)
         {
@@ -536,27 +639,45 @@ namespace OrbitApi.Controllers
             var memberWorkloads = new List<TeamMemberWorkloadDto>();
             int totalOpen = 0, totalOverdue = 0;
 
+            var teamProjectIds = await _db.ProjectTeams
+                .Where(pt => pt.TeamId == id)
+                .Select(pt => pt.ProjectId)
+                .ToListAsync();
+
+            var teamMemberUserIds = team.TeamMembers.Select(m => m.UserId).ToList();
+            
+            var users = await _db.Users
+                .Where(u => teamMemberUserIds.Contains(u.Id))
+                .ToDictionaryAsync(u => u.Id, u => u.Name);
+
+            var taskMemberships = await _db.TaskMembers
+                .Where(tm => teamMemberUserIds.Contains(tm.UserId))
+                .Join(_db.Tasks, tm => tm.TaskId, t => t.Id, (tm, t) => new { tm.UserId, t })
+                .Where(x => teamProjectIds.Contains(x.t.ProjectId) && x.t.Status != OrbitApi.Models.TaskStatus.Done && !x.t.IsDeleted)
+                .ToListAsync();
+
+            var volunteerTaskMemberships = await _db.Volunteers
+                .Where(v => v.UserId != null && teamMemberUserIds.Contains(v.UserId.Value))
+                .Join(_db.TaskVolunteers, v => v.Id, tv => tv.VolunteerId, (v, tv) => new { v.UserId, tv.TaskId })
+                .Join(_db.Tasks, vt => vt.TaskId, t => t.Id, (vt, t) => new { vt.UserId, t })
+                .Where(x => teamProjectIds.Contains(x.t.ProjectId) && x.t.Status != OrbitApi.Models.TaskStatus.Done && !x.t.IsDeleted)
+                .ToListAsync();
+
             foreach (var member in team.TeamMembers)
             {
-                var user = await _db.Users.FindAsync(member.UserId);
-                if (user == null) continue;
+                var userName = users.GetValueOrDefault(member.UserId) ?? "Unknown";
 
-                var openTasks = await _db.TaskMembers
-                    .Where(tm => tm.UserId == member.UserId)
-                    .Join(_db.Tasks, tm => tm.TaskId, t => t.Id, (tm, t) => t)
-                    .Where(t => t.Status != OrbitApi.Models.TaskStatus.Done && !t.IsDeleted)
-                    .CountAsync();
+                var userTaskIds = taskMemberships.Where(x => x.UserId == member.UserId).Select(x => x.t)
+                    .Concat(volunteerTaskMemberships.Where(x => x.UserId == member.UserId).Select(x => x.t))
+                    .GroupBy(t => t.Id).Select(g => g.First()).ToList();
 
-                var overdueTasks = await _db.TaskMembers
-                    .Where(tm => tm.UserId == member.UserId)
-                    .Join(_db.Tasks, tm => tm.TaskId, t => t.Id, (tm, t) => t)
-                    .Where(t => t.Status != OrbitApi.Models.TaskStatus.Done && !t.IsDeleted && t.Deadline < DateTime.UtcNow)
-                    .CountAsync();
+                var openTasks = userTaskIds.Count;
+                var overdueTasks = userTaskIds.Count(t => t.Deadline < DateTime.UtcNow);
 
                 memberWorkloads.Add(new TeamMemberWorkloadDto
                 {
                     UserId = member.UserId,
-                    UserName = user.Name,
+                    UserName = userName,
                     OpenTasks = openTasks,
                     OverdueTasks = overdueTasks
                 });
@@ -579,6 +700,12 @@ namespace OrbitApi.Controllers
             return Ok(workload);
         }
 
+        /// <summary>
+        /// Copies an existing team and its roster to a target workspace.
+        /// </summary>
+        /// <param name="id">Source Team ID.</param>
+        /// <param name="req">Target workspace ID, new team name, and description.</param>
+        /// <returns>Created duplicated team DTO.</returns>
         [HttpPost("{id}/copy")]
         public async Task<ActionResult<TeamDto>> CopyTeam(int id, [FromBody] CopyTeamRequest req)
         {
@@ -643,19 +770,41 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = newTeam.Id }, dto);
         }
 
+        /// <summary>
+        /// Migrates/reassigns a team from its current projects to a new destination project.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <param name="req">Destination project ID.</param>
+        /// <returns>Move operation result.</returns>
         [HttpPost("{id}/move-to-project")]
         public async Task<ActionResult> MoveTeamToProject(int id, [FromBody] AssignTeamToProjectRequest req)
         {
             var team = await _db.Teams.FindAsync(id);
-            if (team == null) return NotFound();
+            if (team == null) return NotFound("Team not found.");
+
+            if (team.IsArchived)
+            {
+                return BadRequest("Cannot move an archived team.");
+            }
 
             if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamAssignProject)))
             {
                 return Forbid();
             }
 
-            var project = await _db.Projects.FindAsync(req.ProjectId);
-            if (project == null) return BadRequest("Project not found");
+            var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == req.ProjectId && !p.IsDeleted);
+            if (project == null) return BadRequest("Destination project not found or has been deleted.");
+
+            if (!(await IsAuthorizedForProjectAsync(project.Id, Permission.ProjectEdit)))
+            {
+                return Forbid();
+            }
+
+            var alreadyOnProject = await _db.ProjectTeams.AnyAsync(pt => pt.TeamId == id && pt.ProjectId == req.ProjectId);
+            if (alreadyOnProject)
+            {
+                return BadRequest("Team is already assigned to this destination project.");
+            }
 
             var currentAssignments = await _db.ProjectTeams.Where(pt => pt.TeamId == id).ToListAsync();
             _db.ProjectTeams.RemoveRange(currentAssignments);

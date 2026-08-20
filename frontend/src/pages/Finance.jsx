@@ -12,6 +12,11 @@ import {
   Receipt, ShieldCheck
 } from 'lucide-react';
 
+/**
+ * Financial Governance & Accounting Dashboard component providing a 7-tab hub for
+ * overview metrics, Chart of Accounts (COA), donor contributions, bank accounts,
+ * budget revisions, expense approval trails, and compliance filings.
+ */
 export default function Finance() {
   const [activeTab, setActiveTab] = useState('overview');
 

@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { useUser } from '../contexts/UserContext';
 import { ShieldCheck, ChevronDown, Check, Sparkles, RefreshCw } from 'lucide-react';
+import { showErrorToast } from '../utils/toastHelper';
 
+/**
+ * List of system roles with UI display metadata, icon badges, and color themes.
+ */
 const ROLES = [
   { id: 'Owner', label: 'Owner', icon: '👑', color: 'bg-amber-500/10 text-amber-700 border-amber-300 hover:bg-amber-500/20', badge: 'bg-amber-500' },
   { id: 'Admin', label: 'Admin', icon: '🛡️', color: 'bg-indigo-500/10 text-indigo-700 border-indigo-300 hover:bg-indigo-500/20', badge: 'bg-indigo-500' },
@@ -12,6 +16,9 @@ const ROLES = [
   { id: 'Viewer', label: 'Viewer', icon: '🔍', color: 'bg-slate-500/10 text-slate-700 border-slate-300 hover:bg-slate-500/20', badge: 'bg-slate-500' }
 ];
 
+/**
+ * Topbar Role Switcher dropdown allowing instant role-swapping to test and preview role-specific dashboards, permissions, and features.
+ */
 export default function RoleSwitcherBar() {
   const { getPrimaryRole, switchPersona } = useUser();
   const [isOpen, setIsOpen] = useState(false);
@@ -21,6 +28,10 @@ export default function RoleSwitcherBar() {
   const currentRole = getPrimaryRole() || 'Owner';
   const activeRoleObj = ROLES.find(r => r.id === currentRole) || ROLES[0];
 
+  /**
+   * Triggers the backend persona/role switch, re-fetches permissions, and displays a confirmation toast.
+   * @param {string} roleId - Selected role identifier.
+   */
   const handleSelectRole = async (roleId) => {
     if (roleId === currentRole || isSwitching) {
       setIsOpen(false);
@@ -38,7 +49,7 @@ export default function RoleSwitcherBar() {
       setToastMessage(`Switched to ${selected?.label || roleId}`);
       setTimeout(() => setToastMessage(null), 3000);
     } else {
-      alert(`Failed to switch role: ${res.error}`);
+      showErrorToast(`Failed to switch role: ${res.error}`);
     }
   };
 

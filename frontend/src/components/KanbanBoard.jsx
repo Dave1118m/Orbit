@@ -5,27 +5,40 @@ import { CSS } from '@dnd-kit/utilities';
 import { AutoText } from '../contexts/TranslationContext';
 
 const statusMap = {
-  0: 'To Do',
-  1: 'In Progress',
-  2: 'In Review',
-  3: 'Blocked',
-  4: 'Done'
+  'ToDo': 'To Do',
+  'InProgress': 'In Progress',
+  'InReview': 'In Review',
+  'Blocked': 'Blocked',
+  'Done': 'Done'
 };
 
 const priorityMap = {
-  0: 'Low',
-  1: 'Medium',
-  2: 'High',
-  3: 'Urgent'
+  'Low': 'Low',
+  'Medium': 'Medium',
+  'High': 'High',
+  'Urgent': 'Urgent'
 };
 
+/**
+ * Helper to determine CSS badge styling according to task priority level.
+ * @param {string} priority - Priority level string ('Urgent', 'High', 'Medium', 'Low').
+ * @returns {string} Tailwind CSS class string.
+ */
 const getPriorityColor = (priority) => {
-  if (priority === 3) return 'text-red-600 bg-red-100';
-  if (priority === 2) return 'text-orange-600 bg-orange-100';
-  if (priority === 1) return 'text-blue-600 bg-blue-100';
+  if (priority === 'Urgent') return 'text-red-600 bg-red-100';
+  if (priority === 'High') return 'text-orange-600 bg-orange-100';
+  if (priority === 'Medium') return 'text-blue-600 bg-blue-100';
   return 'text-slate-600 bg-slate-100';
 };
 
+/**
+ * Draggable individual task card item using `@dnd-kit/sortable`.
+ * @param {{
+ *   task: Object,
+ *   onClick: (task: Object) => void,
+ *   isSelected: boolean
+ * }} props
+ */
 function SortableTaskItem({ task, onClick, isSelected }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: task.id });
 
@@ -70,6 +83,16 @@ function SortableTaskItem({ task, onClick, isSelected }) {
   );
 }
 
+/**
+ * Droppable Kanban column lane holding tasks belonging to a specific status category.
+ * @param {{
+ *   statusId: string,
+ *   title: string,
+ *   tasks: Array<Object>,
+ *   onTaskClick: (task: Object) => void,
+ *   selectedTaskId: number|string|null
+ * }} props
+ */
 function KanbanColumn({ statusId, title, tasks, onTaskClick, selectedTaskId }) {
   const { setNodeRef } = useDroppable({
     id: `col-${statusId}`
@@ -102,6 +125,16 @@ function KanbanColumn({ statusId, title, tasks, onTaskClick, selectedTaskId }) {
   );
 }
 
+/**
+ * Interactive Drag-and-Drop Kanban Board component supporting task status transitions, filtering, and selection.
+ * @param {{
+ *   tasks: Array<Object>,
+ *   onTaskMove: (taskId: number|string, newStatus: string) => void,
+ *   onTaskClick: (task: Object) => void,
+ *   selectedTaskId: number|string|null,
+ *   statusFilter?: string
+ * }} props
+ */
 export default function KanbanBoard({ tasks, onTaskMove, onTaskClick, selectedTaskId, statusFilter = 'all' }) {
   const [activeTask, setActiveTask] = React.useState(null);
   
@@ -113,11 +146,17 @@ export default function KanbanBoard({ tasks, onTaskMove, onTaskClick, selectedTa
     })
   );
 
+  /**
+   * Captures the active dragging task when drag motion initiates.
+   */
   const handleDragStart = (event) => {
     const { active } = event;
     setActiveTask(tasks.find((t) => t.id === active.id));
   };
 
+  /**
+   * Evaluates the drop target on drag completion and fires onTaskMove with the new target status.
+   */
   const handleDragEnd = (event) => {
     const { active, over } = event;
     setActiveTask(null);
@@ -147,7 +186,7 @@ export default function KanbanBoard({ tasks, onTaskMove, onTaskClick, selectedTa
     } else {
       // It might be dropping on an empty column string id like "col-0"
       if (typeof overId === 'string' && overId.startsWith('col-')) {
-        targetStatus = parseInt(overId.replace('col-', ''), 10);
+        targetStatus = overId.replace('col-', '');
       }
     }
 
@@ -159,8 +198,7 @@ export default function KanbanBoard({ tasks, onTaskMove, onTaskClick, selectedTa
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
       <div className="flex h-full gap-6 overflow-x-auto pb-4 flex-wrap items-start">
-        {Object.entries(statusMap).map(([statusIdStr, title]) => {
-          const statusId = parseInt(statusIdStr, 10);
+        {Object.entries(statusMap).map(([statusId, title]) => {
           if (statusFilter !== 'all' && statusFilter !== statusId) return null;
           
           const columnTasks = tasks.filter((t) => t.status === statusId);

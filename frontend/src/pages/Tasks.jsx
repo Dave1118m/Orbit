@@ -1,29 +1,39 @@
 import { useEffect, useState, useCallback } from 'react';
 import Modal from '../components/Modal';
 import KanbanBoard from '../components/KanbanBoard';
-import TaskBottomPanel from '../components/TaskBottomPanel';
+import TaskDetailsDrawer from '../components/TaskDetailsDrawer';
 import SearchSelect from '../components/SearchSelect';
+import { parseApiResponse } from '../utils/toastHelper';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/tasks`;
 const PROJECTS_URL = `${import.meta.env.VITE_API_URL}/projects`;
 const WORKSPACES_URL = `${import.meta.env.VITE_API_URL}/workspaces`;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+/**
+ * Status style mapping configurations for task badges and Kanban lanes.
+ */
 const STATUS_CONFIG = {
-  0: { label: 'To Do',       color: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400'   },
-  1: { label: 'In Progress', color: 'bg-blue-50 text-blue-700',       dot: 'bg-blue-500'    },
-  2: { label: 'In Review',   color: 'bg-violet-50 text-violet-700',   dot: 'bg-violet-500'  },
-  3: { label: 'Blocked',     color: 'bg-red-50 text-red-700',         dot: 'bg-red-500'     },
-  4: { label: 'Done',        color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  "ToDo":       { label: 'To Do',       color: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400'   },
+  "InProgress": { label: 'In Progress', color: 'bg-blue-50 text-blue-700',       dot: 'bg-blue-500'    },
+  "InReview":   { label: 'In Review',   color: 'bg-violet-50 text-violet-700',   dot: 'bg-violet-500'  },
+  "Blocked":    { label: 'Blocked',     color: 'bg-red-50 text-red-700',         dot: 'bg-red-500'     },
+  "Done":       { label: 'Done',        color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
 };
 
+/**
+ * Priority style mapping configurations for tasks.
+ */
 const PRIORITY_CONFIG = {
-  0: { label: 'Low',    color: 'bg-slate-100 text-slate-600'   },
-  1: { label: 'Medium', color: 'bg-blue-100 text-blue-700'     },
-  2: { label: 'High',   color: 'bg-orange-100 text-orange-700' },
-  3: { label: 'Urgent', color: 'bg-red-100 text-red-700'       },
+  "Low":    { label: 'Low',    color: 'bg-slate-100 text-slate-600'   },
+  "Medium": { label: 'Medium', color: 'bg-blue-100 text-blue-700'     },
+  "High":   { label: 'High',   color: 'bg-orange-100 text-orange-700' },
+  "Urgent": { label: 'Urgent', color: 'bg-red-100 text-red-700'       },
 };
 
+/**
+ * Stat summary card for task counts.
+ * @param {{ label: string, value: string|number, color: string }} props
+ */
 function StatCard({ label, value, color }) {
   return (
     <div className={`flex flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-sm`}>
@@ -33,6 +43,10 @@ function StatCard({ label, value, color }) {
   );
 }
 
+/**
+ * Task Management page component supporting Drag-and-Drop Kanban boards, list views, subtasks,
+ * team assignment, attachments, comments, and priority filtering.
+ */
 export default function Tasks() {
   const [tasks, setTasks]           = useState([]);
   const [projects, setProjects]     = useState([]);
@@ -48,13 +62,15 @@ export default function Tasks() {
   const [searchQuery, setSearchQuery]   = useState('');
 
   const [formData, setFormData] = useState({
-    title: '', description: '', status: 0, priority: 1, startDate: '', deadline: '', projectId: ''
+    title: '', description: '', status: 'ToDo', priority: 'Medium', startDate: '', deadline: '', projectId: '', categoryId: ''
   });
+  const [createError, setCreateError] = useState('');
 
   const [isEditTaskOpen, setIsEditTaskOpen] = useState(false);
   const [editTaskData, setEditTaskData] = useState({
-    title: '', description: '', status: 0, priority: 1, startDate: '', deadline: ''
+    title: '', description: '', status: 'ToDo', priority: 'Medium', startDate: '', deadline: ''
   });
+  const [editError, setEditError] = useState('');
 
   const authHeaders = useCallback(() => {
     const token = localStorage.getItem('token');
@@ -98,9 +114,21 @@ export default function Tasks() {
     } catch (err) { console.error(err); }
   }, [authHeaders]);
 
+  const [dynamicCategories, setDynamicCategories] = useState([]);
+  const fetchDynamicCategories = useCallback(async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/FinancialCategories`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setDynamicCategories(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+  }, [authHeaders]);
+
   useEffect(() => { fetchWorkspaces(); }, [fetchWorkspaces]);
   useEffect(() => { fetchProjects(selectedWorkspaceId); }, [selectedWorkspaceId, fetchProjects]);
   useEffect(() => { fetchTasks(selectedProjectId); }, [selectedProjectId, fetchTasks]);
+  useEffect(() => { fetchDynamicCategories(); }, [fetchDynamicCategories]);
 
   // ── Storage listener ──
   useEffect(() => {
@@ -128,10 +156,11 @@ export default function Tasks() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setCreateError('');
     const projectId = formData.projectId ? parseInt(formData.projectId, 10) : selectedProjectId;
-    if (!projectId) { alert('Please select a project for this task.'); return; }
+    if (!projectId) { setCreateError('Please select a project for this task.'); return; }
     if (formData.startDate && formData.deadline && new Date(formData.deadline) < new Date(formData.startDate)) {
-      alert('Task End Date (Deadline) cannot be earlier than Task Start Date.');
+      setCreateError('Task End Date (Deadline) cannot be earlier than Task Start Date.');
       return;
     }
     try {
@@ -142,19 +171,23 @@ export default function Tasks() {
           projectId,
           title: formData.title,
           description: formData.description || null,
-          status: parseInt(formData.status, 10),
-          priority: parseInt(formData.priority, 10),
+          status: formData.status,
+          priority: formData.priority,
           startDate: formData.startDate || null,
           deadline: formData.deadline || null,
+          categoryId: formData.categoryId ? parseInt(formData.categoryId, 10) : null
         })
       });
       if (res.ok) {
         setIsModalOpen(false);
-        setFormData({ title: '', description: '', status: 0, priority: 1, startDate: '', deadline: '', projectId: '' });
+        setCreateError('');
+        setFormData({ title: '', description: '', status: 0, priority: 1, startDate: '', deadline: '', projectId: '', categoryId: '' });
         fetchTasks(selectedProjectId);
       } else {
-        const errorText = await res.text();
-        alert(`Failed to create task: ${errorText}`);
+        // Parse error – could be JSON or plain text
+        let errMsg = 'Failed to create task.';
+        try { const j = await res.json(); errMsg = j.title || j.message || JSON.stringify(j); } catch { errMsg = await parseApiResponse(res); }
+        setCreateError(errMsg);
       }
     } catch (err) { console.error(err); }
   };
@@ -185,8 +218,8 @@ export default function Tasks() {
     setEditTaskData({
       title: task.title || '',
       description: task.description || '',
-      status: task.status ?? 0,
-      priority: task.priority ?? 1,
+      status: task.status ?? 'ToDo',
+      priority: task.priority ?? 'Medium',
       startDate: toDateStr(task.startDate),
       deadline: toDateStr(task.deadline),
     });
@@ -198,9 +231,10 @@ export default function Tasks() {
 
   const handleEditTaskSubmit = async (e) => {
     e.preventDefault();
+    setEditError('');
     if (!selectedTask) return;
     if (editTaskData.startDate && editTaskData.deadline && new Date(editTaskData.deadline) < new Date(editTaskData.startDate)) {
-      alert('Deadline cannot be earlier than Start Date.');
+      setEditError('Deadline cannot be earlier than Start Date.');
       return;
     }
     try {
@@ -210,18 +244,20 @@ export default function Tasks() {
         body: JSON.stringify({
           title: editTaskData.title,
           description: editTaskData.description || null,
-          status: parseInt(editTaskData.status, 10),
-          priority: parseInt(editTaskData.priority, 10),
+          status: editTaskData.status,
+          priority: editTaskData.priority,
           startDate: editTaskData.startDate || null,
           deadline: editTaskData.deadline || null,
         }),
       });
       if (res.ok) {
         setIsEditTaskOpen(false);
+        setEditError('');
         fetchTasks(selectedProjectId);
       } else {
-        const err = await res.text();
-        alert(`Failed to update task: ${err}`);
+        let errMsg = 'Failed to update task.';
+        try { const j = await res.json(); errMsg = j.title || j.message || JSON.stringify(j); } catch { errMsg = await parseApiResponse(res); }
+        setEditError(errMsg);
       }
     } catch (err) { console.error(err); }
   };
@@ -235,11 +271,16 @@ export default function Tasks() {
     return matchesStatus && matchesSearch;
   });
 
+  // Project date bounds for form hints
+  const selectedProject = projects.find(p => p.id === (selectedProjectId || parseInt(formData.projectId, 10)));
+  const projectStartDate = selectedProject?.startDate ? new Date(selectedProject.startDate).toISOString().split('T')[0] : undefined;
+  const projectEndDate   = selectedProject?.endDate   ? new Date(selectedProject.endDate).toISOString().split('T')[0]   : undefined;
+
   const stats = {
     total: tasks.length,
-    inProgress: tasks.filter(t => t.status === 1).length,
-    blocked: tasks.filter(t => t.status === 3).length,
-    done: tasks.filter(t => t.status === 4).length,
+    inProgress: tasks.filter(t => t.status === 'InProgress').length,
+    blocked: tasks.filter(t => t.status === 'Blocked').length,
+    done: tasks.filter(t => t.status === 'Done').length,
   };
 
   const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500";
@@ -320,8 +361,8 @@ export default function Tasks() {
             All
           </button>
           {Object.entries(STATUS_CONFIG).map(([k, v]) => (
-            <button key={k} onClick={() => setStatusFilter(parseInt(k))}
-              className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${statusFilter === parseInt(k) ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
+            <button key={k} onClick={() => setStatusFilter(k)}
+              className={`rounded-lg px-4 py-1.5 text-sm font-medium transition ${statusFilter === k ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700'}`}>
               {v.label}
             </button>
           ))}
@@ -382,9 +423,9 @@ export default function Tasks() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredTasks.map(task => {
-                    const st = STATUS_CONFIG[task.status] ?? STATUS_CONFIG[0];
-                    const pr = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG[1];
-                    const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status !== 4;
+                    const st = STATUS_CONFIG[task.status] ?? STATUS_CONFIG["ToDo"];
+                    const pr = PRIORITY_CONFIG[task.priority] ?? PRIORITY_CONFIG["Medium"];
+                    const isOverdue = task.deadline && new Date(task.deadline) < new Date() && task.status !== 'Done';
                     return (
                       <tr key={task.id}
                         onClick={() => setSelectedTask(prev => prev?.id === task.id ? null : task)}
@@ -440,34 +481,9 @@ export default function Tasks() {
         )}
       </div>
 
-      {/* ── Task Detail Bottom Panel ── */}
+      {/* ── Task Detail Side Drawer ── */}
       {selectedTask && (
-        <div className="flex-shrink-0 rounded-2xl border border-slate-200 bg-white shadow-lg overflow-hidden" style={{ height: '340px' }}>
-          <div className="px-6 py-3 bg-slate-50 border-b border-slate-200 flex items-center gap-3">
-            <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-brand-500/10 text-brand-600 text-xs font-bold">
-              {selectedTask.title.slice(0, 1).toUpperCase()}
-            </div>
-            <span className="font-semibold text-slate-800 truncate">{selectedTask.title}</span>
-            <span className={`ml-auto shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${(PRIORITY_CONFIG[selectedTask.priority] ?? PRIORITY_CONFIG[1]).color}`}>
-              {(PRIORITY_CONFIG[selectedTask.priority] ?? PRIORITY_CONFIG[1]).label}
-            </span>
-            <button
-              onClick={(e) => handleOpenTaskEdit(selectedTask, e)}
-              className="p-1 rounded-full text-slate-400 hover:text-brand-600 hover:bg-brand-50 transition flex-shrink-0"
-              title="Edit task"
-            >
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-              </svg>
-            </button>
-            <button onClick={() => setSelectedTask(null)} className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-200 transition flex-shrink-0">
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-          <TaskBottomPanel task={selectedTask} onClose={() => { setSelectedTask(null); fetchTasks(selectedProjectId); }} />
-        </div>
+        <TaskDetailsDrawer task={selectedTask} onClose={() => { setSelectedTask(null); fetchTasks(selectedProjectId); }} />
       )}
 
       {/* ── Create Task Modal ── */}
@@ -484,6 +500,15 @@ export default function Tasks() {
             />
           </div>
           <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Financial Category</label>
+            <select name="categoryId" value={formData.categoryId} onChange={handleChange} className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 bg-white">
+              <option value="">No Financial Category</option>
+              {dynamicCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.fullName || c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
             <input required name="title" value={formData.title} onChange={handleChange}
               placeholder="E.g. Setup database schema" className={inputClass} />
@@ -497,31 +522,50 @@ export default function Tasks() {
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
               <select name="status" value={formData.status} onChange={handleChange} className={inputClass}>
-                <option value={0}>To Do</option>
-                <option value={1}>In Progress</option>
-                <option value={2}>In Review</option>
-                <option value={3}>Blocked</option>
-                <option value={4}>Done</option>
+                <option value="ToDo">To Do</option>
+                <option value="InProgress">In Progress</option>
+                <option value="InReview">In Review</option>
+                <option value="Blocked">Blocked</option>
+                <option value="Done">Done</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
               <select name="priority" value={formData.priority} onChange={handleChange} className={inputClass}>
-                <option value={0}>Low</option>
-                <option value={1}>Medium</option>
-                <option value={2}>High</option>
-                <option value={3}>Urgent</option>
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
               </select>
             </div>
           </div>
+          {/* Inline error banner */}
+          {createError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+              <span>{createError}</span>
+            </div>
+          )}
+
+          {/* Project boundary hint */}
+          {(projectStartDate || projectEndDate) && (
+            <div className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 p-2.5 text-xs text-blue-700">
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              <span>Project window: <strong>{projectStartDate || '—'}</strong> → <strong>{projectEndDate || '—'}</strong></span>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Start Date</label>
-              <input type="date" name="startDate" value={formData.startDate} onChange={handleChange} className={inputClass} />
+              <input type="date" name="startDate" value={formData.startDate} onChange={handleChange}
+                min={projectStartDate} max={formData.deadline || projectEndDate}
+                className={inputClass} />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">End Date (Deadline)</label>
-              <input type="date" name="deadline" min={formData.startDate || undefined} value={formData.deadline} onChange={handleChange} className={inputClass} />
+              <input type="date" name="deadline" value={formData.deadline} onChange={handleChange}
+                min={formData.startDate || projectStartDate} max={projectEndDate}
+                className={inputClass} />
             </div>
           </div>
           <div className="flex justify-end gap-3 pt-2">
@@ -550,29 +594,50 @@ export default function Tasks() {
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Status</label>
               <select name="status" value={editTaskData.status} onChange={handleEditTaskChange} className={inputClass}>
-                <option value={0}>To Do</option>
-                <option value={1}>In Progress</option>
-                <option value={2}>In Review</option>
-                <option value={3}>Blocked</option>
-                <option value={4}>Done</option>
+                <option value="ToDo">To Do</option>
+                <option value="InProgress">In Progress</option>
+                <option value="InReview">In Review</option>
+                <option value="Blocked">Blocked</option>
+                <option value="Done">Done</option>
               </select>
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Priority</label>
               <select name="priority" value={editTaskData.priority} onChange={handleEditTaskChange} className={inputClass}>
-                <option value={0}>Low</option>
-                <option value={1}>Medium</option>
-                <option value={2}>High</option>
-                <option value={3}>Urgent</option>
+                <option value="Low">Low</option>
+                <option value="Medium">Medium</option>
+                <option value="High">High</option>
+                <option value="Urgent">Urgent</option>
               </select>
             </div>
+          </div>
+          {/* Inline error banner */}
+          {editError && (
+            <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+              <svg className="mt-0.5 h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /></svg>
+              <span>{editError}</span>
+            </div>
+          )}
+
+          {/* Project boundary hint */}
+          {(projectStartDate || projectEndDate) && (
+            <div className="flex items-center gap-2 rounded-xl border border-blue-100 bg-blue-50 p-2.5 text-xs text-blue-700">
+              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+              <span>Project window: <strong>{projectStartDate || '—'}</strong> → <strong>{projectEndDate || '—'}</strong></span>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Start Date</label>
-              <input type="date" name="startDate" value={editTaskData.startDate} onChange={handleEditTaskChange} className={inputClass} />
+              <input type="date" name="startDate" value={editTaskData.startDate} onChange={handleEditTaskChange}
+                min={projectStartDate} max={editTaskData.deadline || projectEndDate}
+                className={inputClass} />
             </div>
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">End Date (Deadline)</label>
-              <input type="date" name="deadline" min={editTaskData.startDate || undefined} value={editTaskData.deadline} onChange={handleEditTaskChange} className={inputClass} />
+              <input type="date" name="deadline" value={editTaskData.deadline} onChange={handleEditTaskChange}
+                min={editTaskData.startDate || projectStartDate} max={projectEndDate}
+                className={inputClass} />
             </div>
           </div>
           <div className="flex justify-end gap-3 pt-2">
@@ -586,4 +651,3 @@ export default function Tasks() {
     </div>
   );
 }
-

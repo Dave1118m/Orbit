@@ -6,6 +6,7 @@ import TaskStatusChart from './TaskStatusChart';
 import ActiveProjectsList from './ActiveProjectsList';
 import ActivityFeed from './ActivityFeed';
 import Modal from '../Modal';
+import { parseApiResponse } from '../../utils/toastHelper';
 import { 
   Building2, 
   FolderKanban, 
@@ -90,7 +91,7 @@ export default function CoordinatorDashboard({
           setSuccessMsg('');
         }, 1200);
       } else {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         setErrorMsg(errText || 'Failed to create workspace.');
       }
     } catch (err) {

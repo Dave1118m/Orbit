@@ -4,6 +4,7 @@ import {
   Search, RefreshCw, Upload, Lock, FileSpreadsheet, ExternalLink, Filter, Calendar, Plus, Eye
 } from 'lucide-react';
 import { useUser } from '../../contexts/UserContext';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://localhost:7065/api/v1';
 
@@ -39,7 +40,7 @@ export default function Compliance() {
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
 
-  const [activeSubTab, setActiveSubTab] = useState('schedules'); // schedules, audit, vault
+  const [activeSubTab, setActiveSubTab] = useState('vault'); // vault, audit
 
   const [schedules, setSchedules] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
@@ -54,7 +55,7 @@ export default function Compliance() {
   const [form, setForm] = useState({
     projectId: '',
     donorId: '',
-    reportType: 0,
+    reportType: 'Financial',
     deadlineDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   });
   const [submitting, setSubmitting] = useState(false);
@@ -131,7 +132,7 @@ export default function Compliance() {
   async function handleCreateSchedule(e) {
     e.preventDefault();
     if (!form.projectId) {
-      alert('Please select a project.');
+      showSuccessToast('Please select a project.');
       return;
     }
     setSubmitting(true);
@@ -145,24 +146,24 @@ export default function Compliance() {
         body: JSON.stringify({
           projectId: parseInt(form.projectId, 10),
           donorId: form.donorId ? parseInt(form.donorId, 10) : null,
-          reportType: parseInt(form.reportType, 10),
+          reportType: form.reportType,
           deadlineDate: new Date(form.deadlineDate).toISOString()
         })
       });
       if (!res.ok) {
-        const err = await res.text();
+        const err = await parseApiResponse(res);
         throw new Error(err || 'Failed to create schedule');
       }
       setIsModalOpen(false);
       setForm({
         projectId: '',
         donorId: '',
-        reportType: 0,
+        reportType: 'Financial',
         deadlineDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
       });
       fetchSchedules();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -177,7 +178,7 @@ export default function Compliance() {
       if (!res.ok) throw new Error('Failed to submit report');
       fetchSchedules();
     } catch (e) {
-      alert(e.message);
+      showSuccessToast(e.message);
     }
   }
 
@@ -243,58 +244,67 @@ export default function Compliance() {
       </div>
 
       {/* Compliance Health Scorecard */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
-            <ShieldCheck className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Legal Org Status</span>
-            <h3 className="text-sm font-bold text-emerald-700 mt-0.5 flex items-center gap-1">
-              <CheckCircle2 className="w-4 h-4" /> Fully Compliant
-            </h3>
-          </div>
-        </div>
+      {(() => {
+        const taxDoc = complianceDocs.find(d => d.type === 'Tax Exemption' || d.name.toLowerCase().includes('tax'));
+        const taxStatusText = taxDoc ? `Valid (${taxDoc.expiry})` : 'Not Uploaded';
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
-            <FileText className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tax Exemption</span>
-            <h3 className="text-sm font-bold text-slate-900 mt-0.5">Valid (Expires 2026)</h3>
-          </div>
-        </div>
+        const auditDoc = complianceDocs.find(d => d.type === 'Audit Statement' || d.name.toLowerCase().includes('audit'));
+        const auditStatusText = auditDoc ? `Verified (${auditDoc.expiry})` : 'Pending Upload';
+        const isCompliant = complianceDocs.length > 0;
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
-            <Clock className="w-6 h-6" />
-          </div>
-          <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Audit Renewal</span>
-            <h3 className="text-sm font-bold text-amber-700 mt-0.5">Due in 30 Days</h3>
-          </div>
-        </div>
+        return (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                <ShieldCheck className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Legal Org Status</span>
+                <h3 className={`text-sm font-bold mt-0.5 flex items-center gap-1 ${isCompliant ? 'text-emerald-700' : 'text-amber-700'}`}>
+                  <CheckCircle2 className="w-4 h-4" /> {isCompliant ? 'Fully Compliant' : 'Docs Required'}
+                </h3>
+              </div>
+            </div>
 
-        <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-6 h-6" />
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+                <FileText className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Tax Exemption</span>
+                <h3 className="text-sm font-bold text-slate-900 mt-0.5">{taxStatusText}</h3>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <Clock className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Audit Renewal</span>
+                <h3 className="text-sm font-bold text-amber-700 mt-0.5">{auditStatusText}</h3>
+              </div>
+            </div>
+
+            <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-brand-50 text-brand-600 flex items-center justify-center shrink-0">
+                <CheckCircle2 className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Vault Documents</span>
+                <h3 className="text-sm font-bold text-slate-900 mt-0.5">{complianceDocs.length} Verified Files</h3>
+              </div>
+            </div>
           </div>
-          <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Vault Documents</span>
-            <h3 className="text-sm font-bold text-slate-900 mt-0.5">{complianceDocs.length} Verified Files</h3>
-          </div>
-        </div>
-      </div>
+        );
+      })()}
 
       {/* Subtab Switcher */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="flex border-b border-slate-200 overflow-x-auto bg-slate-50/50 p-1 gap-1">
           {[
-            { id: 'schedules', label: 'Grant Reporting Schedules', icon: Calendar },
-            { id: 'audit', label: 'Immutable Audit Trail Log', icon: Lock },
             { id: 'vault', label: 'Compliance Document Vault', icon: ShieldCheck },
-            { id: 'export', label: 'Export Data', icon: Download }
+            { id: 'audit', label: 'Immutable Audit Trail Log', icon: Lock }
           ].map(tab => {
             const Icon = tab.icon;
             const isActive = activeSubTab === tab.id;
@@ -371,9 +381,9 @@ export default function Compliance() {
                           a.remove();
                           URL.revokeObjectURL(url);
                         } else {
-                          alert('Export failed. Please try again.');
+                          showErrorToast('Export failed. Please try again.');
                         }
-                      } catch (err) { alert('Network error during export.'); }
+                      } catch (err) { showErrorToast('Network error during export.'); }
                     }}
                     className={`flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-semibold text-white transition shadow-sm ${item.btnColor}`}
                   >
@@ -645,9 +655,9 @@ export default function Compliance() {
                   onChange={(e) => setForm({ ...form, reportType: e.target.value })}
                   className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
                 >
-                  <option value="0">Financial Report</option>
-                  <option value="1">Narrative Report</option>
-                  <option value="2">Audit Statement</option>
+                  <option value="Financial">Financial Report</option>
+                  <option value="Narrative">Narrative Report</option>
+                  <option value="Audit">Audit Report</option>
                 </select>
               </div>
 
@@ -703,7 +713,7 @@ export default function Compliance() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. USAID Anti-Terrorism Certificate 2026"
+                  placeholder="e.g. Donor Anti-Terrorism Certificate 2026"
                   value={docForm.name}
                   onChange={(e) => setDocForm({ ...docForm, name: e.target.value })}
                   className="w-full px-3.5 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-500/20"
@@ -789,7 +799,7 @@ export default function Compliance() {
               <div className="border-b-2 border-brand-600 pb-3 flex items-center justify-between">
                 <div>
                   <h4 className="text-sm font-black text-slate-900 tracking-wide uppercase">LEGAL COMPLIANCE VERIFICATION SHEET</h4>
-                  <p className="text-[11px] text-slate-500 font-medium">Orbit Institutional Non-Profit System • Org #{orgId}</p>
+                  <p className="text-[11px] text-slate-500 font-medium">Orbit Institutional Non-Profit System • Verified Organization Account</p>
                 </div>
                 <span className="px-2.5 py-1 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-200">
                   {previewDoc.status} & Encrypted

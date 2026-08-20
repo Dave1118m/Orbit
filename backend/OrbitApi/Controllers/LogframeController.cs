@@ -15,6 +15,10 @@ using System.Threading.Tasks;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Logical Framework (Logframe) Controller managing hierarchical project matrices
+    /// (Goals -> Outcomes -> Outputs -> Activities), linked tasks, verifiable indicators, and donor CSV exports.
+    /// </summary>
     [ApiController]
     [Route("api/v1/projects/{projectId}/logframe")]
     [Authorize]
@@ -63,6 +67,11 @@ namespace OrbitApi.Controllers
 
         // ── GET full logframe (with indicators + hierarchical progress rollups) ──
 
+        /// <summary>
+        /// Retrieves the entire hierarchical logframe matrix, linked tasks, rollups, and indicators for a project.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <returns>Logframe hierarchy and indicator payload.</returns>
         [HttpGet]
         public async Task<ActionResult> GetLogframe(int projectId)
         {
@@ -84,24 +93,25 @@ namespace OrbitApi.Controllers
                             .ThenInclude(a => a.LinkedTask)
                 .ToListAsync();
 
-            var indicators = await _db.Indicators
+            var indicatorsList = await _db.Indicators
                 .Where(i => i.ProjectId == projectId)
-                .Select(i => new
-                {
-                    i.Id,
-                    i.ProjectId,
-                    Level = i.Level.ToString(),
-                    LevelInt = (int)i.Level,
-                    i.EntityId,
-                    i.Name,
-                    i.Baseline,
-                    i.Target,
-                    i.Actual,
-                    i.Unit,
-                    i.Notes,
-                    i.UpdatedAt
-                })
                 .ToListAsync();
+
+            var indicators = indicatorsList.Select(i => new
+            {
+                i.Id,
+                i.ProjectId,
+                Level = i.Level.ToString(),
+                LevelInt = (int)i.Level,
+                i.EntityId,
+                i.Name,
+                i.Baseline,
+                i.Target,
+                i.Actual,
+                i.Unit,
+                i.Notes,
+                i.UpdatedAt
+            }).ToList();
 
             // ── Compute hierarchical progress rollups ─────────────────────────────
             static int? ActivityProgress(LogframeActivity a) =>
@@ -179,6 +189,12 @@ namespace OrbitApi.Controllers
 
         // ── Goals ─────────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Creates a top-level Logframe Goal.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="req">Goal entity.</param>
+        /// <returns>Created goal record.</returns>
         [HttpPost("goals")]
         public async Task<ActionResult> CreateGoal(int projectId, [FromBody] LogframeGoal req)
         {
@@ -228,6 +244,12 @@ namespace OrbitApi.Controllers
 
         // ── Outcomes ──────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Creates a Logframe Outcome under a parent Goal.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="req">Outcome entity.</param>
+        /// <returns>Created outcome record.</returns>
         [HttpPost("outcomes")]
         public async Task<ActionResult> CreateOutcome(int projectId, [FromBody] LogframeOutcome req)
         {
@@ -270,6 +292,12 @@ namespace OrbitApi.Controllers
 
         // ── Outputs ───────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Creates a Logframe Output under a parent Outcome.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="req">Output entity.</param>
+        /// <returns>Created output record.</returns>
         [HttpPost("outputs")]
         public async Task<ActionResult> CreateOutput(int projectId, [FromBody] LogframeOutput req)
         {
@@ -312,6 +340,12 @@ namespace OrbitApi.Controllers
 
         // ── Activities ────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Creates a Logframe Activity under a parent Output.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="req">Activity entity.</param>
+        /// <returns>Created activity record.</returns>
         [HttpPost("activities")]
         public async Task<ActionResult> CreateActivity(int projectId, [FromBody] LogframeActivity req)
         {
@@ -399,6 +433,12 @@ namespace OrbitApi.Controllers
 
         // ── Indicators ────────────────────────────────────────────────────────────
 
+        /// <summary>
+        /// Adds a measurable indicator to any logframe hierarchy level.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="req">Indicator baseline, target, actual, and unit payload.</param>
+        /// <returns>Created indicator record.</returns>
         [HttpPost("indicators")]
         public async Task<ActionResult> CreateIndicator(int projectId, [FromBody] CreateIndicatorRequest req)
         {
@@ -494,6 +534,11 @@ namespace OrbitApi.Controllers
 
         // ── Export (donor-preferred CSV) ──────────────────────────────────────────
 
+        /// <summary>
+        /// Exports the logframe hierarchy and verifiable indicator metrics as a donor-compliant CSV.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <returns>CSV file download stream.</returns>
         [HttpGet("export")]
         public async Task<IActionResult> ExportLogframe(int projectId)
         {

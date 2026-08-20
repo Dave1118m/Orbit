@@ -112,11 +112,11 @@ export default function FinancialDashboard() {
     const catSpentFromTxns = transactions
       .filter(t => t.type === 0 || t.type === 'Expense' || t.type === 'expense')
       .reduce((sum, t) => {
-        if (t.categoryId === cat.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (t.categoryId === cat.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
         const catNameLower = cat.name.toLowerCase();
         const tDesc = (t.description || '').toLowerCase();
         const tCat = (t.category || t.categoryName || '').toLowerCase();
-        if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (tCat && tCat.includes(catNameLower)) return sum + (t.baseCurrencyAmount || t.amount || 0);
         return sum;
       }, 0);
     return Math.max(catSpentFromEntity, catSpentFromTxns);
@@ -154,7 +154,7 @@ export default function FinancialDashboard() {
     const mName = monthNames[d.getMonth()];
     const pos = last6MonthLabels.indexOf(mName);
     if (pos !== -1) {
-      const amt = t.amount || t.baseCurrencyAmount || 0;
+      const amt = t.baseCurrencyAmount || t.amount || 0;
       if (t.type === 1 || t.type === 'Income' || t.type === 'income') {
         monthlyIncome[pos] += amt;
       } else if (t.type === 0 || t.type === 'Expense' || t.type === 'expense') {
@@ -345,22 +345,22 @@ export default function FinancialDashboard() {
                   const txnSpent = transactions
                     .filter(t => (t.type === 0 || t.type === 'Expense' || t.type === 'expense'))
                     .reduce((sum, t) => {
-                      if (t.categoryId === cat.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
+                      if (t.categoryId === cat.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
                       const catNameLower = cat.name.toLowerCase();
                       const tDesc = (t.description || '').toLowerCase();
                       const tCat = (t.category || t.categoryName || '').toLowerCase();
-                      if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || t.baseCurrencyAmount || 0);
+                      if (tCat && tCat.includes(catNameLower)) return sum + (t.baseCurrencyAmount || t.amount || 0);
                       if (catNameLower.includes('equipment') && (tDesc.includes('equipment') || tDesc.includes('solar') || tDesc.includes('water') || tDesc.includes('pump') || tCat.includes('equipment'))) {
-                        return sum + (t.amount || t.baseCurrencyAmount || 0);
+                        return sum + (t.baseCurrencyAmount || t.amount || 0);
                       }
                       if (catNameLower.includes('travel') && (tDesc.includes('travel') || tDesc.includes('flight') || tCat.includes('travel'))) {
-                        return sum + (t.amount || t.baseCurrencyAmount || 0);
+                        return sum + (t.baseCurrencyAmount || t.amount || 0);
                       }
                       if (catNameLower.includes('personnel') && (tDesc.includes('payroll') || tDesc.includes('salary') || tDesc.includes('personnel') || tCat.includes('personnel'))) {
-                        return sum + (t.amount || t.baseCurrencyAmount || 0);
+                        return sum + (t.baseCurrencyAmount || t.amount || 0);
                       }
                       if (catNameLower.includes('operations') && (tDesc.includes('office') || tDesc.includes('admin') || tDesc.includes('ops') || tCat.includes('operations'))) {
-                        return sum + (t.amount || t.baseCurrencyAmount || 0);
+                        return sum + (t.baseCurrencyAmount || t.amount || 0);
                       }
                       return sum;
                     }, 0);
@@ -368,10 +368,10 @@ export default function FinancialDashboard() {
                   const txnIncome = transactions
                     .filter(t => (t.type === 1 || t.type === 'Income' || t.type === 'income'))
                     .reduce((sum, t) => {
-                      if (t.categoryId === cat.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
+                      if (t.categoryId === cat.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
                       const catNameLower = cat.name.toLowerCase();
                       const tCat = (t.category || t.categoryName || '').toLowerCase();
-                      if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || t.baseCurrencyAmount || 0);
+                      if (tCat && tCat.includes(catNameLower)) return sum + (t.baseCurrencyAmount || t.amount || 0);
                       return sum;
                     }, 0);
 

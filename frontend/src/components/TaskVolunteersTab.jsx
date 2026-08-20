@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from './SearchSelect';
+import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
 
 export default function TaskVolunteersTab({ taskId }) {
   const [assignedVolunteers, setAssignedVolunteers] = useState([]);
@@ -66,14 +67,14 @@ export default function TaskVolunteersTab({ taskId }) {
       });
 
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         throw new Error(errText || 'Failed to assign volunteer');
       }
 
       setSelectedVolunteerId(null);
       await loadData();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -89,13 +90,13 @@ export default function TaskVolunteersTab({ taskId }) {
       });
 
       if (!res.ok) {
-        const errText = await res.text();
+        const errText = await parseApiResponse(res);
         throw new Error(errText || 'Failed to unassign volunteer');
       }
 
       await loadData();
     } catch (err) {
-      alert(err.message);
+      showErrorToast(err.message);
     }
   };
 
@@ -157,7 +158,7 @@ export default function TaskVolunteersTab({ taskId }) {
           <div className="space-y-2">
             {assignedVolunteers.map((av) => {
               const vol = av.volunteer || {};
-              const volName = vol.name || `Volunteer #${av.volunteerId}`;
+              const volName = vol.name || av.volunteerName || 'Volunteer';
               const bgStatus = vol.backgroundCheckStatus || 'Pending';
 
               return (

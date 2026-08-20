@@ -2,6 +2,9 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://localhost:7065/api/v1';
 
+/**
+ * Context for multi-language translation and localization.
+ */
 const TranslationContext = createContext({
   language: 'en',
   setLanguage: () => {},
@@ -9,10 +12,19 @@ const TranslationContext = createContext({
   cache: {},
 });
 
+/**
+ * Provider component for internationalization (i18n), managing active language state,
+ * caching translated strings in-memory and in localStorage, and adding typography classes.
+ * @param {{ children: React.ReactNode }} props
+ */
 export function TranslationProvider({ children }) {
   const [language, setLanguageState] = useState(() => localStorage.getItem('orbit_language') || 'en');
   const [cache, setCache] = useState({});
 
+  /**
+   * Updates active UI language, persists selection in localStorage, and toggles body font classes.
+   * @param {string} lang - Language code ('en', 'am', etc.).
+   */
   const setLanguage = (lang) => {
     setLanguageState(lang);
     localStorage.setItem('orbit_language', lang);
@@ -31,6 +43,13 @@ export function TranslationProvider({ children }) {
     }
   }, [language]);
 
+  /**
+   * Asynchronously translates a given English string to the active target language.
+   * Uses client memory cache for 0ms re-renders before calling `/api/v1/translation/translate`.
+   * @param {string} text - The source English text.
+   * @param {string} [targetLang=language] - The target language ISO code.
+   * @returns {Promise<string>} The translated text.
+   */
   const translate = async (text, targetLang = language) => {
     if (!text || typeof text !== 'string' || targetLang === 'en') return text;
 
@@ -69,11 +88,27 @@ export function TranslationProvider({ children }) {
   );
 }
 
+/**
+ * Custom React hook to consume the TranslationContext.
+ * @returns {{
+ *   language: string,
+ *   setLanguage: (lang: string) => void,
+ *   translate: (text: string, targetLang?: string) => Promise<string>,
+ *   cache: Object
+ * }}
+ */
 export function useTranslationContext() {
   return useContext(TranslationContext);
 }
 
-// ── 100% Dynamic AutoText Component ──
+/**
+ * Auto-translating UI text wrapper component that dynamically translates its text prop at runtime.
+ * @param {{
+ *   text: string|number,
+ *   fallback?: string,
+ *   className?: string
+ * }} props
+ */
 export function AutoText({ text, fallback, className = '' }) {
   const { language, translate, cache } = useTranslationContext();
   const strValue = (text !== undefined && text !== null) ? String(text) : '';

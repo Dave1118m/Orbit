@@ -5,6 +5,9 @@ using OrbitApi.Models;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// API Controller providing audit trail and activity log event feeds across the platform.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -12,11 +15,19 @@ namespace OrbitApi.Controllers
     {
         private readonly OrbitDbContext _db;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="ActivityController"/>.
+        /// </summary>
         public ActivityController(OrbitDbContext db)
         {
             _db = db;
         }
 
+        /// <summary>
+        /// Retrieves the most recent chronological audit log and system activity events.
+        /// </summary>
+        /// <param name="limit">Maximum number of records to return (defaults to 20).</param>
+        /// <returns>List of recent activity log items.</returns>
         [HttpGet]
         public async Task<ActionResult> List([FromQuery] int? limit)
         {

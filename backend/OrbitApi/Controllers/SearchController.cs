@@ -7,6 +7,9 @@ using System.Text.Json;
 
 namespace OrbitApi.Controllers;
 
+/// <summary>
+/// API Controller providing multi-entity global search across projects, tasks, donors, and financial records with role-based filtering.
+/// </summary>
 [ApiController]
 [Route("api/v1/search")]
 [Authorize]
@@ -14,11 +17,17 @@ public class SearchController : ControllerBase
 {
     private readonly OrbitDbContext _db;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="SearchController"/>.
+    /// </summary>
     public SearchController(OrbitDbContext db)
     {
         _db = db;
     }
 
+    /// <summary>
+    /// Extracts the integer User ID from authentication claims.
+    /// </summary>
     private int GetCurrentUserId()
     {
         var sub = User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -28,9 +37,10 @@ public class SearchController : ControllerBase
     }
 
     /// <summary>
-    /// Returns the highest role the current user has across all their assignments.
-    /// Higher index = more powerful. Owner=6, Admin=5, ... Viewer=0.
+    /// Computes the highest organizational role the current user holds to enforce sensitive data visibility (e.g. financial filtering).
     /// </summary>
+    /// <param name="userId">The user ID.</param>
+    /// <returns>Highest role name or null.</returns>
     private async Task<RoleName?> GetUserHighestRole(int userId)
     {
         var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted)
@@ -59,9 +69,16 @@ public class SearchController : ControllerBase
         return roles.OrderByDescending(r => Array.IndexOf(roleOrder, r)).First();
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/v1/search?q=&type=&status=&dateFrom=&dateTo=&assignee=
-    // ─────────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Executes a federated search across Projects, Tasks, Donors, and Expenses based on query terms and filters.
+    /// </summary>
+    /// <param name="q">Search keyword.</param>
+    /// <param name="type">Optional entity filter ('project', 'task', 'donor', 'expense').</param>
+    /// <param name="status">Optional status filter string.</param>
+    /// <param name="dateFrom">Optional start date boundary.</param>
+    /// <param name="dateTo">Optional end date boundary.</param>
+    /// <param name="assignee">Optional assignee user ID filter for tasks.</param>
+    /// <returns>Unified list of SearchResultDto items matching criteria.</returns>
     [HttpGet]
     public async Task<IActionResult> Search(
         [FromQuery] string? q,
@@ -201,9 +218,9 @@ public class SearchController : ControllerBase
         return Ok(new { results, totalCount = results.Count });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // GET /api/v1/search/saved
-    // ─────────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Retrieves all saved search queries created by the current user.
+    /// </summary>
     [HttpGet("saved")]
     public async Task<IActionResult> GetSavedSearches()
     {
@@ -216,9 +233,10 @@ public class SearchController : ControllerBase
         return Ok(saved);
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // POST /api/v1/search/saved
-    // ─────────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Persists a custom search filter combination for fast re-execution.
+    /// </summary>
+    /// <param name="req">The search save request payload.</param>
     [HttpPost("saved")]
     public async Task<IActionResult> SaveSearch([FromBody] SaveSearchRequest req)
     {
@@ -238,9 +256,10 @@ public class SearchController : ControllerBase
         return Ok(new { saved.Id, saved.Name, saved.QueryJson, saved.CreatedAt });
     }
 
-    // ─────────────────────────────────────────────────────────────────────────
-    // DELETE /api/v1/search/saved/{id}
-    // ─────────────────────────────────────────────────────────────────────────
+    /// <summary>
+    /// Deletes a saved search query belonging to the authenticated user.
+    /// </summary>
+    /// <param name="id">The saved search record ID.</param>
     [HttpDelete("saved/{id}")]
     public async Task<IActionResult> DeleteSavedSearch(int id)
     {

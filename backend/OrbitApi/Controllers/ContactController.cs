@@ -3,17 +3,25 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OrbitApi.Models;
 using OrbitApi.Services;
+using System.ComponentModel.DataAnnotations;
 
 namespace OrbitApi.Controllers;
 
+/// <summary>
+/// API Controller for handling public contact submissions, demo inquiries, admin reviews, and SendGrid email responses.
+/// </summary>
 [ApiController]
 [Route("api/v1/[controller]")]
+[Authorize]
 public class ContactController : ControllerBase
 {
     private readonly OrbitDbContext _context;
     private readonly IEmailSender _emailSender;
     private readonly IConfiguration _config;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="ContactController"/>.
+    /// </summary>
     public ContactController(OrbitDbContext context, IEmailSender emailSender, IConfiguration config)
     {
         _context = context;
@@ -21,16 +29,31 @@ public class ContactController : ControllerBase
         _config = config;
     }
 
+    /// <summary>
+    /// Data transfer object representing a public contact inquiry or demo request.
+    /// </summary>
     public class CreateContactDto
     {
+        /// <summary>Sender's full name.</summary>
+        [Required, StringLength(100)]
         public string Name { get; set; } = string.Empty;
+        
+        /// <summary>Sender's contact email address.</summary>
+        [Required, EmailAddress, StringLength(150)]
         public string Email { get; set; } = string.Empty;
+        
+        /// <summary>Inquiry subject or topic.</summary>
+        [StringLength(200)]
         public string Subject { get; set; } = string.Empty;
+        
+        /// <summary>Detailed message body.</summary>
+        [Required, StringLength(2000)]
         public string Message { get; set; } = string.Empty;
     }
 
     /// <summary>
     /// Public submission endpoint for contact and demo request inquiries.
+    /// Saves inquiry to database and dispatches admin alert and sender confirmation emails via SendGrid.
     /// </summary>
     [HttpPost]
     [AllowAnonymous]
@@ -58,31 +81,8 @@ public class ContactController : ControllerBase
         }
         catch (Exception dbEx)
         {
-            Console.WriteLine($"[ContactController] DB Save initial attempt: {dbEx.Message}");
-            try
-            {
-                await _context.Database.ExecuteSqlRawAsync(@"
-                    IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'ContactInquiries')
-                    BEGIN
-                        CREATE TABLE [ContactInquiries] (
-                            [Id] INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
-                            [Name] NVARCHAR(MAX) NOT NULL,
-                            [Email] NVARCHAR(MAX) NOT NULL,
-                            [Subject] NVARCHAR(MAX) NOT NULL,
-                            [Message] NVARCHAR(MAX) NOT NULL,
-                            [CreatedAt] DATETIME2 NOT NULL,
-                            [IsResolved] BIT NOT NULL DEFAULT 0,
-                            [AdminNotes] NVARCHAR(MAX) NULL
-                        );
-                    END
-                ");
-                _context.ContactInquiries.Add(inquiry);
-                await _context.SaveChangesAsync();
-            }
-            catch (Exception retryEx)
-            {
-                return StatusCode(500, new { message = $"Failed to save inquiry to database: {retryEx.Message}" });
-            }
+            Console.WriteLine($"[ContactController] DB Save failed: {dbEx.Message}");
+            return StatusCode(500, new { message = "Failed to save inquiry to database due to an internal error." });
         }
 
         // Asynchronously attempt to send email notifications via SendGrid
@@ -170,11 +170,13 @@ public class ContactController : ControllerBase
 
     public class ResolveDto
     {
+        [StringLength(1000)]
         public string? AdminNotes { get; set; }
     }
 
     public class SendReplyDto
     {
+        [Required, StringLength(3000)]
         public string ReplyMessage { get; set; } = string.Empty;
     }
 

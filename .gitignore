@@ -1,8 +1,51 @@
+# Dependencies
 node_modules/
+frontend/node_modules/
+
+# Production / Temp Builds
 dist/
+dist_temp/
+frontend/dist/
+frontend/dist_temp/
+
+# Environment and Secret configuration files
 .env
+.env.*
+*.env
+*.env.local
+*.secrets.json
+appsettings.*.Local.json
+
+# Certificates and keys
+certs/
+frontend/certs/
+*.pfx
+*.pem
+*.key
+*.cer
+*.crt
+
+# Build outputs and compilation artifacts
 bin/
 obj/
-*.user
+backend/OrbitApi/bin/
+backend/OrbitApi/obj/
+*.dll
+*.exe
+*.pdb
+*.cache
 *.suo
+*.user
+
+# Uploads and temporary assets
+Uploads/
+backend/OrbitApi/Uploads/
+
+# VS Code and IDE settings
+.vscode/
+.idea/
+
+# Log files
+logs/
+*.log
 

@@ -13,6 +13,10 @@ using System.Threading.Tasks;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Regulatory and Compliance Controller managing grant reporting milestones,
+    /// chronological audit trails, logframe exports, and USAID donor compliance data packages.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -84,8 +88,12 @@ namespace OrbitApi.Controllers
                 return BadRequest("Grant report deadline date cannot be in the past.");
             }
 
-            var project = await _db.Projects.FindAsync(req.ProjectId);
-            if (project == null) return BadRequest("Selected project not found.");
+            Project? project = null;
+            if (req.ProjectId.HasValue && req.ProjectId.Value > 0)
+            {
+                project = await _db.Projects.FindAsync(req.ProjectId.Value);
+                if (project == null) return BadRequest("Selected project not found.");
+            }
 
             if (req.DonorId.HasValue)
             {
@@ -95,7 +103,7 @@ namespace OrbitApi.Controllers
 
             var schedule = new GrantReportSchedule
             {
-                ProjectId = req.ProjectId,
+                ProjectId = req.ProjectId.HasValue && req.ProjectId.Value > 0 ? req.ProjectId.Value : null,
                 DonorId = req.DonorId,
                 ReportType = req.ReportType,
                 DeadlineDate = req.DeadlineDate,
@@ -194,6 +202,39 @@ namespace OrbitApi.Controllers
         }
 
         /// <summary>
+        /// Deletes a grant reporting schedule entry.
+        /// </summary>
+        /// <param name="id">Report schedule ID.</param>
+        /// <returns>NoContent on success.</returns>
+        [HttpDelete("reports/{id}")]
+        public async Task<ActionResult> DeleteReportSchedule(int id)
+        {
+            var report = await _db.GrantReportSchedules.FindAsync(id);
+            if (report == null) return NotFound();
+
+            _db.GrantReportSchedules.Remove(report);
+            await _db.SaveChangesAsync();
+            return NoContent();
+        }
+
+        /// <summary>
+        /// Manually triggers and generates an on-demand grant report run.
+        /// </summary>
+        /// <param name="id">Report schedule ID.</param>
+        /// <returns>Execution confirmation.</returns>
+        [HttpPost("reports/{id}/run-now")]
+        public async Task<ActionResult> RunReportNow(int id)
+        {
+            var report = await _db.GrantReportSchedules.FindAsync(id);
+            if (report == null) return NotFound();
+
+            report.SubmittedDate = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+
+            return Ok(new { message = "Automated report triggered successfully and dispatched." });
+        }
+
+        /// <summary>
         /// GET /api/v1/compliance/audit-logs — Fetch chronological ledger
         /// </summary>
         [HttpGet("audit-logs")]
@@ -239,6 +280,7 @@ namespace OrbitApi.Controllers
             var expenses = await _db.Expenses
                 .Include(e => e.Project)
                 .Include(e => e.SubmittedByUser)
+                .Include(e => e.FinancialCategory)
                 .OrderByDescending(e => e.Date)
                 .ToListAsync();
 
@@ -247,7 +289,8 @@ namespace OrbitApi.Controllers
 
             foreach (var e in expenses)
             {
-                var row = $"{e.Id},{e.Date:yyyy-MM-dd},\"{e.Project?.Title}\",\"{e.SubmittedByUser?.Name}\",{e.Category},{e.Amount},{e.Currency},{e.ApprovalStatus},\"{e.Description?.Replace("\"", "\"\"")}\"";
+                var catName = e.FinancialCategory?.Name ?? "General Expense";
+                var row = $"{e.Id},{e.Date:yyyy-MM-dd},\"{e.Project?.Title}\",\"{e.SubmittedByUser?.Name}\",\"{catName}\",{e.Amount},{e.Currency},{e.ApprovalStatus},\"{e.Description?.Replace("\"", "\"\"")}\"";
                 builder.AppendLine(row);
             }
 

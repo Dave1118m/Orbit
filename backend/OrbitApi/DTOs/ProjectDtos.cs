@@ -3,7 +3,13 @@ using System.Collections.Generic;
 
 namespace OrbitApi.DTOs
 {
-    public enum ProjectStatus { Draft = 0, Active = 1, OnHold = 2, Completed = 3, Cancelled = 4 }
+    public enum ProjectStatus { Planning = 0, Active = 1, OnHold = 2, Completed = 3, Cancelled = 4, Archived = 5 }
+
+    public class TeamSimpleDto
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = null!;
+    }
 
     public class ProjectDto
     {
@@ -16,8 +22,10 @@ namespace OrbitApi.DTOs
         public DateTime? EndDate { get; set; }
         public decimal? Budget { get; set; }
         public int? DonorId { get; set; }
+        public List<int>? DonorIds { get; set; }
         public string FundingType { get; set; } = "SingleDonor";
         public List<int>? TeamIds { get; set; }
+        public List<TeamSimpleDto>? Teams { get; set; }
         public int TaskCount { get; set; }
         public byte[]? RowVersion { get; set; }
     }
@@ -45,6 +53,7 @@ namespace OrbitApi.DTOs
         public DateTime? EndDate { get; set; }
         public decimal? Budget { get; set; }
         public int? DonorId { get; set; }
+        public List<int>? DonorIds { get; set; }
         public string? FundingType { get; set; }
         public byte[]? RowVersion { get; set; }
     }

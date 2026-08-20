@@ -24,10 +24,12 @@ ChartJS.register(
 );
 
 const PROJECT_STATUS = {
-  PLANNED: 0, // Draft
+  PLANNED: 0,
   ACTIVE: 1,
   ON_HOLD: 2,
   COMPLETED: 3,
+  CANCELLED: 4,
+  ARCHIVED: 5,
 };
 
 const STATUS_COLORS = {
@@ -35,6 +37,8 @@ const STATUS_COLORS = {
   [PROJECT_STATUS.ACTIVE]: '#3b82f6',    // blue 500
   [PROJECT_STATUS.ON_HOLD]: '#f59e0b',   // amber 500
   [PROJECT_STATUS.COMPLETED]: '#6366f1', // indigo 500
+  [PROJECT_STATUS.CANCELLED]: '#ef4444', // red 500
+  [PROJECT_STATUS.ARCHIVED]: '#6b7280',  // gray 500
 };
 
 const STATUS_LABELS = {
@@ -42,12 +46,16 @@ const STATUS_LABELS = {
   [PROJECT_STATUS.ACTIVE]: 'Active',
   [PROJECT_STATUS.ON_HOLD]: 'On Hold',
   [PROJECT_STATUS.COMPLETED]: 'Completed',
+  [PROJECT_STATUS.CANCELLED]: 'Cancelled',
+  [PROJECT_STATUS.ARCHIVED]: 'Archived',
 };
 
 function normalizeProjectStatus(s) {
   if (s === 'Active' || s === 1 || s === '1') return 1;
   if (s === 'OnHold' || s === 2 || s === '2') return 2;
   if (s === 'Completed' || s === 3 || s === '3') return 3;
+  if (s === 'Cancelled' || s === 4 || s === '4') return 4;
+  if (s === 'Archived' || s === 5 || s === '5') return 5;
   return 0; // Planned / 0
 }
 

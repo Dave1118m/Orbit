@@ -13,33 +13,55 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// API Controller providing dynamic text translation with distributed Redis caching and fallback to external translation services.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
+    [Authorize]
     public class TranslationController : ControllerBase
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ICacheService _cache;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="TranslationController"/>.
+        /// </summary>
         public TranslationController(IHttpClientFactory httpClientFactory, ICacheService cache)
         {
             _httpClientFactory = httpClientFactory;
             _cache = cache;
         }
 
+        /// <summary>
+        /// Request model for translating a single text string.
+        /// </summary>
         public class TranslationRequest
         {
+            /// <summary>Source text to translate.</summary>
             public string Text { get; set; } = string.Empty;
+            /// <summary>Source language code (default 'en').</summary>
             public string SourceLanguage { get; set; } = "en";
+            /// <summary>Target language code (default 'am').</summary>
             public string TargetLanguage { get; set; } = "am";
         }
 
+        /// <summary>
+        /// Request model for batch translation of multiple text strings.
+        /// </summary>
         public class BatchTranslationRequest
         {
+            /// <summary>List of strings to translate.</summary>
             public List<string> Texts { get; set; } = new();
+            /// <summary>Source language code.</summary>
             public string SourceLanguage { get; set; } = "en";
+            /// <summary>Target language code.</summary>
             public string TargetLanguage { get; set; } = "am";
         }
 
+        /// <summary>
+        /// Result model containing original and translated text with cache flag.
+        /// </summary>
         public class TranslationResult
         {
             public string OriginalText { get; set; } = string.Empty;
@@ -48,6 +70,9 @@ namespace OrbitApi.Controllers
             public string TargetLanguage { get; set; } = "am";
         }
 
+        /// <summary>
+        /// Computes a unique SHA-256 cache key for a source/target/text tuple.
+        /// </summary>
         private static string GetCacheKey(string text, string src, string tgt)
         {
             using var sha = SHA256.Create();

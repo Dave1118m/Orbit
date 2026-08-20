@@ -65,7 +65,7 @@ const FEATURES = [
       { role: 'Goal & Impact Level', desc: 'High-level socio-economic transformational objectives with multi-year targets.' },
       { role: 'Outcomes & Indicators', desc: 'Measurable change indicators tracking baseline vs target performance.' },
       { role: 'Outputs & Activities', desc: 'Direct deliverables mapped to actionable tasks and verification sources.' },
-      { role: 'Donor Report Export', desc: 'Instant 1-click export of logframe tables for USAID, EU, and institutional donors.' }
+      { role: 'Donor Report Export', desc: 'Instant 1-click export of logframe tables for major institutional donors.' }
     ],
     demoWidget: (
       <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-lg">

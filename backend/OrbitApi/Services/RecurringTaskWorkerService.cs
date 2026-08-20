@@ -3,17 +3,26 @@ using OrbitApi.Models;
 
 namespace OrbitApi.Services
 {
+    /// <summary>
+    /// Hosted background worker that runs periodically to clone and instantiate recurring task templates on schedule.
+    /// </summary>
     public class RecurringTaskWorkerService : BackgroundService
     {
         private readonly IServiceProvider _serviceProvider;
         private readonly ILogger<RecurringTaskWorkerService> _logger;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="RecurringTaskWorkerService"/>.
+        /// </summary>
         public RecurringTaskWorkerService(IServiceProvider serviceProvider, ILogger<RecurringTaskWorkerService> logger)
         {
             _serviceProvider = serviceProvider;
             _logger = logger;
         }
 
+        /// <summary>
+        /// Execution loop running continuously while the API host is active, checking tasks daily.
+        /// </summary>
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             while (!stoppingToken.IsCancellationRequested)
@@ -33,6 +42,9 @@ namespace OrbitApi.Services
             }
         }
 
+        /// <summary>
+        /// Scans for template tasks containing '[Recurring]' and generates a new monthly task instance if one does not already exist.
+        /// </summary>
         private async Task InstantiateRecurringTasksAsync(CancellationToken stoppingToken)
         {
             using var scope = _serviceProvider.CreateScope();

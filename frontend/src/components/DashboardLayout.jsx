@@ -7,6 +7,7 @@ import RoleSwitcherBar from './RoleSwitcherBar';
 import LanguageSwitcher from './LanguageSwitcher';
 import { AutoText } from '../contexts/TranslationContext';
 import { createOrGetConnection, onEvent, offEvent } from '../lib/signalrClient';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
 
 export default function DashboardLayout({ children }) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -101,14 +102,25 @@ export default function DashboardLayout({ children }) {
           offEvent(conn, 'NotificationReceived', handleNotificationReceived);
         };
       } catch (err) {
-        Console.error('Failed to setup SignalR notifications', err);
+        console.error('Failed to setup SignalR notifications', err);
       }
     }
 
     setupNotifications();
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const token = localStorage.getItem('token');
+    if (token) {
+      try {
+        await fetch(`${import.meta.env.VITE_API_URL}/auth/revoke`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}` }
+        });
+      } catch (err) {
+        console.error('Failed to revoke token', err);
+      }
+    }
     localStorage.removeItem('token');
     window.location.href = '/login';
   };
@@ -145,6 +157,17 @@ export default function DashboardLayout({ children }) {
     if (!file) {
       setProfilePhotoFile(null);
       setProfilePhotoPreview(profileForm.photoUrl || '');
+      return;
+    }
+
+    const validTypes = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    if (!validTypes.includes(file.type)) {
+      showSuccessToast("Invalid file format. Please upload an image (JPEG, PNG, WebP, GIF).");
+      return;
+    }
+
+    if (file.size > 2 * 1024 * 1024) {
+      showSuccessToast("File is too large. Maximum size is 2MB.");
       return;
     }
 
@@ -208,9 +231,9 @@ export default function DashboardLayout({ children }) {
         setProfilePhotoFile(null);
         setIsProfileModalOpen(false);
       } else {
-        const error = await response.text();
+        const error = await parseApiResponse(response);
         console.error('Failed to save profile', error);
-        alert('Unable to save profile. Please try again.');
+        showErrorToast('Unable to save profile. Please try again.');
       }
     } catch (err) {
       console.error('Failed to save profile', err);
@@ -225,7 +248,8 @@ export default function DashboardLayout({ children }) {
     return `${import.meta.env.VITE_API_URL.replace('/api/v1', '')}${url}`;
   };
 
-  const userInitials = user?.name ? user.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() : 'JK';
+  const displayName = user?.name || user?.fullName || user?.email?.split('@')[0] || 'Orbit User';
+  const userInitials = displayName.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase() || 'OU';
 
   return (
     <div className="flex h-screen overflow-hidden bg-slate-100 font-sans">
@@ -247,9 +271,7 @@ export default function DashboardLayout({ children }) {
               </svg>
             </button>
             <div className="flex items-center gap-2">
-              <div className="grid h-8 w-8 place-items-center rounded-xl bg-brand-500 text-sm font-bold text-white">
-                <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" fill="none"/></svg>
-              </div>
+              <img src="/logo.png" alt="OrbitDesk Logo" className="w-8 h-8 object-contain drop-shadow-sm" />
               <span className="font-semibold text-slate-900">OrbitDesk</span>
             </div>
           </div>
@@ -332,7 +354,7 @@ export default function DashboardLayout({ children }) {
                           )}
                         </div>
                         <div>
-                          <p className="font-semibold text-slate-900">{user?.name || 'Guest User'}</p>
+                          <p className="font-semibold text-slate-900">{user?.name || user?.fullName || user?.email?.split('@')[0] || 'User'}</p>
                           <p className="text-sm text-slate-500">{user?.email || 'No email available'}</p>
                         </div>
                       </div>

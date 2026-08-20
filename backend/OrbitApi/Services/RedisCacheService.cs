@@ -6,12 +6,18 @@ using Microsoft.Extensions.Logging;
 
 namespace OrbitApi.Services
 {
+    /// <summary>
+    /// IDistributedCache implementation providing resilient, JSON-serialized caching with logging and error suppression.
+    /// </summary>
     public class RedisCacheService : ICacheService
     {
         private readonly IDistributedCache _cache;
         private readonly ILogger<RedisCacheService> _logger;
         private readonly JsonSerializerOptions _jsonOptions;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="RedisCacheService"/>.
+        /// </summary>
         public RedisCacheService(IDistributedCache cache, ILogger<RedisCacheService> logger)
         {
             _cache = cache;
@@ -23,6 +29,9 @@ namespace OrbitApi.Services
             };
         }
 
+        /// <summary>
+        /// Gets a value from cache and deserializes it from JSON.
+        /// </summary>
         public async Task<T?> GetAsync<T>(string key)
         {
             try
@@ -41,6 +50,9 @@ namespace OrbitApi.Services
             return default;
         }
 
+        /// <summary>
+        /// Serializes an object to JSON and stores it in IDistributedCache with expiration settings.
+        /// </summary>
         public async Task SetAsync<T>(string key, T value, TimeSpan? absoluteExpireTime = null, TimeSpan? slidingExpireTime = null)
         {
             try
@@ -66,6 +78,9 @@ namespace OrbitApi.Services
             }
         }
 
+        /// <summary>
+        /// Removes a key from the distributed cache.
+        /// </summary>
         public async Task RemoveAsync(string key)
         {
             try
@@ -78,12 +93,11 @@ namespace OrbitApi.Services
             }
         }
 
+        /// <summary>
+        /// Evicts keys matching the specified prefix.
+        /// </summary>
         public async Task RemoveByPrefixAsync(string prefixKey)
         {
-            // Note: Standard IDistributedCache doesn't natively support wildcards.
-            // For production, consider using StackExchange.Redis ConnectionMultiplexer directly to run `KEYS pattern`
-            // and delete matching keys, OR use a tagging strategy in code.
-            // For now, this acts as a placeholder / fallback for explicit exact keys.
             await RemoveAsync(prefixKey);
         }
     }

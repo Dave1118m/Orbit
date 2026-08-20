@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { parseApiResponse } from '../utils/toastHelper';
 
 export default function AcceptInvite() {
   const [searchParams] = useSearchParams();
@@ -39,7 +40,7 @@ export default function AcceptInvite() {
           setMessage('Invitation accepted successfully! Redirecting to dashboard...');
           setTimeout(() => navigate('/dashboard'), 2000);
         } else {
-          const errText = await res.text();
+          const errText = await parseApiResponse(res);
           setStatus('error');
           setMessage(`Failed to accept invitation: ${errText}`);
         }

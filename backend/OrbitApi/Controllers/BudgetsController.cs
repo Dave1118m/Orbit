@@ -9,18 +9,26 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 
+using OrbitApi.Services;
+
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing organizational, project, and workspace budget hierarchies,
+    /// line item allocations, revision audits, approvals, return of unspent funds, and donor balancing.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
     public class BudgetsController : ControllerBase
     {
         private readonly OrbitDbContext _db;
+        private readonly ICurrencyService _currencyService;
 
-        public BudgetsController(OrbitDbContext db)
+        public BudgetsController(OrbitDbContext db, ICurrencyService currencyService)
         {
             _db = db;
+            _currencyService = currencyService;
         }
 
         private int? GetActiveOrganizationId()
@@ -42,7 +50,7 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id;
+            return firstOrg?.Id ?? 0;
         }
 
         private int? GetCurrentUserId()
@@ -72,7 +80,8 @@ namespace OrbitApi.Controllers
                 {
                     Id = l.Id,
                     BudgetId = l.BudgetId,
-                    Category = l.Category,
+                    CategoryId = l.CategoryId,
+                    CategoryName = l.FinancialCategory?.Name ?? "General Line Item",
                     Description = l.Description,
                     Amount = l.Amount
                 }).ToList() ?? new List<BudgetLineItemDto>()
@@ -91,7 +100,7 @@ namespace OrbitApi.Controllers
         private IQueryable<Budget> BudgetsWithIncludes(int orgId) =>
             _db.Budgets
                 .Where(b => b.OrganizationId == orgId)
-                .Include(b => b.LineItems)
+                .Include(b => b.LineItems).ThenInclude(l => l.FinancialCategory)
                 .Include(b => b.Organization)
                 .Include(b => b.Project)
                 .Include(b => b.Workspace)
@@ -99,34 +108,47 @@ namespace OrbitApi.Controllers
 
         private async Task<decimal> GetSpentAsync(Budget b)
         {
+            var baseCurrency = b.Currency ?? "USD";
+            List<Expense> expensesToSum = new List<Expense>();
+
             if (b.ProjectId.HasValue)
             {
-                return await _db.Expenses
+                expensesToSum = await _db.Expenses
                     .Where(e => e.ProjectId == b.ProjectId.Value && e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .SumAsync(e => e.Amount);
+                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
+                    .ToListAsync();
             }
             else if (b.WorkspaceId.HasValue)
             {
-                return await _db.Expenses
+                expensesToSum = await _db.Expenses
                     .Where(e => e.Project != null && e.Project.WorkspaceId == b.WorkspaceId.Value && e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .SumAsync(e => e.Amount);
+                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
+                    .ToListAsync();
             }
             else if (b.TaskId.HasValue)
             {
-                return await _db.Expenses
+                expensesToSum = await _db.Expenses
                     .Where(e => e.TaskId == b.TaskId.Value && e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .SumAsync(e => e.Amount);
+                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
+                    .ToListAsync();
             }
             else if (b.Level == BudgetLevel.Organization || (b.OrganizationId.HasValue && b.OrganizationId.Value > 0))
             {
                 var orgId = b.OrganizationId ?? 0;
-                return await _db.Expenses
+                expensesToSum = await _db.Expenses
                     .Where(e => ((e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == orgId) ||
                                 (e.BankAccount != null && e.BankAccount.OrganizationId == orgId)) &&
                                 e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .SumAsync(e => e.Amount);
+                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
+                    .ToListAsync();
             }
-            return 0;
+
+            decimal totalSpent = 0;
+            foreach (var e in expensesToSum)
+            {
+                totalSpent += await _currencyService.ConvertAsync(e.Amount, e.Currency, baseCurrency);
+            }
+            return totalSpent;
         }
 
         private async Task EnsureFiscalYearColumnExistsAsync()
@@ -140,6 +162,10 @@ namespace OrbitApi.Controllers
             catch { }
         }
 
+        /// <summary>
+        /// Retrieves all budgets in the active organization with real-time spend calculations.
+        /// </summary>
+        /// <returns>Collection of budget DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<BudgetDto>>> GetBudgets()
         {
@@ -154,6 +180,11 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Retrieves a single budget with allocated line items and spend totals.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <returns>Budget DTO.</returns>
         [HttpGet("{id}")]
         public async Task<ActionResult<BudgetDto>> GetBudget(int id)
         {
@@ -166,6 +197,11 @@ namespace OrbitApi.Controllers
             return Ok(MapToDto(budget, await GetSpentAsync(budget)));
         }
 
+        /// <summary>
+        /// Creates a new hierarchical budget record in Draft status.
+        /// </summary>
+        /// <param name="dto">Budget creation parameters.</param>
+        /// <returns>Created budget DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<BudgetDto>> CreateBudget(BudgetCreateDto dto)
         {
@@ -178,6 +214,9 @@ namespace OrbitApi.Controllers
 
             if (dto.TotalAmount <= 0)
                 return BadRequest(new { message = "Budget total amount must be strictly greater than zero." });
+
+            if (dto.Level == BudgetLevel.Project && !dto.ProjectId.HasValue)
+                return BadRequest(new { message = "Strict Validation: Project ID is required for a Project-level budget." });
 
             var budget = new Budget
             {
@@ -199,6 +238,12 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(GetBudget), new { id = budget.Id }, MapToDto(created));
         }
 
+        /// <summary>
+        /// Revises a budget ceiling and records an immutable audit log version.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <param name="dto">Revision parameters.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpPut("{id}")]
         public async Task<ActionResult> ReviseBudget(int id, [FromBody] BudgetReviseDto dto)
         {
@@ -300,6 +345,11 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Formally approves a budget, enforcing segregation of duties.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <returns>Approval confirmation.</returns>
         [HttpPost("{id}/approve")]
         public async Task<ActionResult> ApproveBudget(int id)
         {
@@ -307,6 +357,21 @@ namespace OrbitApi.Controllers
             if (orgId == null) return BadRequest("Organization context is required.");
             var userId = GetCurrentUserId();
             if (userId == null) return Unauthorized();
+
+            var userRoles = User.FindAll(System.Security.Claims.ClaimTypes.Role).Select(r => r.Value).ToList();
+            userRoles.AddRange(User.FindAll("role").Select(r => r.Value));
+
+            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted);
+            var isDbAuthorized = isOrgOwner
+                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && (a.Role.Name == RoleName.Owner || a.Role.Name == RoleName.Admin || a.Role.Name == RoleName.FinanceOfficer))
+                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && (m.Role.Name == RoleName.Owner || m.Role.Name == RoleName.Admin || m.Role.Name == RoleName.FinanceOfficer));
+
+            var isFinanceOfficerOrAdmin = isOrgOwner || isDbAuthorized || userRoles.Any(r => r == "Owner" || r == "Admin" || r == "SystemOwner" || r == "FinanceOfficer" || r == "Finance");
+
+            if (!isFinanceOfficerOrAdmin)
+            {
+                return BadRequest(new { message = "Segregation of Duties Enforcement: Only Finance Officers or Admins can approve budgets. The budget drafter cannot approve their own budget." });
+            }
 
             var budget = await _db.Budgets
                 .Include(b => b.Revisions)
@@ -337,6 +402,11 @@ namespace OrbitApi.Controllers
             return Ok(new { message = "Budget approved." });
         }
 
+        /// <summary>
+        /// Deletes a budget and cascades removal to its line items and revision logs.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteBudget(int id)
         {
@@ -365,6 +435,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Allocates a new line item under a budget ceiling.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <param name="dto">Line item details.</param>
+        /// <returns>Created budget line item DTO.</returns>
         [HttpPost("{id}/line-items")]
         public async Task<ActionResult> AddLineItem(int id, BudgetLineItemCreateDto dto)
         {
@@ -385,10 +461,17 @@ namespace OrbitApi.Controllers
                 return BadRequest($"Adding this line item (${dto.Amount:N2}) would exceed the total budget ceiling (${budget.TotalAmount:N2}). Current allocated: ${currentAllocated:N2}.");
             }
 
+            string? catName = null;
+            if (dto.CategoryId.HasValue)
+            {
+                var fc = await _db.FinancialCategories.FindAsync(dto.CategoryId.Value);
+                if (fc != null) catName = fc.Name;
+            }
+
             var lineItem = new BudgetLineItem
             {
                 BudgetId = id,
-                Category = dto.Category,
+                CategoryId = dto.CategoryId,
                 Description = dto.Description,
                 Amount = dto.Amount
             };
@@ -400,25 +483,48 @@ namespace OrbitApi.Controllers
             {
                 Id = lineItem.Id,
                 BudgetId = lineItem.BudgetId,
-                Category = lineItem.Category,
+                CategoryId = lineItem.CategoryId,
+                CategoryName = catName ?? "General Line Item",
                 Description = lineItem.Description,
                 Amount = lineItem.Amount
             });
         }
 
+        /// <summary>
+        /// Updates a budget line item category or allocated amount.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <param name="lineItemId">Line item ID.</param>
+        /// <param name="dto">Updated line item fields.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpPut("{id}/line-items/{lineItemId}")]
         public async Task<IActionResult> UpdateLineItem(int id, int lineItemId, BudgetLineItemCreateDto dto)
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
 
-            var budgetExists = await _db.Budgets.AnyAsync(b => b.Id == id && b.OrganizationId == orgId.Value);
-            if (!budgetExists) return NotFound();
+            var budget = await _db.Budgets.FirstOrDefaultAsync(b => b.Id == id && b.OrganizationId == orgId.Value);
+            if (budget == null) return NotFound();
+
+            if (dto.Amount <= 0)
+            {
+                return BadRequest("Line item amount must be strictly greater than zero.");
+            }
 
             var lineItem = await _db.BudgetLineItems.FirstOrDefaultAsync(l => l.Id == lineItemId && l.BudgetId == id);
             if (lineItem == null) return NotFound();
 
-            lineItem.Category = dto.Category;
+            // Calculate if the new amount exceeds the budget ceiling
+            var otherAllocated = await _db.BudgetLineItems
+                .Where(l => l.BudgetId == id && l.Id != lineItemId)
+                .SumAsync(l => l.Amount);
+
+            if (otherAllocated + dto.Amount > budget.TotalAmount)
+            {
+                return BadRequest($"Updating this line item (${dto.Amount:N2}) would exceed the total budget ceiling (${budget.TotalAmount:N2}). Other allocated: ${otherAllocated:N2}.");
+            }
+
+            lineItem.CategoryId = dto.CategoryId;
             lineItem.Description = dto.Description;
             lineItem.Amount = dto.Amount;
 
@@ -426,6 +532,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Removes a line item from a budget.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <param name="lineItemId">Line item ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}/line-items/{lineItemId}")]
         public async Task<IActionResult> DeleteLineItem(int id, int lineItemId)
         {
@@ -443,6 +555,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Lists historical version revisions and amendment logs for a budget.
+        /// </summary>
+        /// <param name="id">Budget ID.</param>
+        /// <returns>List of budget revision logs.</returns>
         [HttpGet("{id}/revisions")]
         public async Task<ActionResult<IEnumerable<BudgetRevisionLogDto>>> GetRevisions(int id)
         {
@@ -513,6 +630,11 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Exports a complete compliance and audit package for a project budget.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <returns>ZIP archive stream.</returns>
         [HttpGet("projects/{projectId}/export-audit-package")]
         public async Task<IActionResult> ExportAuditPackage(int projectId)
         {
@@ -550,9 +672,14 @@ namespace OrbitApi.Controllers
                         writer.WriteLine($"Project ID: {project.Id}");
                         writer.WriteLine($"Generated At: {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss} UTC");
                         writer.WriteLine($"Status: {project.Status}");
-                        writer.WriteLine($"Total Project Budget: ${budget?.TotalAmount.ToString("N2") ?? "0.00"}");
-                        writer.WriteLine($"Total Approved Expenses: ${expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Approved).Sum(e => e.Amount):N2}");
-                        writer.WriteLine($"Total Donor Contributions Allocated: ${donorAllocations.Sum(da => da.AllocatedAmount):N2}");
+                        writer.WriteLine($"Total Project Budget (USD eq.): {budget?.TotalAmount.ToString("N2") ?? "0.00"}");
+                        var approvedExpensesTotal = 0m;
+                        foreach (var e in expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Approved))
+                        {
+                            approvedExpensesTotal += await _currencyService.ConvertAsync(e.Amount, e.Currency, "USD");
+                        }
+                        writer.WriteLine($"Total Approved Expenses (USD eq.): {approvedExpensesTotal:N2}");
+                        writer.WriteLine($"Total Donor Contributions Allocated: {donorAllocations.Sum(da => da.AllocatedAmount):N2}");
                         writer.WriteLine($"=================================================");
                     }
 
@@ -564,7 +691,7 @@ namespace OrbitApi.Controllers
                             ProjectId = project.Id,
                             ProjectTitle = project.Title,
                             TotalBudget = budget?.TotalAmount,
-                            BudgetItems = budget?.LineItems.Select(l => new { l.Id, l.Category, l.Description, l.Amount }),
+                            BudgetItems = budget?.LineItems.Select(l => new { l.Id, CategoryId = l.CategoryId, CategoryName = l.FinancialCategory?.Name ?? "General Line Item", l.Description, l.Amount }),
                             VersionHistory = budget?.Revisions.Select(r => new { r.Id, r.VersionNo, r.DateApproved, r.Notes })
                         };
                         writer.Write(System.Text.Json.JsonSerializer.Serialize(auditBudgetData, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));

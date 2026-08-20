@@ -265,7 +265,7 @@ export default function InteractiveReportsDemo() {
               <span>1-Click Donor Export Ready</span>
             </div>
             <p className="text-[11px] text-slate-400">
-              Instantly export PDF/Excel reports formatted for USAID, EU, and institutional donors.
+              Instantly export PDF/Excel reports formatted for institutional donors.
             </p>
           </div>
         </div>

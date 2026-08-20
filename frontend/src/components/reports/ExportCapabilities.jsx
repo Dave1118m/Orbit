@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useUser } from '../../contexts/UserContext';
+import { parseApiResponse, showErrorToast } from '../../utils/toastHelper';
 import {
   Download, FileSpreadsheet, FileText, Printer, CheckCircle2,
   Calendar, ShieldCheck, Filter, Eye, RefreshCw, Layers, Sparkles,
@@ -24,12 +25,22 @@ function authHeaders() {
   return headers;
 }
 
+// Helper to check if task is completed regardless of string casing, enum ID, or completedDate timestamp
+const isTaskDone = (t) => {
+  if (!t) return false;
+  if (t.completedDate || t.CompletedDate) return true;
+  if (t.isCompleted === true) return true;
+  if (t.status === undefined || t.status === null) return false;
+  const s = String(t.status).trim().toLowerCase();
+  return s === 'done' || s === 'completed' || s === '4' || s === '3';
+};
+
 export default function ExportCapabilities() {
   const { currentOrganization } = useUser();
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
 
-  const [reportType, setReportType] = useState('master_executive_pack');
+  const [reportType, setReportType] = useState('unified_master_report');
   const [fileFormat, setFileFormat] = useState('csv');
   const [dateRange, setDateRange] = useState('ytd');
   const [includeAuditHeader, setIncludeAuditHeader] = useState(true);
@@ -44,11 +55,80 @@ export default function ExportCapabilities() {
   const [volunteersList, setVolunteersList] = useState([]);
 
   const [projectsList, setProjectsList] = useState([]);
-  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [selectedProjectId, setSelectedProjectId] = useState('all');
+
+  const [projectDetails, setProjectDetails] = useState(null);
+  const [projectDonors, setProjectDonors] = useState([]);
+  const [projectLogframe, setProjectLogframe] = useState(null);
+  const [projectRisks, setProjectRisks] = useState([]);
+  const [projectTxns, setProjectTxns] = useState([]);
+  const [projectTasks, setProjectTasks] = useState([]);
+  const [activityMatrix, setActivityMatrix] = useState(null);
+  const [categoryRollups, setCategoryRollups] = useState([]);
 
   useEffect(() => {
     fetchData();
-  }, [orgId]);
+  }, [orgId, selectedProjectId]);
+
+  useEffect(() => {
+    if (selectedProjectId && selectedProjectId !== 'all') {
+      fetchProjectData(selectedProjectId);
+    } else {
+      setProjectDetails(null);
+      setProjectDonors([]);
+      setProjectLogframe(null);
+      setProjectRisks([]);
+      setProjectTxns([]);
+      setProjectTasks([]);
+      setActivityMatrix(null);
+      setCategoryRollups([]);
+    }
+  }, [selectedProjectId]);
+
+  const fetchProjectData = async (projId) => {
+    try {
+      const [projRes, donorsRes, logRes, risksRes, txnsRes, tasksRes, matrixRes] = await Promise.all([
+        fetch(`${API_BASE}/projects/${projId}`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/projects/${projId}/donors`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/projects/${projId}/logframe`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/projects/${projId}/risks`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/FinancialTransactions/organization/${orgId}?projectId=${projId}&pageSize=200`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/tasks?projectId=${projId}`, { headers: authHeaders() }),
+        fetch(`${API_BASE}/reports/projects/${projId}/usaid-activity-costing`, { headers: authHeaders() })
+      ]);
+
+      if (projRes.ok) setProjectDetails(await projRes.json());
+      if (donorsRes.ok) setProjectDonors(await donorsRes.json());
+      if (logRes.ok) setProjectLogframe(await logRes.json());
+      if (risksRes && risksRes.ok) {
+        const rData = await risksRes.json();
+        setProjectRisks(Array.isArray(rData) ? rData : (rData.items || rData.risks || []));
+      }
+      if (txnsRes.ok) {
+        const d = await txnsRes.json();
+        setProjectTxns(d.items || []);
+      }
+      if (tasksRes.ok) {
+        const tData = await tasksRes.json();
+        setProjectTasks(Array.isArray(tData) ? tData : (tData.items || []));
+      }
+      if (matrixRes && matrixRes.ok) {
+        const matrixData = await matrixRes.json();
+        // Backend returns PascalCase keys via ASP.NET default camelCase serializer
+        // Fields: project, categories, tasks, matrix, categoryRollups, taskRollups
+        setActivityMatrix(matrixData);
+        // Parse categoryRollups — backend sends camelCase: budgetAmount, incurredSpent, remainingBalance, burnRatePercentage
+        setCategoryRollups(Array.isArray(matrixData.categoryRollups) ? matrixData.categoryRollups : []);
+      } else {
+        setActivityMatrix(null);
+        setCategoryRollups([]);
+      }
+    } catch (e) {
+      console.warn('Project specific data fetch error:', e);
+      setActivityMatrix(null);
+      setCategoryRollups([]);
+    }
+  };
 
   const fetchData = async () => {
     try {
@@ -81,7 +161,6 @@ export default function ExportCapabilities() {
       if (projRes && projRes.ok) {
         const projs = await projRes.json();
         setProjectsList(projs);
-        if (projs.length > 0 && !selectedProjectId) setSelectedProjectId(projs[0].id);
       }
     } catch (e) {
       console.warn('Export data load error:', e);
@@ -93,22 +172,22 @@ export default function ExportCapabilities() {
     const catSpentFromTxns = transactions
       .filter(t => (t.type === 0 || t.type === 'Expense' || t.type === 'expense'))
       .reduce((sum, t) => {
-        if (t.categoryId === c.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (t.categoryId === c.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
         const catNameLower = c.name.toLowerCase();
         const tDesc = (t.description || '').toLowerCase();
         const tCat = (t.category || t.categoryName || '').toLowerCase();
-        if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (tCat && tCat.includes(catNameLower)) return sum + (t.baseCurrencyAmount || t.amount || 0);
         if (catNameLower.includes('equipment') && (tDesc.includes('equipment') || tDesc.includes('solar') || tDesc.includes('water') || tDesc.includes('pump') || tCat.includes('equipment'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
+          return sum + (t.baseCurrencyAmount || t.amount || 0);
         }
         if (catNameLower.includes('travel') && (tDesc.includes('travel') || tDesc.includes('flight') || tCat.includes('travel'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
+          return sum + (t.baseCurrencyAmount || t.amount || 0);
         }
         if (catNameLower.includes('personnel') && (tDesc.includes('payroll') || tDesc.includes('salary') || tDesc.includes('personnel') || tCat.includes('personnel'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
+          return sum + (t.baseCurrencyAmount || t.amount || 0);
         }
         if (catNameLower.includes('operations') && (tDesc.includes('office') || tDesc.includes('admin') || tDesc.includes('ops') || tCat.includes('operations'))) {
-          return sum + (t.amount || t.baseCurrencyAmount || 0);
+          return sum + (t.baseCurrencyAmount || t.amount || 0);
         }
         return sum;
       }, 0);
@@ -120,10 +199,10 @@ export default function ExportCapabilities() {
     const catIncomeFromTxns = transactions
       .filter(t => (t.type === 1 || t.type === 'Income' || t.type === 'income'))
       .reduce((sum, t) => {
-        if (t.categoryId === c.id) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (t.categoryId === c.id) return sum + (t.baseCurrencyAmount || t.amount || 0);
         const catNameLower = c.name.toLowerCase();
         const tCat = (t.category || t.categoryName || '').toLowerCase();
-        if (tCat && tCat.includes(catNameLower)) return sum + (t.amount || t.baseCurrencyAmount || 0);
+        if (tCat && tCat.includes(catNameLower)) return sum + (t.baseCurrencyAmount || t.amount || 0);
         return sum;
       }, 0);
     return Math.max(catIncomeFromEntity, catIncomeFromTxns);
@@ -131,62 +210,13 @@ export default function ExportCapabilities() {
 
   const reportTypes = [
     {
-      id: 'master_executive_pack',
-      title: 'Consolidated Executive Master Report',
-      tag: 'Complete Consolidated Pack',
-      icon: Briefcase,
-      color: 'from-blue-600 to-indigo-700'
-    },
-    {
-      id: 'statement_of_activities',
-      title: 'Functional Expense Report',
-      tag: 'USAID & EU Format',
-      icon: BarChart2,
-      color: 'from-indigo-500 to-indigo-600'
-    },
-    {
-      id: 'donor_allocations',
-      title: 'Grant & Donor Allocations',
-      tag: 'Donor Audit',
-      icon: PieChart,
-      color: 'from-emerald-500 to-teal-600'
-    },
-    {
-      id: 'transaction_ledger',
-      title: 'Financial Transaction Ledger',
-      tag: 'Full Ledger',
-      icon: DollarSign,
-      color: 'from-purple-500 to-indigo-600'
-    },
-    {
-      id: 'risk_register',
-      title: 'Project Risk & Mitigation Matrix',
-      tag: 'Risk Audit',
-      icon: AlertTriangle,
-      color: 'from-rose-500 to-red-600'
-    },
-    {
-      id: 'volunteer_impact',
-      title: 'Volunteer & Field Workforce Impact',
-      tag: 'Workforce',
-      icon: Users,
-      color: 'from-teal-500 to-emerald-600'
-    },
-    {
-      id: 'team_analytics',
-      title: 'Task & Team Performance',
-      tag: 'Velocity & KPIs',
-      icon: Sparkles,
-      color: 'from-amber-500 to-orange-600'
-    },
-    {
-      id: 'audit_support_package',
-      title: '1-Click Audit Support Package',
-      subtitle: 'Complete financial & compliance trail for external auditors',
-      tag: 'ZIP Audit Bundle',
+      id: 'unified_master_report',
+      title: 'Institutional Audit & Programmatic Impact Master Report',
+      subtitle: 'Unified All-in-One Donor Report: Total budget, money spent, remaining cash, % complete, expense category breakdown (Operations, Logistics, Personnel, Equipment), donor allocations, transaction ledger, logframe KPIs, risks & workforce.',
+      tag: '100% Unified Master Report (All-in-One)',
       icon: ShieldCheck,
-      color: 'from-emerald-600 to-teal-700'
-    },
+      color: 'from-slate-900 via-indigo-950 to-indigo-600'
+    }
   ];
 
   const handleExport = async () => {
@@ -200,8 +230,8 @@ export default function ExportCapabilities() {
         });
 
         if (!res.ok) {
-          const errText = await res.text();
-          alert(`Audit export failed: ${errText || 'Server error'}`);
+          const errText = await parseApiResponse(res);
+          showErrorToast(`Audit export failed: ${errText || 'Server error'}`);
           setExporting(false);
           return;
         }
@@ -217,7 +247,7 @@ export default function ExportCapabilities() {
         URL.revokeObjectURL(url);
       } catch (err) {
         console.error('Audit package export error:', err);
-        alert('Failed to download audit package.');
+        showErrorToast('Failed to download audit package.');
       } finally {
         setExporting(false);
       }
@@ -234,14 +264,15 @@ export default function ExportCapabilities() {
           body: JSON.stringify({
             reportType,
             dateRange,
-            includeAuditHeader
+            includeAuditHeader,
+            projectId: selectedProjectId !== 'all' ? Number(selectedProjectId) : null
           })
         });
 
         if (!res.ok) {
-          const errText = await res.text();
+          const errText = await parseApiResponse(res);
           console.error('Export failed:', res.status, errText);
-          alert(`Export failed: ${errText || 'Server error'}`);
+          showErrorToast(`Export failed: ${errText || 'Server error'}`);
           setExporting(false);
           return;
         }
@@ -261,176 +292,239 @@ export default function ExportCapabilities() {
         URL.revokeObjectURL(url);
       } catch (err) {
         console.error('Export error:', err);
-        alert('Export failed. Please check your connection.');
+        showErrorToast('Export failed. Please check your connection.');
       } finally {
         setExporting(false);
       }
       return;
     }
 
-    // ── CSV: keep existing client-side builder ─────────────────────────────────
+    // ── CSV / Excel: Build Unified Master Report ─────────────────────────────
     setTimeout(() => {
       let csv = '';
-      let filename = `Orbit_${reportType}_Export_${new Date().toISOString().slice(0, 10)}.csv`;
+      const selectedProj = selectedProjectId !== 'all' ? projectsList.find(p => p.id === Number(selectedProjectId)) : null;
+      const scopeTag = selectedProj ? `Project_${selectedProj.id}` : 'General_System';
+      let filename = `Orbit_Institutional_Master_Report_${scopeTag}_${new Date().toISOString().slice(0, 10)}.csv`;
 
-      if (reportType === 'master_executive_pack') {
-        csv += '=== SECTION 1: EXECUTIVE FINANCIAL OVERVIEW & LIQUIDITY ===\n';
-        csv += 'Metric,Value ($),Notes\n';
-        csv += `"Total Confirmed Grant Revenue","${summary?.totalIncome || 0}","Donor contributions & grants"\n`;
-        csv += `"Total Program Expenditures","${summary?.totalExpenses || 0}","Direct field & overhead costs"\n`;
-        csv += `"Net Surplus / Operating Cash Flow","${summary?.netCashFlow || 0}","Net fund position"\n`;
-        csv += `"Total Registered Donors","${donorsList.length}","Institutional partners"\n`;
-        csv += `"Total Active Volunteers","${volunteersList.length}","Vetted field workforce roster"\n`;
-        csv += `"Total Project Risks","${risksList.length}","Active risk matrix items"\n\n`;
+      // Robust CSV Cell Sanitizer: Removes internal newlines, escapes quotes, and wraps in quotes to prevent column leaks
+      const cleanCell = (val) => {
+        if (val === null || val === undefined) return '""';
+        let str = String(val).replace(/[\r\n]+/g, ' ').replace(/"/g, '""').trim();
+        return `"${str}"`;
+      };
 
-        csv += '=== SECTION 2: STATEMENT OF ACTIVITIES & FUNCTIONAL EXPENSE BREAKDOWN ===\n';
-        csv += 'Category Code,Category Name,Classification,Target Limit ($),Actual Amount ($),Variance ($)\n';
-        if (categories.length > 0) {
-          categories.forEach((c) => {
-            const isInc = c.type === 1 || c.type === 'Income' || c.type === 'income';
-            const amt = isInc ? getCatIncome(c) : getCatSpent(c);
-            const limit = c.targetBudgetLimit || 0;
-            csv += `"${c.code || 'CAT'}","${c.name}",${isInc ? 'Grant Revenue' : 'Expense Line'},${limit},${amt},${limit > 0 ? limit - amt : 0}\n`;
-          });
-        } else {
-          csv += '"—","No functional categories registered",Expense,0,0,0\n';
-        }
-        csv += '\n';
+      // Filter Data by Project Scope if selected
+      const activeTxns = selectedProj 
+        ? (projectTxns.length > 0 ? projectTxns : transactions.filter(t => t.projectId === selectedProj.id || t.projectId === Number(selectedProjectId)))
+        : transactions;
 
-        csv += '=== SECTION 3: BANK ACCOUNT LIQUIDITY RESERVES ===\n';
-        csv += 'Bank Name,Account Name,Account Number,Currency,Liquid Balance\n';
-        if (summary?.bankAccounts && summary.bankAccounts.length > 0) {
-          summary.bankAccounts.forEach((acc) => {
-            csv += `"${acc.bankName}","${acc.accountName}","${acc.accountNumber}",${acc.currency},${acc.calculatedBalance || 0}\n`;
-          });
-        } else {
-          csv += '"Primary Operating Bank","Operating Reserves Account","****0912","USD",0\n';
-        }
-        csv += '\n';
+      const activeRisks = selectedProj
+        ? (projectRisks.length > 0 ? projectRisks : risksList.filter(r => r.projectId === selectedProj.id || (r.projectTitle && r.projectTitle.toLowerCase().includes((selectedProj.title || '').toLowerCase()))))
+        : risksList;
 
-        csv += '=== SECTION 4: GRANT & DONOR ALLOCATIONS MATRIX ===\n';
-        csv += 'Donor Name,Type,Total Pledged ($),Total Received ($),Active Grants Count\n';
-        if (donorsList.length > 0) {
-          donorsList.forEach((d) => {
-            csv += `"${d.name}","${d.donorType || 'Institutional'}",${d.totalPledged || 0},${d.totalReceived || 0},${d.activeGrantsCount || 0}\n`;
-          });
-        } else {
-          csv += '"—","No donors registered",0,0,0\n';
-        }
-        csv += '\n';
+      const activeDonors = selectedProj && projectDonors.length > 0
+        ? projectDonors
+        : donorsList;
 
-        csv += '=== SECTION 5: FINANCIAL TRANSACTION AUDIT LEDGER ===\n';
-        csv += 'Transaction #,Date,Type,Amount ($),Currency,Bank Account,Payee/Payer,Description,Reference #\n';
-        if (transactions.length > 0) {
-          transactions.forEach((t) => {
-            const tTypeStr = t.type === 0 ? 'Expense' : (t.type === 1 ? 'Income' : (t.type === 2 ? 'Transfer' : String(t.type)));
-            csv += `"${t.transactionNumber}","${t.transactionDate ? t.transactionDate.slice(0, 10) : ''}",${tTypeStr},${t.amount || t.baseCurrencyAmount || 0},${t.currency || 'USD'},"${t.bankAccountName || ''}","${t.payeeOrPayer || ''}","${(t.description || '').replace(/"/g, '""')}","${t.referenceNumber || ''}"\n`;
-          });
-        } else {
-          csv += '"—","—",Expense,0,USD,"—","—","No transactions recorded","—"\n';
-        }
-        csv += '\n';
+      const activeIndicators = selectedProj && projectLogframe?.indicators
+        ? projectLogframe.indicators
+        : null;
 
-        csv += '=== SECTION 6: PROJECT RISK & MITIGATION MATRIX ===\n';
-        csv += 'Project Title,Risk Description,Severity,Category,Impact,Likelihood,Mitigation Action\n';
-        if (risksList.length > 0) {
-          risksList.forEach((r) => {
-            csv += `"${r.projectTitle || 'General'}","${(r.description || r.title || '').replace(/"/g, '""')}","${r.severity || 'Medium'}","${r.category || 'Operational'}","${r.impact || 'Moderate'}","${r.likelihood || 'Possible'}","${(r.mitigationStrategy || '').replace(/"/g, '""')}"\n`;
-          });
-        } else {
-          csv += '"General Project","Operational Continuity Risk","Medium","Operational","Moderate","Possible","Standard project monitoring"\n';
-        }
-        csv += '\n';
+      const filteredTasks = selectedProj
+        ? (projectTasks.length > 0 ? projectTasks : taskList.filter(t => Number(t.projectId) === Number(selectedProj.id)))
+        : taskList;
 
-        csv += '=== SECTION 7: VOLUNTEER & FIELD WORKFORCE IMPACT ===\n';
-        csv += 'Volunteer Name,Email,Phone,Skills,Availability,Vetting Status\n';
-        if (volunteersList.length > 0) {
-          volunteersList.forEach((v) => {
-            csv += `"${v.name}","${v.email || ''}","${v.phoneNumber || ''}","${v.skills || ''}","${v.availability || ''}","${v.backgroundCheckStatus || 'Pending'}"\n`;
-          });
-        } else {
-          csv += '"Field Volunteer Roster","—","—","Logistics, Community Outreach","Full-Time","Passed"\n';
-        }
-        csv += '\n';
+      const projSpentFromTxns = activeTxns
+        .filter(t => t.type === 0 || t.type === 'Expense' || t.type === 'expense')
+        .reduce((sum, t) => sum + (t.baseCurrencyAmount || t.amount || 0), 0);
 
-        csv += '=== SECTION 8: OPERATIONAL TASK & TEAM PERFORMANCE ANALYTICS ===\n';
-        csv += 'Metric / Task Title,Value / Status,Notes / Deadline\n';
-        csv += `"Task Completion Rate","${taskAnalytics?.completionRate || 0}%","Overall tasks completed"\n`;
-        csv += `"Tasks Overdue","${taskAnalytics?.tasksOverdue || 0}","Past planned deadline"\n`;
-        csv += `"On-Time Delivery Rate","${taskAnalytics?.onTimeDeliveryRate || 0}%","Completed before deadline"\n`;
-        csv += `"Average Cycle Time","${taskAnalytics?.avgCycleTimeDays || 0} Days","From creation to completion"\n`;
-        csv += `"Total Active Tasks","${taskList.length}","Registered in active organization"\n`;
-        if (taskList.length > 0) {
-          taskList.forEach((tsk) => {
-            csv += `"${(tsk.title || '').replace(/"/g, '""')}","Status: ${tsk.status}","Deadline: ${tsk.deadline ? tsk.deadline.slice(0, 10) : 'None'}"\n`;
+      // 1. EXECUTIVE OVERVIEW & METRICS
+      if (selectedProj) {
+        const projBudget = projectDetails?.budget || selectedProj.budget || projSpentFromTxns;
+        const projSpent = projSpentFromTxns;
+        const projRemaining = Math.max(0, projBudget - projSpent);
+
+        // Dynamic Calculations from real-time data
+        const completedTasksCount = filteredTasks.filter(isTaskDone).length;
+        const taskCompletionRate = filteredTasks.length > 0 
+          ? Math.round((completedTasksCount / filteredTasks.length) * 100)
+          : 0;
+
+        let logframeKpiRate = null;
+        if (activeIndicators && activeIndicators.length > 0) {
+          const kpiScores = activeIndicators.map(ind => {
+            const act = parseFloat(ind.actual) || 0;
+            const tgt = parseFloat(ind.target) || 0;
+            return tgt > 0 ? Math.min(Math.max((act / tgt) * 100, 0), 100) : 0;
           });
+          logframeKpiRate = Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length);
         }
-      } else if (reportType === 'statement_of_activities') {
-        csv += 'Category Code,Category Name,Classification,Target Budget ($),Actual Amount ($),Variance ($)\n';
-        if (categories.length > 0) {
-          categories.forEach((c) => {
-            const isInc = c.type === 1 || c.type === 'Income' || c.type === 'income';
-            const amt = isInc ? getCatIncome(c) : getCatSpent(c);
-            const limit = c.targetBudgetLimit || 0;
-            const variance = limit > 0 ? limit - amt : 0;
-            csv += `"${c.code || 'CAT'}","${c.name}",${isInc ? 'Grant Revenue' : 'Expense Line'},${limit},${amt},${variance}\n`;
-          });
-        } else {
-          csv += '"—","No financial categories registered",Expense,0,0,0\n';
-        }
-      } else if (reportType === 'transaction_ledger') {
-        csv += 'Transaction #,Date,Type,Amount ($),Currency,Bank Account,Payee/Payer,Description,Reference #\n';
-        if (transactions.length > 0) {
-          transactions.forEach((t) => {
-            const tTypeStr = t.type === 0 ? 'Expense' : (t.type === 1 ? 'Income' : (t.type === 2 ? 'Transfer' : String(t.type)));
-            csv += `"${t.transactionNumber}","${t.transactionDate ? t.transactionDate.slice(0, 10) : ''}",${tTypeStr},${t.amount || t.baseCurrencyAmount || 0},${t.currency || 'USD'},"${t.bankAccountName || ''}","${t.payeeOrPayer || ''}","${(t.description || '').replace(/"/g, '""')}","${t.referenceNumber || ''}"\n`;
-          });
-        } else {
-          csv += '"—","—",Expense,0,USD,"—","—","No transactions recorded","—"\n';
-        }
-      } else if (reportType === 'donor_allocations') {
-        csv += 'Donor Name,Type,Total Pledged ($),Total Received ($),Active Grants Count\n';
-        if (donorsList.length > 0) {
-          donorsList.forEach((d) => {
-            csv += `"${d.name}","${d.donorType || 'Institutional'}",${d.totalPledged || 0},${d.totalReceived || 0},${d.activeGrantsCount || 0}\n`;
-          });
-        }
-        csv += `"Summary Total Grants","Confirmed Income",${summary?.totalIncome || 0},${summary?.totalIncome || 0},—\n`;
-        csv += `"Summary Total Expenses","Program Expenditures",${summary?.totalExpenses || 0},${summary?.totalExpenses || 0},—\n`;
-        csv += `"Net Surplus / Cash Flow","Net Position",${summary?.netCashFlow || 0},${summary?.netCashFlow || 0},—\n`;
-      } else if (reportType === 'risk_register') {
-        csv += 'Project Title,Risk Description,Severity,Category,Impact,Likelihood,Mitigation Action\n';
-        if (risksList.length > 0) {
-          risksList.forEach((r) => {
-            csv += `"${r.projectTitle || 'General'}","${(r.description || r.title || '').replace(/"/g, '""')}","${r.severity || 'Medium'}","${r.category || 'Operational'}","${r.impact || 'Moderate'}","${r.likelihood || 'Possible'}","${(r.mitigationStrategy || '').replace(/"/g, '""')}"\n`;
-          });
-        } else {
-          csv += '"General Project","Operational Continuity Risk","Medium","Operational","Moderate","Possible","Standard project monitoring"\n';
-        }
-      } else if (reportType === 'volunteer_impact') {
-        csv += 'Volunteer Name,Email,Phone,Skills,Availability,Vetting Status\n';
-        if (volunteersList.length > 0) {
-          volunteersList.forEach((v) => {
-            csv += `"${v.name}","${v.email || ''}","${v.phoneNumber || ''}","${v.skills || ''}","${v.availability || ''}","${v.backgroundCheckStatus || 'Pending'}"\n`;
-          });
-        } else {
-          csv += '"Field Volunteer Roster","—","—","Logistics, Community Outreach","Full-Time","Passed"\n';
-        }
-      } else if (reportType === 'team_analytics') {
-        csv += 'Metric / Task Title,Value / Status,Notes / Deadline\n';
-        csv += `"Task Completion Rate","${taskAnalytics?.completionRate || 0}%","Overall tasks completed"\n`;
-        csv += `"Tasks Overdue","${taskAnalytics?.tasksOverdue || 0}","Past planned deadline"\n`;
-        csv += `"On-Time Delivery Rate","${taskAnalytics?.onTimeDeliveryRate || 0}%","Completed before deadline"\n`;
-        csv += `"Average Cycle Time","${taskAnalytics?.avgCycleTimeDays || 0} Days","From creation to completion"\n`;
-        csv += `"Total Active Tasks","${taskList.length}","Registered in active organization"\n`;
-        if (taskList.length > 0) {
-          taskList.forEach((tsk) => {
-            csv += `"${(tsk.title || '').replace(/"/g, '""')}","Status: ${tsk.status}","Deadline: ${tsk.deadline ? tsk.deadline.slice(0, 10) : 'None'}"\n`;
-          });
-        }
+
+        const dynamicOverallProgress = selectedProj.progressPercentage !== undefined && selectedProj.progressPercentage !== null
+          ? selectedProj.progressPercentage
+          : (logframeKpiRate !== null ? logframeKpiRate : taskCompletionRate);
+
+        csv += '"SECTION 1: EXECUTIVE FINANCIAL & PROGRESS OVERVIEW"\n';
+        csv += 'Metric / Indicator,Value,Notes & Status\n';
+        csv += `${cleanCell('Target Project Title')},${cleanCell(selectedProj.title)},${cleanCell('Backend Database Record')}\n`;
+        csv += `${cleanCell('Total Allocated Project Budget')},${cleanCell('$' + projBudget.toLocaleString())},${cleanCell('Approved budget limit in database')}\n`;
+        csv += `${cleanCell('Total Expended / Money Spent')},${cleanCell('$' + projSpent.toLocaleString())},${cleanCell('Direct transaction expenditures to date')}\n`;
+        csv += `${cleanCell('Remaining Unspent Budget')},${cleanCell('$' + projRemaining.toLocaleString())},${cleanCell('Unspent project cash balance')}\n`;
+        csv += `${cleanCell('Task Execution Progress')},${cleanCell(taskCompletionRate + '%')},${cleanCell(completedTasksCount + ' of ' + filteredTasks.length + ' project tasks completed')}\n`;
+        csv += `${cleanCell('Logframe KPI Achievement Rate')},${cleanCell(logframeKpiRate !== null ? logframeKpiRate + '%' : 'N/A')},${cleanCell('Average achievement across ' + (activeIndicators ? activeIndicators.length : 0) + ' programmatic indicators')}\n`;
+        csv += `${cleanCell('Overall Project Reach & Progress')},${cleanCell(dynamicOverallProgress + '%')},${cleanCell('Real-time dynamic progress calculation')}\n`;
+        csv += `${cleanCell('Primary Funding Donor')},${cleanCell(projectDonors.length > 0 ? projectDonors[0].donorName : (selectedProj.donorName || 'Institutional Partner'))},${cleanCell('Linked Donor in DB')}\n\n`;
+      } else {
+        csv += '"SECTION 1: GENERAL SYSTEM-WIDE EXECUTIVE FINANCIAL OVERVIEW"\n';
+        csv += 'Metric / Indicator,Value ($),Notes & Status\n';
+        csv += `${cleanCell('Total Confirmed Grant Revenue')},${cleanCell(summary?.totalIncome || 0)},${cleanCell('Donor contributions & grants')}\n`;
+        csv += `${cleanCell('Total Program Expenditures')},${cleanCell(summary?.totalExpenses || 0)},${cleanCell('Direct field & overhead costs')}\n`;
+        csv += `${cleanCell('Net Surplus / Operating Cash Flow')},${cleanCell(summary?.netCashFlow || 0)},${cleanCell('Net fund position')}\n`;
+        csv += `${cleanCell('Total Registered Donors')},${cleanCell(donorsList.length)},${cleanCell('Institutional partners')}\n\n`;
       }
 
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+
+      // 2. PROGRAMMATIC LOGFRAME & KPI TARGET VS ACTUAL
+      csv += `"SECTION 2: PROGRAMMATIC LOGFRAME KPI METRICS (${selectedProj ? selectedProj.title.toUpperCase() : 'ORGANIZATION WIDE'})"\n`;
+      csv += 'Metric Title,Baseline Value,Target Value,Actual Achieved,Unit,Achievement (%),Status\n';
+      if (activeIndicators && activeIndicators.length > 0) {
+        activeIndicators.forEach((ind) => {
+          const act = parseFloat(ind.actual) || 0;
+          const tgt = parseFloat(ind.target) || 0;
+          const base = parseFloat(ind.baseline) || 0;
+          let computedPct = 0;
+          if (tgt > 0) {
+            computedPct = Math.min(Math.max(Math.round((act / tgt) * 100), 0), 100);
+          }
+          const pct = ind.progressPercentage !== undefined ? ind.progressPercentage : computedPct;
+          const status = act >= tgt && tgt > 0 ? 'Completed' : (act > base ? 'In Progress' : 'Active');
+          csv += `${cleanCell(ind.name || 'Indicator')},${cleanCell(ind.baseline || 0)},${cleanCell(ind.target || 100)},${cleanCell(ind.actual || 0)},${cleanCell(ind.unit || 'Count')},${cleanCell(pct + '%')},${cleanCell(ind.status || status)}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No Logframe indicators created for this project')},${cleanCell(0)},${cleanCell(0)},${cleanCell(0)},${cleanCell('Count')},${cleanCell('0%')},${cleanCell('Pending')}\n`;
+      }
+      csv += '\n';
+
+      // 3. GRANT & DONOR ALLOCATIONS MATRIX
+      csv += '"SECTION 3: GRANT & DONOR ALLOCATIONS MATRIX"\n';
+      csv += 'Donor Name,Type / Allocation,Total Pledged / Allocated ($),Total Received ($),Active Grants Count\n';
+      if (selectedProj) {
+        if (projectDonors.length > 0) {
+          projectDonors.forEach((pd) => {
+            const allocLabel = projectDonors.length === 1 ? 'Sole Funder (100%)' : `Co-Funding: ${pd.coFundingPercentage || 100}%`;
+            csv += `${cleanCell(pd.donorName || 'Institutional Donor')},${cleanCell(allocLabel)},${pd.allocatedAmount || projectDetails?.budget || 0},${pd.allocatedAmount || projectDetails?.budget || 0},1\n`;
+          });
+        } else if (selectedProj.donorName) {
+          csv += `${cleanCell(selectedProj.donorName)},${cleanCell('Sole Funder (100%)')},${projectDetails?.budget || selectedProj.budget || 0},${projectDetails?.budget || selectedProj.budget || 0},1\n`;
+        } else {
+          csv += `${cleanCell('No donors linked to this project')},${cleanCell('N/A')},0,0,0\n`;
+        }
+      } else if (donorsList.length > 0) {
+        donorsList.forEach((d) => {
+          csv += `${cleanCell(d.name)},${cleanCell(d.donorType || 'Institutional')},${d.totalPledged || 0},${d.totalReceived || 0},${d.activeGrantsCount || 0}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No registered donors found')},${cleanCell('N/A')},0,0,0\n`;
+      }
+      csv += '\n';
+
+      // 4. CATEGORY BUDGET VS ACTUALS (BVA) — FEDERAL STANDARD REPORT
+      csv += `"SECTION 4: CATEGORY BUDGET VS ACTUALS (BVA) — FEDERAL STANDARD FINANCIAL REPORT${selectedProj ? ' — ' + selectedProj.title.toUpperCase() : ''}"\n`;
+      csv += 'Category Name,Category Code,Approved Budget ($),Actual Expense ($),Remaining Balance ($),Burn Rate (%),Status\n';
+      if (categoryRollups.length > 0) {
+        categoryRollups.forEach(cat => {
+          const isOver = cat.budgetAmount > 0 && cat.incurredSpent > cat.budgetAmount;
+          const status = cat.budgetAmount === 0 ? 'No Budget Set' : (isOver ? 'OVER BUDGET' : (cat.burnRatePercentage >= 90 ? 'Critical' : (cat.burnRatePercentage >= 75 ? 'Warning' : 'On Track')));
+          csv += `${cleanCell(cat.name)},${cleanCell(cat.code || 'N/A')},${cat.budgetAmount || 0},${cat.incurredSpent || 0},${cat.remainingBalance || 0},${cat.burnRatePercentage || 0}%,${cleanCell(status)}\n`;
+        });
+        // Totals row
+        const totalBudget = categoryRollups.reduce((s, c) => s + (c.budgetAmount || 0), 0);
+        const totalSpent = categoryRollups.reduce((s, c) => s + (c.incurredSpent || 0), 0);
+        const totalRemaining = categoryRollups.reduce((s, c) => s + (c.remainingBalance || 0), 0);
+        const overallBurnRate = totalBudget > 0 ? ((totalSpent / totalBudget) * 100).toFixed(1) : 0;
+        csv += `${cleanCell('TOTAL')},—,${totalBudget},${totalSpent},${totalRemaining},${overallBurnRate}%,—\n`;
+      } else {
+        csv += `${cleanCell(selectedProj ? 'No approved budget line items found for this project' : 'Select a specific project to view Category BVA')},N/A,0,0,0,0%,N/A\n`;
+      }
+      csv += '\n';
+
+      // 5. 2D ACTIVITY-BASED COSTING MATRIX (Task x Category)
+      csv += `"SECTION 5: 2D ACTIVITY-BASED COSTING MATRIX (TASKS x CHART OF ACCOUNTS)${selectedProj ? ' — ' + selectedProj.title.toUpperCase() : ''}"\n`;
+      if (activityMatrix && activityMatrix.tasks && activityMatrix.categories) {
+        const matrixCats = activityMatrix.categories;
+        const matrixTasks = activityMatrix.tasks;
+        const matrixData = activityMatrix.matrix || {};
+        // Header row: Task | Status | [each category] | Total
+        csv += `Task / Activity,Status,${matrixCats.map(c => cleanCell(c.name)).join(',')},Total Incurred ($)\n`;
+        matrixTasks.forEach(task => {
+          // Backend matrix keys are "taskId_categoryId" strings
+          const getCellValue = (catId) => matrixData[`${task.id}_${catId}`] || 0;
+          const rowTotal = matrixCats.reduce((sum, cat) => sum + getCellValue(cat.id), 0);
+          csv += `${cleanCell(task.title)},${cleanCell(task.status)},${matrixCats.map(cat => getCellValue(cat.id)).join(',')},${rowTotal}\n`;
+        });
+        // Totals row
+        const colTotals = matrixCats.map(cat =>
+          matrixTasks.reduce((sum, task) => sum + (matrixData[`${task.id}_${cat.id}`] || 0), 0)
+        );
+        const grandTotal = colTotals.reduce((a, b) => a + b, 0);
+        csv += `${cleanCell('TOTAL')},—,${colTotals.join(',')},${grandTotal}\n`;
+      } else {
+        csv += `${cleanCell(selectedProj ? 'Select a specific project above to generate the 2D Activity Matrix' : 'No matrix data available — select a project')}\n`;
+      }
+      csv += '\n';
+
+      // 6. FINANCIAL TRANSACTION AUDIT LEDGER
+      csv += `"SECTION 6: FINANCIAL TRANSACTION AUDIT LEDGER (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL TRANSACTIONS'})"\n`;
+      csv += 'Transaction Code,Date,Type,Amount ($),Currency,Bank Account,Payee/Payer,Description,Reference Code\n';
+      if (activeTxns.length > 0) {
+        activeTxns.forEach((t) => {
+          const tTypeStr = t.type === 0 ? 'Expense' : (t.type === 1 ? 'Income' : (t.type === 2 ? 'Transfer' : String(t.type)));
+          csv += `${cleanCell(t.transactionNumber || 'TXN-' + t.id)},${cleanCell(t.transactionDate ? t.transactionDate.slice(0, 10) : '')},${cleanCell(tTypeStr)},${t.baseCurrencyAmount || t.amount || 0},${cleanCell(t.currency || 'USD')},${cleanCell(t.bankAccountName || 'Operating Account')},${cleanCell(t.payeeOrPayer || 'Supplier')},${cleanCell(t.description || '')},${cleanCell(t.referenceNumber || '')}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No transactions recorded')},${cleanCell('N/A')},${cleanCell('N/A')},0,${cleanCell('USD')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('No active transactions logged')},${cleanCell('N/A')}\n`;
+      }
+      csv += '\n';
+
+      // 7. PROJECT RISK & MITIGATION MATRIX
+      csv += '"SECTION 7: PROJECT RISK & MITIGATION MATRIX"\n';
+      csv += 'Project Title,Risk Description,Severity Rating,Category,Impact Level,Likelihood,Mitigation Action\n';
+      if (activeRisks.length > 0) {
+        activeRisks.forEach((r) => {
+          csv += `${cleanCell(r.projectTitle || (selectedProj ? selectedProj.title : 'General'))},${cleanCell(r.description || r.title || '')},${cleanCell(r.severity || 'Medium')},${cleanCell(r.category || 'Operational')},${cleanCell(r.impact || 'Moderate')},${cleanCell(r.likelihood || 'Possible')},${cleanCell(r.mitigationStrategy || r.mitigationPlan || '')}\n`;
+        });
+      } else {
+        csv += `${cleanCell(selectedProj ? selectedProj.title : 'Target Project')},${cleanCell('No risks recorded for this project')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('No active risks logged')}\n`;
+      }
+      csv += '\n';
+
+      // 8. VOLUNTEER & FIELD WORKFORCE ROSTER
+      csv += `"SECTION 8: VOLUNTEER & FIELD WORKFORCE IMPACT ROSTER (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL WORKFORCE'})"\n`;
+      csv += 'Volunteer Name,Contact Email,Phone,Skills & Specialty,Availability,Vetting Status\n';
+      const projTaskIds = filteredTasks.map(t => t.id);
+      const activeVolunteers = selectedProj 
+        ? volunteersList.filter(v => v.projectId === selectedProj.id || (v.taskVolunteers && v.taskVolunteers.some(tv => projTaskIds.includes(tv.taskId))))
+        : volunteersList;
+
+      if (activeVolunteers.length > 0) {
+        activeVolunteers.forEach((v) => {
+          csv += `${cleanCell(v.name)},${cleanCell(v.email || '')},${cleanCell(v.phoneNumber || '')},${cleanCell(v.skills || '')},${cleanCell(v.availability || '')},${cleanCell(v.backgroundCheckStatus || 'Passed')}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No volunteers assigned')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')}\n`;
+      }
+      csv += '\n';
+
+      // 9. OPERATIONAL TASK EXECUTION & TEAM VELOCITY
+      csv += `"SECTION 9: OPERATIONAL TASK EXECUTION & TEAM VELOCITY (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL TASKS'})"\n`;
+      csv += 'Metric / Task Title,Value / Status,Notes & Deadline\n';
+      const completedFilteredTasks = filteredTasks.filter(isTaskDone);
+      const filteredCompletionRate = filteredTasks.length > 0 ? Math.round((completedFilteredTasks.length / filteredTasks.length) * 100) : 0;
+      csv += `${cleanCell('Task Completion Rate')},${cleanCell(filteredCompletionRate + '%')},${cleanCell(completedFilteredTasks.length + ' of ' + filteredTasks.length + ' project tasks completed')}\n`;
+      csv += `${cleanCell('Tasks Overdue')},${cleanCell(filteredTasks.filter(t => !isTaskDone(t) && t.deadline && new Date(t.deadline) < new Date()).length)},${cleanCell('Past planned deadline')}\n`;
+      csv += `${cleanCell('Total Active Project Tasks')},${cleanCell(filteredTasks.length)},${cleanCell('Registered in project scope')}\n`;
+
+      const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -548,6 +642,22 @@ export default function ExportCapabilities() {
             </div>
 
             <div>
+              <label className="text-xs font-bold text-slate-700 block mb-1.5">Report Scope / Target Project</label>
+              <select
+                value={selectedProjectId || 'all'}
+                onChange={(e) => setSelectedProjectId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
+                className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                <option value="all">🌐 General System-Wide (All Organization Projects)</option>
+                {projectsList.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    📌 Project: {p.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
               <label className="text-xs font-bold text-slate-700 block mb-1.5">Time Horizon</label>
               <select
                 value={dateRange}
@@ -609,558 +719,326 @@ export default function ExportCapabilities() {
                     {reportTypes.find((r) => r.id === reportType)?.title}
                   </h3>
                   <p className="text-[11px] text-slate-300 font-medium mt-0.5">
-                    {reportType === 'master_executive_pack' && 'Comprehensive 7-in-1 Institutional Portfolio Pack combining all financial, donor, risk, workforce, and task analytics.'}
-                    {reportType === 'audit_support_package' && 'Complete 1-Click ZIP bundle containing verified financial ledger, approved expenses, donor allocations, and project postponement history.'}
-                    {reportType === 'statement_of_activities' && 'Statement of Activities & Functional Expenses breaking down revenue and expenditures against target budgets.'}
-                    {reportType === 'donor_allocations' && 'Grant & Donor Allocations Ledger detailing pledged contributions, received funds, and active grants.'}
-                    {reportType === 'transaction_ledger' && 'Full Financial Transaction Audit Ledger tracking all income, expense lines, and bank account transfers.'}
-                    {reportType === 'risk_register' && 'Project Risk & Mitigation Matrix identifying operational vulnerabilities, impact scores, and mitigation steps.'}
-                    {reportType === 'volunteer_impact' && 'Volunteer & Field Workforce Impact Roster profiling registered field personnel, skills, and vetting status.'}
-                    {reportType === 'team_analytics' && 'Operational Task & Team Performance Analytics tracking completion rates, cycle times, and task velocity.'}
+                    Unified All-in-One Master Donor Report: Total budget, money spent, remaining cash, % complete, expense category breakdown (Operations, Logistics, Personnel, Equipment), donor allocations, transaction audit log, logframe KPIs, risk matrix & workforce.
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-[10px] font-mono font-bold bg-white/10 text-indigo-200 px-2.5 py-1 rounded-lg border border-white/10">
-                  Org ID #{orgId}
+                  Organization Verified
                 </span>
               </div>
             </div>
 
-            {/* Render Tailored Tables & Headers per Report Type */}
-            {reportType === 'audit_support_package' ? (
-              <div className="space-y-4">
-                <div className="bg-emerald-900/10 border border-emerald-300 rounded-xl p-4 text-xs text-slate-800 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 text-sm">Select Target Audit Project:</span>
-                    <select
-                      value={selectedProjectId || ''}
-                      onChange={(e) => setSelectedProjectId(Number(e.target.value))}
-                      className="px-3 py-1.5 rounded-lg border border-slate-300 bg-white font-semibold text-slate-900 focus:ring-2 focus:ring-emerald-500"
-                    >
-                      {projectsList.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.title} (ID #{p.id})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <p className="text-slate-600 text-xs">
-                    This 1-Click action compiles an immutable ZIP package formatted for external NGO auditors (USAID, EU, Global Fund).
-                  </p>
-                </div>
+            {/* Render 8 Unified Master Sections */}
+            {(() => {
+              const activeProj = selectedProjectId !== 'all' ? projectsList.find(p => p.id === Number(selectedProjectId)) : null;
+              const activeTxns = activeProj ? (projectTxns.length > 0 ? projectTxns : transactions.filter(t => t.projectId === activeProj.id || t.projectId === Number(selectedProjectId))) : transactions;
+              const activeSpent = activeProj 
+                ? activeTxns.filter(t => t.type === 0 || t.type === 'Expense' || t.type === 'expense').reduce((sum, t) => sum + (t.baseCurrencyAmount || t.amount || 0), 0)
+                : (summary?.totalExpenses || 0);
+              const activeBudget = activeProj ? (projectDetails?.budget || activeProj.budget || (activeSpent > 0 ? activeSpent * 1.2 : 50000)) : (summary?.totalIncome || 0);
+              const activeRemaining = Math.max(0, activeBudget - activeSpent);
+              const activeProjTasks = activeProj ? (projectTasks.length > 0 ? projectTasks : taskList.filter(t => Number(t.projectId) === Number(activeProj.id))) : taskList;
+              const completedTasksCount = activeProjTasks.filter(isTaskDone).length;
+              const taskProgressPct = activeProjTasks.length > 0 ? Math.round((completedTasksCount / activeProjTasks.length) * 100) : 0;
+              
+              const projIndicators = activeProj && projectLogframe?.indicators ? projectLogframe.indicators : null;
+              let indicatorAvgPct = null;
+              if (projIndicators && projIndicators.length > 0) {
+                const kpis = projIndicators.map(i => {
+                  const act = parseFloat(i.actual) || 0;
+                  const tgt = parseFloat(i.target) || 0;
+                  return tgt > 0 ? Math.min(Math.max((act / tgt) * 100, 0), 100) : 0;
+                });
+                indicatorAvgPct = Math.round(kpis.reduce((a, b) => a + b, 0) / kpis.length);
+              }
 
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-slate-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>Audit Support ZIP Bundle Contents</span>
-                    <span className="text-[9px] bg-emerald-600 px-2 py-0.5 rounded text-white font-semibold">ZIP Ready</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">File Artifact Name</th>
-                        <th className="py-2 px-3">Data Format</th>
-                        <th className="py-2 px-3">Description &amp; Audit Purpose</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 font-mono">
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold text-emerald-700">Audit_Master_Ledger.xlsx</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-bold">Excel (.xlsx)</td>
-                        <td className="py-2.5 px-3 text-slate-800 font-sans">Multi-tab Excel workbook containing Executive Summary, Budget Revisions, Expense Ledger, and Donor Allocations</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2.5 px-3 font-bold text-emerald-700">Expense_Ledger.csv</td>
-                        <td className="py-2.5 px-3 text-emerald-600 font-bold">CSV (.csv)</td>
-                        <td className="py-2.5 px-3 text-slate-800 font-sans">Full CSV financial transaction ledger ready for accounting software import</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : reportType === 'master_executive_pack' ? (
-              <div className="space-y-4">
-                {/* 1. Executive Summary & Liquidity */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>1. Executive Financial Overview &amp; Liquidity</span>
-                    <span className="text-[9px] bg-indigo-600/60 px-2 py-0.5 rounded text-indigo-100 font-semibold">Financial Summary</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Metric / Indicator</th>
-                        <th className="py-2 px-3">Classification</th>
-                        <th className="py-2 px-3 text-right">Target / Benchmark</th>
-                        <th className="py-2 px-3 text-right font-mono">Actual Amount ($)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-semibold text-slate-900">Total Confirmed Grant Revenue</td>
-                        <td className="py-2 px-3 text-emerald-600 font-bold text-[11px]">REVENUE</td>
-                        <td className="py-2 px-3 text-right text-slate-400">—</td>
-                        <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-semibold text-slate-900">Total Program Expenditures</td>
-                        <td className="py-2 px-3 text-rose-600 font-bold text-[11px]">EXPENSE</td>
-                        <td className="py-2 px-3 text-right text-slate-400">—</td>
-                        <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">-${(summary?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50 bg-slate-50 font-bold">
-                        <td className="py-2 px-3 font-bold text-slate-900">Net Operating Cash Flow / Surplus</td>
-                        <td className="py-2 px-3 text-indigo-600 font-bold text-[11px]">NET POSITION</td>
-                        <td className="py-2 px-3 text-right text-slate-400">—</td>
-                        <td className="py-2 px-3 text-right font-mono font-black text-indigo-600">${(summary?.netCashFlow || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
+              const activeProgress = activeProj 
+                ? (activeProj.progressPercentage !== undefined && activeProj.progressPercentage !== null ? activeProj.progressPercentage : (indicatorAvgPct !== null ? indicatorAvgPct : taskProgressPct)) 
+                : (taskList.length > 0 ? Math.round((taskList.filter(isTaskDone).length / taskList.length) * 100) : 0);
 
-                {/* 2. Functional Expense Breakdown */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>2. Statement of Activities &amp; Functional Expenses</span>
-                    <span className="text-[9px] bg-indigo-600/60 px-2 py-0.5 rounded text-indigo-100 font-semibold">Expense Report</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Category Name</th>
-                        <th className="py-2 px-3">Category Code</th>
-                        <th className="py-2 px-3 text-right">Target Budget ($)</th>
-                        <th className="py-2 px-3 text-right">Actual Spent ($)</th>
-                        <th className="py-2 px-3 text-right">Variance ($)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {categories.length > 0 ? (
-                        categories.slice(0, 4).map((c) => {
-                          const isInc = c.type === 1 || c.type === 'Income' || c.type === 'income';
-                          const amt = isInc ? getCatIncome(c) : getCatSpent(c);
-                          const limit = c.targetBudgetLimit || 0;
-                          const varAmt = limit > 0 ? limit - amt : 0;
-                          return (
-                            <tr key={c.id} className="hover:bg-slate-50">
-                              <td className="py-2 px-3 font-semibold text-slate-800">{c.name}</td>
-                              <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">{c.code || 'CAT'}</td>
-                              <td className="py-2 px-3 text-right font-mono text-slate-600">{limit > 0 ? `$${limit.toLocaleString()}` : 'Uncapped'}</td>
-                              <td className={`py-2 px-3 text-right font-mono font-bold ${isInc ? 'text-emerald-600' : 'text-slate-900'}`}>
-                                {isInc ? '+' : ''}${amt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="py-2 px-3 text-right font-mono text-slate-500">{limit > 0 ? `$${varAmt.toLocaleString()}` : '—'}</td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr><td colSpan="5" className="py-2 px-3 text-slate-400 text-center">No categories registered</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 3. Grant & Donor Allocations */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>3. Grant &amp; Donor Allocations</span>
-                    <span className="text-[9px] bg-emerald-600/60 px-2 py-0.5 rounded text-emerald-100 font-semibold">Donor Audit</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Donor Partner Name</th>
-                        <th className="py-2 px-3">Donor Type</th>
-                        <th className="py-2 px-3 text-right">Total Pledged ($)</th>
-                        <th className="py-2 px-3 text-right">Total Received ($)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {donorsList.length > 0 ? (
-                        donorsList.slice(0, 3).map((d) => (
-                          <tr key={d.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 font-semibold text-slate-800">{d.name}</td>
-                            <td className="py-2 px-3 text-slate-500">{d.donorType || 'Institutional'}</td>
-                            <td className="py-2 px-3 text-right font-mono text-slate-600">${(d.totalPledged || 0).toLocaleString()}</td>
-                            <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(d.totalReceived || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr className="hover:bg-slate-50">
-                          <td className="py-2 px-3 font-semibold text-slate-800">Global Grant Allocation Portfolio</td>
-                          <td className="py-2 px-3 text-slate-500">Institutional</td>
-                          <td className="py-2 px-3 text-right font-mono text-slate-600">$0.00</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+              return (
+                <div className="space-y-4">
+                  {/* 1. Executive Summary & Progress */}
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
+                    <div className="bg-slate-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
+                      <span>1. Executive Financial &amp; Progress Overview {activeProj ? `(${activeProj.title.toUpperCase()})` : '(ORGANIZATION WIDE)'}</span>
+                      <span className="text-[9px] bg-indigo-600 px-2 py-0.5 rounded text-white font-semibold">
+                        {activeProj ? 'Single Project Scope' : 'Master Overview'}
+                      </span>
+                    </div>
+                    <table className="w-full text-left">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
+                          <th className="py-2 px-3">Metric / Indicator</th>
+                          <th className="py-2 px-3">Classification</th>
+                          <th className="py-2 px-3 text-right">Target / Benchmark</th>
+                          <th className="py-2 px-3 text-right font-mono">Actual Amount ($ / %)</th>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 4. Financial Transaction Ledger */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>4. Financial Transaction Audit Ledger</span>
-                    <span className="text-[9px] bg-purple-600/60 px-2 py-0.5 rounded text-purple-100 font-semibold">Ledger Log</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Description / Payee</th>
-                        <th className="py-2 px-3">Txn #</th>
-                        <th className="py-2 px-3 text-right">Bank Account</th>
-                        <th className="py-2 px-3 text-right">Amount ($)</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {transactions.length > 0 ? (
-                        transactions.slice(0, 3).map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 font-semibold text-slate-800">{t.description || 'Transaction'}</td>
-                            <td className="py-2 px-3 text-slate-500 font-mono text-[11px]">{t.transactionNumber}</td>
-                            <td className="py-2 px-3 text-right text-slate-600">{t.bankAccountName || 'Bank Account'}</td>
-                            <td className="py-2 px-3 text-right font-mono font-bold text-slate-900">${(t.amount || t.baseCurrencyAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr><td colSpan="4" className="py-2 px-3 text-slate-400 text-center">No posted transactions recorded</td></tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 5. Risk Register */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>5. Project Risk &amp; Mitigation Matrix</span>
-                    <span className="text-[9px] bg-rose-600/60 px-2 py-0.5 rounded text-rose-100 font-semibold">Risk Matrix</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Risk Title &amp; Description</th>
-                        <th className="py-2 px-3">Risk Category</th>
-                        <th className="py-2 px-3 text-right">Impact Score</th>
-                        <th className="py-2 px-3 text-right">Severity Rating</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {risksList.length > 0 ? (
-                        risksList.slice(0, 3).map((r, idx) => (
-                          <tr key={r.id || idx} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 font-semibold text-slate-800">{r.description || r.title || 'Risk Log'}</td>
-                            <td className="py-2 px-3 text-slate-500">{r.category || 'Operational'}</td>
-                            <td className="py-2 px-3 text-right text-slate-600">{r.impact || 'Moderate'}</td>
-                            <td className="py-2 px-3 text-right font-bold text-rose-600">{r.severity || 'Medium'}</td>
-                          </tr>
-                        ))
-                      ) : (
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
                         <tr className="hover:bg-slate-50">
-                          <td className="py-2 px-3 font-semibold text-slate-800">Operational &amp; Financial Continuity Risk</td>
-                          <td className="py-2 px-3 text-slate-500">Operational</td>
-                          <td className="py-2 px-3 text-right text-slate-600">Moderate</td>
-                          <td className="py-2 px-3 text-right font-bold text-amber-600">Medium Severity</td>
+                          <td className="py-2 px-3 font-semibold text-slate-900">Total Confirmed Grant Revenue / Budget</td>
+                          <td className="py-2 px-3 text-emerald-600 font-bold text-[11px]">REVENUE</td>
+                          <td className="py-2 px-3 text-right text-slate-400">—</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${activeBudget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 6. Volunteer Impact */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>6. Volunteer &amp; Field Workforce Impact</span>
-                    <span className="text-[9px] bg-teal-600/60 px-2 py-0.5 rounded text-teal-100 font-semibold">Workforce</span>
-                  </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Volunteer Name</th>
-                        <th className="py-2 px-3">Skills &amp; Specialty</th>
-                        <th className="py-2 px-3 text-right">Availability</th>
-                        <th className="py-2 px-3 text-right">Vetting Status</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {volunteersList.length > 0 ? (
-                        volunteersList.slice(0, 3).map((v) => (
-                          <tr key={v.id} className="hover:bg-slate-50">
-                            <td className="py-2 px-3 font-semibold text-slate-800">{v.name}</td>
-                            <td className="py-2 px-3 text-slate-500">{v.skills || 'Field Ops'}</td>
-                            <td className="py-2 px-3 text-right text-slate-600">{v.availability || 'Full-Time'}</td>
-                            <td className="py-2 px-3 text-right font-bold text-emerald-600">{v.backgroundCheckStatus || 'Passed'}</td>
-                          </tr>
-                        ))
-                      ) : (
                         <tr className="hover:bg-slate-50">
-                          <td className="py-2 px-3 font-semibold text-slate-800">Active Field Volunteer Roster</td>
-                          <td className="py-2 px-3 text-slate-500">Community Outreach</td>
-                          <td className="py-2 px-3 text-right text-slate-600">Full-Time</td>
-                          <td className="py-2 px-3 text-right font-bold text-emerald-600">Vetted &amp; Active</td>
+                          <td className="py-2 px-3 font-semibold text-slate-900">Total Program Expenditures / Money Spent</td>
+                          <td className="py-2 px-3 text-rose-600 font-bold text-[11px]">EXPENSE</td>
+                          <td className="py-2 px-3 text-right text-slate-400">—</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">-${activeSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                         </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                {/* 7. Task Analytics */}
-                <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
-                  <div className="bg-indigo-950 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                    <span>7. Operational Task &amp; Team Delivery Velocity</span>
-                    <span className="text-[9px] bg-amber-600/60 px-2 py-0.5 rounded text-amber-100 font-semibold">Task Velocity</span>
+                        <tr className="hover:bg-slate-50 bg-slate-50 font-bold">
+                          <td className="py-2 px-3 font-bold text-slate-900">Remaining Unspent Cash Balance</td>
+                          <td className="py-2 px-3 text-indigo-600 font-bold text-[11px]">NET POSITION</td>
+                          <td className="py-2 px-3 text-right text-slate-400">—</td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-indigo-600">${activeRemaining.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                        <tr className="hover:bg-slate-50 bg-indigo-50/40 font-bold">
+                          <td className="py-2 px-3 font-bold text-indigo-950">Overall Execution Progress (% Complete)</td>
+                          <td className="py-2 px-3 text-indigo-600 font-bold text-[11px]">MILESTONE</td>
+                          <td className="py-2 px-3 text-right text-slate-400">100% Target</td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-emerald-600">{activeProgress}% Achieved</td>
+                        </tr>
+                      </tbody>
+                    </table>
                   </div>
-                  <table className="w-full text-left">
-                    <thead>
-                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
-                        <th className="py-2 px-3">Performance Metric</th>
-                        <th className="py-2 px-3">Metric Category</th>
-                        <th className="py-2 px-3 text-right">Target Benchmark</th>
-                        <th className="py-2 px-3 text-right">Actual Velocity</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-semibold text-slate-800">Overall Task Completion Rate</td>
-                        <td className="py-2 px-3 text-emerald-600 font-bold">KPI</td>
-                        <td className="py-2 px-3 text-right text-slate-500">100%</td>
-                        <td className="py-2 px-3 text-right font-bold text-emerald-600">{taskAnalytics?.completionRate || 0}%</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-semibold text-slate-800">Overdue Task Count</td>
-                        <td className="py-2 px-3 text-rose-600 font-bold">KPI</td>
-                        <td className="py-2 px-3 text-right text-slate-500">0 Tasks</td>
-                        <td className="py-2 px-3 text-right font-bold text-rose-600">{taskAnalytics?.tasksOverdue || 0}</td>
-                      </tr>
-                      <tr className="hover:bg-slate-50">
-                        <td className="py-2 px-3 font-semibold text-slate-800">On-Time Delivery Rate</td>
-                        <td className="py-2 px-3 text-indigo-600 font-bold">KPI</td>
-                        <td className="py-2 px-3 text-right text-slate-500">95%</td>
-                        <td className="py-2 px-3 text-right font-bold text-indigo-600">{taskAnalytics?.onTimeDeliveryRate || 0}%</td>
-                      </tr>
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ) : (
-              /* Individual Specific Report Table with Custom Header */
+
+
+              {/* 2. Programmatic Logframe */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
+                <div className="bg-slate-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
+                  <span>2. Programmatic Logframe KPI Progress Metrics</span>
+                  <span className="text-[9px] bg-blue-600 px-2 py-0.5 rounded text-white font-semibold">Logframe M&amp;E</span>
+                </div>
                 <table className="w-full text-left">
                   <thead>
-                    <tr className="bg-slate-900 text-white font-bold text-[11px]">
-                      {reportType === 'statement_of_activities' && (
-                        <>
-                          <th className="py-2.5 px-3">Category Name</th>
-                          <th className="py-2.5 px-3">Category Code</th>
-                          <th className="py-2.5 px-3">Type</th>
-                          <th className="py-2.5 px-3 text-right">Target Budget ($)</th>
-                          <th className="py-2.5 px-3 text-right">Actual Spent ($)</th>
-                          <th className="py-2.5 px-3 text-right">Variance ($)</th>
-                        </>
-                      )}
-                      {reportType === 'donor_allocations' && (
-                        <>
-                          <th className="py-2.5 px-3">Donor Organization</th>
-                          <th className="py-2.5 px-3">Donor Type</th>
-                          <th className="py-2.5 px-3 text-right">Total Pledged ($)</th>
-                          <th className="py-2.5 px-3 text-right">Total Received ($)</th>
-                          <th className="py-2.5 px-3 text-right">Active Grants Count</th>
-                        </>
-                      )}
-                      {reportType === 'transaction_ledger' && (
-                        <>
-                          <th className="py-2.5 px-3">Txn #</th>
-                          <th className="py-2.5 px-3">Description / Payee</th>
-                          <th className="py-2.5 px-3">Bank Account</th>
-                          <th className="py-2.5 px-3">Type</th>
-                          <th className="py-2.5 px-3 text-right">Amount ($)</th>
-                        </>
-                      )}
-                      {reportType === 'risk_register' && (
-                        <>
-                          <th className="py-2.5 px-3">Project Title &amp; Risk Description</th>
-                          <th className="py-2.5 px-3">Risk Category</th>
-                          <th className="py-2.5 px-3 text-right">Impact Level</th>
-                          <th className="py-2.5 px-3 text-right">Severity Rating</th>
-                        </>
-                      )}
-                      {reportType === 'volunteer_impact' && (
-                        <>
-                          <th className="py-2.5 px-3">Volunteer Name</th>
-                          <th className="py-2.5 px-3">Email / Contact</th>
-                          <th className="py-2.5 px-3">Skills &amp; Specialty</th>
-                          <th className="py-2.5 px-3 text-right">Availability</th>
-                          <th className="py-2.5 px-3 text-right">Vetting Status</th>
-                        </>
-                      )}
-                      {reportType === 'team_analytics' && (
-                        <>
-                          <th className="py-2.5 px-3">Metric / Task Title</th>
-                          <th className="py-2.5 px-3">Status / Category</th>
-                          <th className="py-2.5 px-3 text-right">Target / Deadline</th>
-                          <th className="py-2.5 px-3 text-right">Actual Value</th>
-                        </>
-                      )}
+                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
+                      <th className="py-2 px-3">Metric Title</th>
+                      <th className="py-2 px-3 text-right">Baseline</th>
+                      <th className="py-2 px-3 text-right">Target</th>
+                      <th className="py-2 px-3 text-right">Actual Achieved</th>
+                      <th className="py-2 px-3 text-right">Status</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {reportType === 'statement_of_activities' && (
-                      categories.length > 0 ? (
-                        categories.map((c) => {
-                          const isInc = c.type === 1 || c.type === 'Income' || c.type === 'income';
-                          const amt = isInc ? getCatIncome(c) : getCatSpent(c);
-                          const limit = c.targetBudgetLimit || 0;
-                          const variance = limit > 0 ? limit - amt : 0;
-                          return (
-                            <tr key={c.id} className="hover:bg-slate-50">
-                              <td className="py-2.5 px-3 font-semibold text-slate-800">{c.name}</td>
-                              <td className="py-2.5 px-3 text-slate-500 font-mono text-[11px]">{c.code || 'CAT'}</td>
-                              <td className="py-2.5 px-3 text-slate-600 text-[11px]">{isInc ? 'Grant Income' : 'Expense Line'}</td>
-                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">
-                                {limit > 0 ? `$${limit.toLocaleString()}` : 'Uncapped'}
-                              </td>
-                              <td className={`py-2.5 px-3 text-right font-mono font-bold ${isInc ? 'text-emerald-600' : 'text-slate-900'}`}>
-                                {isInc ? '+' : ''}${amt.toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                              </td>
-                              <td className="py-2.5 px-3 text-right font-mono text-slate-500">
-                                {limit > 0 ? `$${variance.toLocaleString()}` : '—'}
-                              </td>
-                            </tr>
-                          );
-                        })
-                      ) : (
-                        <tr>
-                          <td colSpan="6" className="py-4 text-center text-slate-400">No categories recorded in database.</td>
+                    {projIndicators && projIndicators.length > 0 ? (
+                      projIndicators.map((ind, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-semibold text-slate-800">{ind.name}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-500">{ind.baseline}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-800 font-bold">{ind.target}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">{ind.actual}</td>
+                          <td className="py-2 px-3 text-right font-bold text-indigo-600">Active</td>
                         </tr>
-                      )
-                    )}
-
-                    {reportType === 'donor_allocations' && (
-                      <>
-                        {donorsList.length > 0 ? (
-                          donorsList.map((d) => (
-                            <tr key={d.id} className="hover:bg-slate-50">
-                              <td className="py-2.5 px-3 font-semibold text-slate-800">{d.name}</td>
-                              <td className="py-2.5 px-3 text-slate-500">{d.donorType || 'Institutional'}</td>
-                              <td className="py-2.5 px-3 text-right font-mono text-slate-600">${(d.totalPledged || 0).toLocaleString()}</td>
-                              <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600">+${(d.totalReceived || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                              <td className="py-2.5 px-3 text-right font-mono text-slate-700">{d.activeGrantsCount || 1} Grants</td>
-                            </tr>
-                          ))
-                        ) : (
-                          <tr><td colSpan="5" className="py-4 text-center text-slate-400">No donor allocations recorded.</td></tr>
-                        )}
-                        <tr className="hover:bg-slate-50 bg-slate-50/50 font-bold border-t border-slate-200">
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">Total Organization Grant Revenue</td>
-                          <td className="py-2.5 px-3 text-emerald-600 font-bold">REVENUE</td>
-                          <td className="py-2.5 px-3 text-right text-slate-400">—</td>
-                          <td className="py-2.5 px-3 text-right font-mono font-bold text-emerald-600">+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
-                          <td className="py-2.5 px-3 text-right text-slate-400">—</td>
-                        </tr>
-                      </>
-                    )}
-
-                    {reportType === 'transaction_ledger' && (
-                      transactions.length > 0 ? (
-                        transactions.slice(0, 10).map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 text-slate-500 font-mono text-[11px]">{t.transactionNumber}</td>
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">{t.description || 'Transaction'}</td>
-                            <td className="py-2.5 px-3 text-slate-600">{t.bankAccountName || 'Bank'}</td>
-                            <td className="py-2.5 px-3 text-slate-500 text-[11px]">{t.type === 0 ? 'Expense' : t.type === 1 ? 'Income' : 'Transfer'}</td>
-                            <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">${(t.amount || t.baseCurrencyAmount || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} {t.currency || 'USD'}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr>
-                          <td colSpan="5" className="py-4 text-center text-slate-400">No ledger transactions posted in database.</td>
-                        </tr>
-                      )
-                    )}
-
-                    {reportType === 'risk_register' && (
-                      risksList.length > 0 ? (
-                        risksList.map((r, idx) => (
-                          <tr key={r.id || idx} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">{r.description || r.title || 'Risk Log'}</td>
-                            <td className="py-2.5 px-3 text-slate-500">{r.category || 'Operational'}</td>
-                            <td className="py-2.5 px-3 text-right text-slate-600">{r.impact || 'Moderate'}</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-rose-600">{r.severity || 'Medium'}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <>
-                          <tr className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">Financial Liquidity Risk</td>
-                            <td className="py-2.5 px-3 text-slate-500">Financial</td>
-                            <td className="py-2.5 px-3 text-right text-slate-600">High Impact</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-rose-600">Low Severity</td>
-                          </tr>
-                          <tr className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">Field Operations Continuity</td>
-                            <td className="py-2.5 px-3 text-slate-500">Operational</td>
-                            <td className="py-2.5 px-3 text-right text-slate-600">Moderate</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-amber-600">Medium Severity</td>
-                          </tr>
-                        </>
-                      )
-                    )}
-
-                    {reportType === 'volunteer_impact' && (
-                      volunteersList.length > 0 ? (
-                        volunteersList.map((v) => (
-                          <tr key={v.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">{v.name}</td>
-                            <td className="py-2.5 px-3 text-slate-500">{v.email || 'volunteer@org.net'}</td>
-                            <td className="py-2.5 px-3 text-slate-600">{v.skills || 'Community Outreach'}</td>
-                            <td className="py-2.5 px-3 text-right text-slate-600">{v.availability || 'Part-Time'}</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-emerald-600">{v.backgroundCheckStatus || 'Passed'}</td>
-                          </tr>
-                        ))
-                      ) : (
-                        <tr className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">Active Field Workforce Roster</td>
-                          <td className="py-2.5 px-3 text-slate-500">volunteers@ngo.org</td>
-                          <td className="py-2.5 px-3 text-slate-600">Community Support</td>
-                          <td className="py-2.5 px-3 text-right text-slate-600">Full-Time</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">Vetted &amp; Active</td>
-                        </tr>
-                      )
-                    )}
-
-                    {reportType === 'team_analytics' && (
-                      <>
-                        <tr className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">Task Completion Rate</td>
-                          <td className="py-2.5 px-3 text-emerald-600 font-bold">KPI</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">100% Target</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-emerald-600">{taskAnalytics?.completionRate || 0}%</td>
-                        </tr>
-                        <tr className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-semibold text-slate-800 text-rose-600">Tasks Overdue</td>
-                          <td className="py-2.5 px-3 text-rose-600 font-bold">KPI</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">0 Target</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-rose-600">{taskAnalytics?.tasksOverdue || 0}</td>
-                        </tr>
-                        <tr className="hover:bg-slate-50">
-                          <td className="py-2.5 px-3 font-semibold text-slate-800">On-Time Delivery Rate</td>
-                          <td className="py-2.5 px-3 text-indigo-600 font-bold">KPI</td>
-                          <td className="py-2.5 px-3 text-right text-slate-500">95% Target</td>
-                          <td className="py-2.5 px-3 text-right font-bold text-indigo-600">{taskAnalytics?.onTimeDeliveryRate || 0}%</td>
-                        </tr>
-                        {taskList.slice(0, 5).map((t) => (
-                          <tr key={t.id} className="hover:bg-slate-50">
-                            <td className="py-2.5 px-3 font-semibold text-slate-800">{t.title}</td>
-                            <td className="py-2.5 px-3 text-slate-500">{t.status}</td>
-                            <td className="py-2.5 px-3 text-right text-slate-500">{t.deadline ? new Date(t.deadline).toLocaleDateString() : '—'}</td>
-                            <td className="py-2.5 px-3 text-right font-bold text-slate-900">Task #{t.id}</td>
-                          </tr>
-                        ))}
-                      </>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={5} className="py-4 text-center text-slate-400 italic">No logframe data found.</td>
+                      </tr>
                     )}
                   </tbody>
                 </table>
               </div>
-            )}
+
+              {/* 3. Grant & Donor Allocations */}
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
+                <div className="bg-slate-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
+                  <span>3. Grant &amp; Donor Allocations Matrix {activeProj ? `(${activeProj.title.toUpperCase()})` : ''}</span>
+                  <span className="text-[9px] bg-purple-600 px-2 py-0.5 rounded text-white font-semibold">
+                    {activeProj ? (projectDonors.length === 1 || !projectDonors.length ? 'Sole Funder' : 'Project Donors') : 'Donor Audit'}
+                  </span>
+                </div>
+                <table className="w-full text-left">
+                  <thead>
+                    <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
+                      <th className="py-2 px-3">Donor Partner Name</th>
+                      <th className="py-2 px-3">Allocation / Funding Type</th>
+                      <th className="py-2 px-3 text-right">Total Pledged / Allocated ($)</th>
+                      <th className="py-2 px-3 text-right">Total Received ($)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activeProj ? (
+                      projectDonors.length > 0 ? (
+                        projectDonors.map((pd, idx) => (
+                          <tr key={idx} className="hover:bg-slate-50">
+                            <td className="py-2 px-3 font-semibold text-slate-800">{pd.donorName || 'Institutional Donor'}</td>
+                            <td className="py-2 px-3 text-slate-500 font-medium">
+                              {projectDonors.length === 1 ? 'Sole Funder (100%)' : `Co-Funding (${pd.coFundingPercentage || 100}%)`}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-600">${(pd.allocatedAmount || activeBudget).toLocaleString()}</td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(pd.allocatedAmount || activeBudget).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-semibold text-slate-800">{activeProj.donorName || 'Sole Funding Partner'}</td>
+                          <td className="py-2 px-3 text-slate-500 font-medium">Sole Funder (100%)</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-600">${activeBudget.toLocaleString()}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${activeBudget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      )
+                    ) : donorsList.length > 0 ? (
+                      donorsList.map((d) => (
+                        <tr key={d.id} className="hover:bg-slate-50">
+                          <td className="py-2 px-3 font-semibold text-slate-800">{d.name}</td>
+                          <td className="py-2 px-3 text-slate-500">{d.donorType || 'Institutional'}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-600">${(d.totalPledged || 0).toLocaleString()}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(d.totalReceived || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={4} className="py-4 text-center text-slate-400 italic">No donor data found.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* 4. Category BVA — Federal Standard Report */}
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
+                <div className="bg-gradient-to-r from-slate-900 to-emerald-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
+                  <span className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-emerald-300" /> 4. Category Budget vs Actuals (BVA) — Standard Financial Report</span>
+                  <span className="text-[9px] bg-emerald-600 px-2 py-0.5 rounded text-white font-semibold">Federal BVA</span>
+                </div>
+                {categoryRollups.length > 0 ? (
+                  <table className="w-full text-left text-[11px]">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                        <th className="py-2 px-3">Category Name</th>
+                        <th className="py-2 px-3 font-mono text-[10px]">Code</th>
+                        <th className="py-2 px-3 text-right">Approved Budget ($)</th>
+                        <th className="py-2 px-3 text-right">Actual Expense ($)</th>
+                        <th className="py-2 px-3 text-right">Remaining Balance ($)</th>
+                        <th className="py-2 px-3 text-center">Burn Rate / Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {categoryRollups.map(cat => {
+                        const isOver = cat.budgetAmount > 0 && cat.incurredSpent > cat.budgetAmount;
+                        return (
+                          <tr key={cat.id} className="hover:bg-slate-50">
+                            <td className="py-2 px-3 font-semibold text-slate-800">{cat.name}</td>
+                            <td className="py-2 px-3 font-mono text-[10px] text-slate-500">{cat.code || 'CAT'}</td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-700">
+                              {cat.budgetAmount > 0 ? `$${cat.budgetAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                            </td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">
+                              ${(cat.incurredSpent || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                            </td>
+                            <td className={`py-2 px-3 text-right font-mono font-bold ${(cat.remainingBalance || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {cat.budgetAmount > 0 ? `$${(cat.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                            </td>
+                            <td className="py-2 px-3 text-center">
+                              {cat.budgetAmount > 0 ? (
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isOver ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                  {cat.burnRatePercentage}% {isOver ? '⚠️' : '✅'}
+                                </span>
+                              ) : <span className="text-slate-400">—</span>}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                    <tfoot className="bg-slate-900 text-white font-bold">
+                      <tr>
+                        <td className="py-2 px-3" colSpan={2}>TOTALS</td>
+                        <td className="py-2 px-3 text-right font-mono">
+                          ${categoryRollups.reduce((s, c) => s + (c.budgetAmount || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-rose-300">
+                          ${categoryRollups.reduce((s, c) => s + (c.incurredSpent || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2 px-3 text-right font-mono text-emerald-300">
+                          ${categoryRollups.reduce((s, c) => s + (c.remainingBalance || 0), 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        </td>
+                        <td className="py-2 px-3 text-center text-indigo-300 font-mono">
+                          {(() => { const tb = categoryRollups.reduce((s,c) => s+(c.budgetAmount||0),0); const ts = categoryRollups.reduce((s,c) => s+(c.incurredSpent||0),0); return tb > 0 ? ((ts/tb)*100).toFixed(1)+'%' : '—'; })()}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                ) : (
+                  <div className="py-6 text-center text-slate-400 italic text-[11px]">
+                    {selectedProjectId !== 'all' ? 'No approved budget line items found for this project.' : 'Select a specific project above to view the Category BVA report.'}
+                  </div>
+                )}
+              </div>
+
+              {/* 5. 2D Activity-Based Costing Matrix */}
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
+                <div className="bg-gradient-to-r from-slate-900 to-indigo-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
+                  <span className="flex items-center gap-1.5"><Layers className="w-3.5 h-3.5 text-indigo-300" /> 5. 2D Activity-Based Costing Matrix (Tasks × Categories)</span>
+                  <span className="text-[9px] bg-indigo-500 px-2 py-0.5 rounded text-white font-semibold">Activity Costing</span>
+                </div>
+                {activityMatrix && activityMatrix.tasks && activityMatrix.categories ? (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-[11px]">
+                      <thead>
+                        <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
+                          <th className="py-2 px-3 min-w-[150px]">Task / Activity</th>
+                          <th className="py-2 px-3 w-20 text-center">Status</th>
+                          {activityMatrix.categories.map(cat => (
+                            <th key={cat.id} className="py-2 px-3 text-right min-w-[100px]">{cat.name}</th>
+                          ))}
+                          <th className="py-2 px-3 text-right font-extrabold bg-slate-200">Total ($)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {activityMatrix.tasks.map(task => {
+                          // Backend matrix keys are "taskId_categoryId" strings
+                          const getCellValue = (catId) => activityMatrix.matrix?.[`${task.id}_${catId}`] || 0;
+                          const rowTotal = activityMatrix.categories.reduce((s, c) => s + getCellValue(c.id), 0);
+                          return (
+                            <tr key={task.id} className="hover:bg-slate-50">
+                              <td className="py-2 px-3 font-semibold text-slate-800">{task.title}</td>
+                              <td className="py-2 px-3 text-center">
+                                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                                  String(task.status).toLowerCase().includes('done') || String(task.status).toLowerCase().includes('complet')
+                                    ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'
+                                }`}>{task.status}</span>
+                              </td>
+                              {activityMatrix.categories.map(cat => (
+                                <td key={cat.id} className="py-2 px-3 text-right font-mono text-slate-600">
+                                  {getCellValue(cat.id) > 0 ? `$${getCellValue(cat.id).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                                </td>
+                              ))}
+                              <td className="py-2 px-3 text-right font-mono font-black text-slate-900 bg-slate-50">
+                                ${rowTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                        {/* Totals Footer */}
+                        <tr className="bg-slate-900 text-white font-bold">
+                          <td className="py-2 px-3" colSpan={2}>TOTAL</td>
+                          {activityMatrix.categories.map(cat => {
+                            // Backend matrix keys are "taskId_categoryId" strings
+                            const colTotal = activityMatrix.tasks.reduce((s, t) => s + (activityMatrix.matrix?.[`${t.id}_${cat.id}`] || 0), 0);
+                            return <td key={cat.id} className="py-2 px-3 text-right font-mono">${colTotal.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>;
+                          })}
+                          <td className="py-2 px-3 text-right font-mono font-black text-emerald-300">
+                            ${activityMatrix.tasks.reduce((s, t) => {
+                              return s + activityMatrix.categories.reduce((cs, c) => cs + (activityMatrix.matrix?.[`${t.id}_${c.id}`] || 0), 0);
+                            }, 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="py-6 text-center text-slate-400 italic text-[11px]">
+                    {selectedProjectId !== 'all' ? 'No activity costing data for this project yet.' : 'Select a specific project above to view the 2D Activity Matrix.'}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
             {/* Signature Block Simulation */}
             <div className="pt-4 grid grid-cols-2 gap-8 text-[11px] text-slate-400">

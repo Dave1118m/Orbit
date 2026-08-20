@@ -8,6 +8,9 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// API Controller for managing isolated organization workspaces and evaluating workspace-scoped permissions.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -17,6 +20,9 @@ namespace OrbitApi.Controllers
         private readonly IAuthorizationService _authorizationService;
         private readonly IPermissionService _permissionService;
 
+        /// <summary>
+        /// Initializes a new instance of <see cref="WorkspacesController"/>.
+        /// </summary>
         public WorkspacesController(OrbitDbContext db, IAuthorizationService authorizationService, IPermissionService permissionService)
         {
             _db = db;
@@ -24,6 +30,12 @@ namespace OrbitApi.Controllers
             _permissionService = permissionService;
         }
 
+        /// <summary>
+        /// Creates a new workspace within the designated organization.
+        /// Requires `WorkspaceCreate` permission scoped to the organization.
+        /// </summary>
+        /// <param name="req">Workspace creation details.</param>
+        /// <returns>The newly created workspace DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<WorkspaceDto>> Create([FromBody] CreateWorkspaceRequest req)
         {
@@ -65,7 +77,7 @@ namespace OrbitApi.Controllers
                 OrganizationId = workspace.OrganizationId,
                 Name = workspace.Name,
                 Description = workspace.Description,
-                Visibility = (WorkspaceVisibility)workspace.Visibility,
+                Visibility = workspace.Visibility,
                 BudgetCeiling = workspace.BudgetCeiling,
                 IsArchived = workspace.IsArchived
             };
@@ -73,6 +85,9 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(Get), new { id = workspace.Id }, dto);
         }
 
+        /// <summary>
+        /// Resolves the active organization ID from request headers, user memberships, or system defaults.
+        /// </summary>
         private int GetActiveOrganizationId()
         {
             if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
@@ -92,30 +107,43 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id ?? 2003;
+            return firstOrg?.Id ?? 0;
         }
 
+        /// <summary>
+        /// Lists non-archived workspaces for the specified or active organization context.
+        /// </summary>
+        /// <param name="orgId">Optional explicit organization ID filter.</param>
+        /// <returns>Collection of workspace DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<WorkspaceDto>>> List([FromQuery] int? orgId)
         {
             var targetOrgId = orgId ?? GetActiveOrganizationId();
 
-            var workspaces = await _db.Workspaces
+            var workspaceEntities = await _db.Workspaces
                 .Where(w => w.OrganizationId == targetOrgId && !w.IsArchived)
+                .ToListAsync();
+
+            var workspaces = workspaceEntities
                 .Select(w => new WorkspaceDto
                 {
                     Id = w.Id,
                     OrganizationId = w.OrganizationId,
                     Name = w.Name,
                     Description = w.Description,
-                    Visibility = (WorkspaceVisibility)w.Visibility,
+                    Visibility = w.Visibility,
                     BudgetCeiling = w.BudgetCeiling,
                     IsArchived = w.IsArchived
-                }).ToListAsync();
+                }).ToList();
 
             return Ok(workspaces);
         }
 
+        /// <summary>
+        /// Retrieves a single workspace by ID.
+        /// Requires `WorkspaceView` permission on the workspace.
+        /// </summary>
+        /// <param name="id">The workspace ID.</param>
         [HttpGet("{id}")]
         public async Task<ActionResult<WorkspaceDto>> Get(int id)
         {
@@ -134,12 +162,18 @@ namespace OrbitApi.Controllers
                 OrganizationId = workspace.OrganizationId,
                 Name = workspace.Name,
                 Description = workspace.Description,
-                Visibility = (WorkspaceVisibility)workspace.Visibility,
+                Visibility = workspace.Visibility,
                 BudgetCeiling = workspace.BudgetCeiling,
                 IsArchived = workspace.IsArchived
             });
         }
 
+        /// <summary>
+        /// Updates workspace metadata, visibility, budget ceiling, or archive status.
+        /// Requires `WorkspaceEdit` permission on the workspace.
+        /// </summary>
+        /// <param name="id">The workspace ID.</param>
+        /// <param name="req">The update payload.</param>
         [HttpPut("{id}")]
         public async Task<ActionResult<WorkspaceDto>> Update(int id, [FromBody] UpdateWorkspaceRequest req)
         {
@@ -183,12 +217,18 @@ namespace OrbitApi.Controllers
                 OrganizationId = workspace.OrganizationId,
                 Name = workspace.Name,
                 Description = workspace.Description,
-                Visibility = (WorkspaceVisibility)workspace.Visibility,
+                Visibility = workspace.Visibility,
                 BudgetCeiling = workspace.BudgetCeiling,
                 IsArchived = workspace.IsArchived
             });
         }
 
+        /// <summary>
+        /// Resolves the list of workspace IDs that the current user has access to for a given permission.
+        /// </summary>
+        /// <param name="permission">The permission being tested.</param>
+        /// <param name="organizationId">Optional organization context.</param>
+        /// <returns>List of permitted workspace IDs.</returns>
         private async Task<List<int>> GetAccessibleWorkspaceIdsAsync(Permission permission, int? organizationId)
         {
             var userId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);

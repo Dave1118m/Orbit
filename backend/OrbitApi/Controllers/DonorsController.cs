@@ -8,18 +8,26 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 
+using OrbitApi.Services;
+
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing institutional and private donors, grant contributions,
+    /// project co-funding allocations, communications, and USAID-compliant progress reports.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
     public class DonorsController : ControllerBase
     {
         private readonly OrbitDbContext _db;
+        private readonly ICurrencyService _currencyService;
 
-        public DonorsController(OrbitDbContext db)
+        public DonorsController(OrbitDbContext db, ICurrencyService currencyService)
         {
             _db = db;
+            _currencyService = currencyService;
         }
 
         private int? GetActiveOrganizationId()
@@ -41,9 +49,13 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id;
+            return firstOrg?.Id ?? 0;
         }
 
+        /// <summary>
+        /// Retrieves all donors for the active organization with pledged, received, and active grant summaries.
+        /// </summary>
+        /// <returns>Collection of donor DTOs.</returns>
         [HttpGet]
         public async Task<ActionResult<IEnumerable<DonorDto>>> GetDonors()
         {
@@ -61,30 +73,54 @@ namespace OrbitApi.Controllers
 
             var donors = await query.ToListAsync();
 
-            var dtos = donors.Select(d => new DonorDto
+            var org = orgId.HasValue ? await _db.Organizations.FindAsync(orgId.Value) : null;
+            var baseCurrency = org?.Currency ?? "USD";
+
+            var dtos = new List<DonorDto>();
+            foreach (var d in donors)
             {
-                Id = d.Id,
-                Name = d.Name,
-                DonorType = d.DonorType,
-                PrimaryContact = d.PrimaryContact,
-                EmailAddress = d.EmailAddress,
-                PhoneNumber = d.PhoneNumber,
-                Country = d.Country,
-                TotalPledged = d.Contributions.Where(c => c.Status == ContributionStatus.Pledged).Sum(c => c.Amount),
-                TotalReceived = d.Contributions.Where(c => c.Status == ContributionStatus.Received).Sum(c => c.Amount),
-                ActiveGrantsCount = d.ProjectDonors.Count(pd => pd.Project != null && !pd.Project.IsDeleted),
-                LinkedProjects = d.ProjectDonors.Where(pd => pd.Project != null && !pd.Project.IsDeleted).Select(pd => new ProjectDonorDto
+                decimal totalPledged = 0;
+                foreach (var c in d.Contributions.Where(x => x.Status == ContributionStatus.Pledged))
                 {
-                    Id = pd.Id,
-                    ProjectId = pd.ProjectId,
-                    ProjectName = pd.Project!.Title,
-                    AllocatedAmount = pd.AllocatedAmount
-                }).ToList()
-            }).ToList();
+                    totalPledged += await _currencyService.ConvertAsync(c.Amount, c.Currency, baseCurrency);
+                }
+
+                decimal totalReceived = 0;
+                foreach (var c in d.Contributions.Where(x => x.Status == ContributionStatus.Received))
+                {
+                    totalReceived += await _currencyService.ConvertAsync(c.Amount, c.Currency, baseCurrency);
+                }
+
+                dtos.Add(new DonorDto
+                {
+                    Id = d.Id,
+                    Name = d.Name,
+                    DonorType = d.DonorType,
+                    PrimaryContact = d.PrimaryContact,
+                    EmailAddress = d.EmailAddress,
+                    PhoneNumber = d.PhoneNumber,
+                    Country = d.Country,
+                    TotalPledged = totalPledged,
+                    TotalReceived = totalReceived,
+                    ActiveGrantsCount = d.ProjectDonors.Count(pd => pd.Project != null && !pd.Project.IsDeleted),
+                    LinkedProjects = d.ProjectDonors.Where(pd => pd.Project != null && !pd.Project.IsDeleted).Select(pd => new ProjectDonorDto
+                    {
+                        Id = pd.Id,
+                        ProjectId = pd.ProjectId,
+                        ProjectName = pd.Project!.Title,
+                        AllocatedAmount = pd.AllocatedAmount
+                    }).ToList()
+                });
+            }
 
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Registers a new donor profile in the organization.
+        /// </summary>
+        /// <param name="dto">Donor creation payload.</param>
+        /// <returns>Created donor DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<DonorDto>> CreateDonor(DonorCreateDto dto)
         {
@@ -135,6 +171,11 @@ namespace OrbitApi.Controllers
             return CreatedAtAction(nameof(GetDonor), new { id = donor.Id }, result);
         }
 
+        /// <summary>
+        /// Retrieves a single donor by ID with contribution history and linked project allocations.
+        /// </summary>
+        /// <param name="id">Donor ID.</param>
+        /// <returns>Donor DTO.</returns>
         [HttpGet("{id}")]
         public async Task<ActionResult<DonorDto>> GetDonor(int id)
         {
@@ -149,6 +190,21 @@ namespace OrbitApi.Controllers
 
             if (donor == null) return NotFound();
 
+            var org = await _db.Organizations.FindAsync(orgId.Value);
+            var baseCurrency = org?.Currency ?? "USD";
+
+            decimal totalPledged = 0;
+            foreach (var c in donor.Contributions.Where(x => x.Status == ContributionStatus.Pledged))
+            {
+                totalPledged += await _currencyService.ConvertAsync(c.Amount, c.Currency, baseCurrency);
+            }
+
+            decimal totalReceived = 0;
+            foreach (var c in donor.Contributions.Where(x => x.Status == ContributionStatus.Received))
+            {
+                totalReceived += await _currencyService.ConvertAsync(c.Amount, c.Currency, baseCurrency);
+            }
+
             var dto = new DonorDto
             {
                 Id = donor.Id,
@@ -158,8 +214,8 @@ namespace OrbitApi.Controllers
                 EmailAddress = donor.EmailAddress,
                 PhoneNumber = donor.PhoneNumber,
                 Country = donor.Country,
-                TotalPledged = donor.Contributions.Where(c => c.Status == ContributionStatus.Pledged).Sum(c => c.Amount),
-                TotalReceived = donor.Contributions.Where(c => c.Status == ContributionStatus.Received).Sum(c => c.Amount),
+                TotalPledged = totalPledged,
+                TotalReceived = totalReceived,
                 ActiveGrantsCount = donor.ProjectDonors.Count(pd => pd.Project != null && !pd.Project.IsDeleted),
                 LinkedProjects = donor.ProjectDonors.Where(pd => pd.Project != null && !pd.Project.IsDeleted).Select(pd => new ProjectDonorDto
                 {
@@ -209,6 +265,12 @@ namespace OrbitApi.Controllers
             return Ok(projectDonors);
         }
 
+        /// <summary>
+        /// Updates a donor's contact details, type, or country.
+        /// </summary>
+        /// <param name="id">Donor ID.</param>
+        /// <param name="dto">Updated fields.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpPut("{id}")]
         public async Task<IActionResult> UpdateDonor(int id, DonorCreateDto dto)
         {
@@ -233,6 +295,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Deletes a donor and cleanly purges dependent project links and contributions.
+        /// </summary>
+        /// <param name="id">Donor ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<IActionResult> DeleteDonor(int id)
         {
@@ -275,11 +342,36 @@ namespace OrbitApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Records a donor grant contribution (Pledged or Received) and automatically syncs with financial ledger.
+        /// </summary>
+        /// <param name="id">Donor ID.</param>
+        /// <param name="dto">Contribution details.</param>
+        /// <returns>Created contribution DTO.</returns>
         [HttpPost("{id}/contributions")]
         public async Task<ActionResult<DonorContributionDto>> CreateContribution(int id, DonorContributionCreateDto dto)
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+
+            if (dto.Amount <= 0)
+            {
+                return BadRequest("Contribution amount must be strictly greater than zero.");
+            }
+            if (dto.Amount > 1_000_000_000_000m)
+            {
+                return BadRequest("Contribution amount cannot exceed 1 Trillion.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.Currency) && dto.Currency.Trim().Length != 3)
+            {
+                return BadRequest("Currency must be a 3-letter ISO code.");
+            }
+
+            if (!string.IsNullOrWhiteSpace(dto.Notes) && dto.Notes.Length > 2000)
+            {
+                return BadRequest("Notes cannot exceed 2000 characters.");
+            }
 
             // Verify donor belongs to active org
             var donor = await _db.Donors
@@ -305,20 +397,29 @@ namespace OrbitApi.Controllers
                     .FirstOrDefaultAsync(p => p.Id == dto.AllocatedProjectId.Value);
                 if (project == null || (project.Workspace != null && project.Workspace.OrganizationId != orgId.Value))
                     return BadRequest("Allocated project not found or does not belong to active organization.");
+            }
 
-                if (project.StartDate.HasValue && dto.Date.Date < project.StartDate.Value.Date)
+            if (dto.AllocatedTaskId.HasValue)
+            {
+                var task = await _db.Tasks
+                    .Include(t => t.Project)
+                    .ThenInclude(p => p.Workspace)
+                    .FirstOrDefaultAsync(t => t.Id == dto.AllocatedTaskId.Value);
+
+                if (task == null || (task.Project != null && task.Project.Workspace != null && task.Project.Workspace.OrganizationId != orgId.Value))
                 {
-                    return BadRequest($"Contribution date ({dto.Date:yyyy-MM-dd}) cannot be earlier than project start date ({project.StartDate.Value:yyyy-MM-dd}).");
+                    return BadRequest("Allocated task not found or does not belong to active organization.");
                 }
-                if (project.EndDate.HasValue && dto.Date.Date > project.EndDate.Value.Date)
+
+                if (dto.AllocatedProjectId.HasValue && task.ProjectId != dto.AllocatedProjectId.Value)
                 {
-                    return BadRequest($"Contribution date ({dto.Date:yyyy-MM-dd}) cannot be later than project end date ({project.EndDate.Value:yyyy-MM-dd}).");
+                    return BadRequest("The allocated task does not belong to the allocated project.");
                 }
             }
 
-            if (dto.Date.Date > DateTime.UtcNow.Date)
+            if (dto.Status == OrbitApi.Models.ContributionStatus.Received && dto.Date.Date > DateTime.UtcNow.Date)
             {
-                return BadRequest("Contribution date cannot be in the future.");
+                return BadRequest("A 'Received' contribution cannot have a date in the future.");
             }
 
             var contribution = new DonorContribution
@@ -395,6 +496,11 @@ namespace OrbitApi.Controllers
             return Ok(result);
         }
 
+        /// <summary>
+        /// Lists all contributions associated with a specific donor.
+        /// </summary>
+        /// <param name="id">Donor ID.</param>
+        /// <returns>Collection of donor contributions.</returns>
         [HttpGet("{id}/contributions")]
         public async Task<ActionResult<IEnumerable<DonorContributionDto>>> GetContributions(int id)
         {
@@ -436,6 +542,12 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Links a donor's grant funding to a specific project.
+        /// </summary>
+        /// <param name="id">Donor ID.</param>
+        /// <param name="dto">Project ID and allocated funding amount.</param>
+        /// <returns>Operation result.</returns>
         [HttpPost("{id}/link-project")]
         public async Task<IActionResult> LinkProject(int id, LinkProjectDto dto)
         {
@@ -505,6 +617,7 @@ namespace OrbitApi.Controllers
                 .Include(e => e.SubmittedByUser)
                 .Include(e => e.ApprovedByFinanceOfficer)
                 .Include(e => e.SignedOffByManager)
+                .Include(e => e.FinancialCategory)
                 .Where(e => e.ProjectId.HasValue && projectIds.Contains(e.ProjectId.Value))
                 .OrderByDescending(e => e.Date)
                 .ToListAsync();
@@ -536,7 +649,7 @@ namespace OrbitApi.Controllers
                 {
                     Id = pd.Id,
                     ProjectId = pd.ProjectId,
-                    ProjectName = pd.Project != null ? pd.Project.Title : "Unknown",
+                    ProjectName = pd.Project?.Title ?? "Unknown Project",
                     DonorId = pd.DonorId,
                     DonorName = donor.Name,
                     AllocatedAmount = pd.AllocatedAmount,
@@ -546,7 +659,7 @@ namespace OrbitApi.Controllers
                 {
                     Id = e.Id,
                     ProjectTitle = e.Project?.Title ?? "General",
-                    CategoryName = e.Category.ToString(),
+                    CategoryName = e.FinancialCategory?.Name ?? "General Expense",
                     Amount = e.Amount,
                     Currency = e.Currency,
                     Date = e.Date,

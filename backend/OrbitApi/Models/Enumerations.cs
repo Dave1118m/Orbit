@@ -105,16 +105,6 @@ public enum FinancialCategoryType
     Both
 }
 
-public enum ExpenseCategory
-{
-    Personnel,
-    Equipment,
-    Operations,
-    Training,
-    Supplies,
-    Travel
-}
-
 public enum ReportType
 {
     Financial,
@@ -183,16 +173,6 @@ public enum BudgetLevel
     Workspace,
     Project,
     Task
-}
-
-public enum BudgetCategory
-{
-    Personnel,
-    Travel,
-    Supplies,
-    Overhead,
-    Equipment,
-    Other
 }
 
 public enum BudgetStatus

@@ -61,7 +61,6 @@ namespace OrbitApi.DTOs
         public string BankName { get; set; } = string.Empty;
         public string AccountName { get; set; } = string.Empty;
         public string AccountNumber { get; set; } = string.Empty;
-        public string SwiftCode { get; set; } = string.Empty;
         public string Currency { get; set; } = "USD";
         public bool IsActive { get; set; }
 
@@ -84,9 +83,6 @@ namespace OrbitApi.DTOs
         [Required(ErrorMessage = "Account number is required.")]
         [StringLength(50, MinimumLength = 3, ErrorMessage = "Account number must be between 3 and 50 characters.")]
         public string AccountNumber { get; set; } = string.Empty;
-
-        [StringLength(20, ErrorMessage = "SWIFT/BIC code cannot exceed 20 characters.")]
-        public string SwiftCode { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Currency is required.")]
         [StringLength(10, MinimumLength = 3, ErrorMessage = "Currency code must be 3 characters.")]
@@ -122,9 +118,6 @@ namespace OrbitApi.DTOs
         [Required(ErrorMessage = "Account number is required.")]
         [StringLength(50, MinimumLength = 3, ErrorMessage = "Account number must be between 3 and 50 characters.")]
         public string AccountNumber { get; set; } = string.Empty;
-
-        [StringLength(20, ErrorMessage = "SWIFT/BIC code cannot exceed 20 characters.")]
-        public string SwiftCode { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Currency is required.")]
         [StringLength(10, MinimumLength = 3, ErrorMessage = "Currency code must be 3 characters.")]
@@ -174,14 +167,15 @@ namespace OrbitApi.DTOs
     {
         public int Id { get; set; }
         public int BudgetId { get; set; }
-        public BudgetCategory Category { get; set; }
+        public int? CategoryId { get; set; }
+        public string? CategoryName { get; set; }
         public string Description { get; set; } = string.Empty;
         public decimal Amount { get; set; }
     }
 
     public class BudgetLineItemCreateDto
     {
-        public BudgetCategory Category { get; set; }
+        public int? CategoryId { get; set; }
         public string Description { get; set; } = string.Empty;
         public decimal Amount { get; set; }
     }
@@ -207,8 +201,13 @@ namespace OrbitApi.DTOs
         public string? TaskName { get; set; }
         public int SubmittedByUserId { get; set; }
         public string SubmittedByUserName { get; set; } = string.Empty;
-        public ExpenseCategory Category { get; set; }
+        public int? CategoryId { get; set; }
+        public string? CategoryName { get; set; }
+        public string? CategoryCode { get; set; }
         public decimal Amount { get; set; }
+        public decimal? GrossAmount { get; set; }
+        public decimal? TaxAmount { get; set; }
+        public decimal? NetAmount { get; set; }
         public string Currency { get; set; } = "ETB";
         public DateTime Date { get; set; }
         public string Description { get; set; } = string.Empty;
@@ -229,6 +228,7 @@ namespace OrbitApi.DTOs
         public string? AttachmentFileName { get; set; }
         public DateTime CreatedAt { get; set; }
         public bool BudgetWarning { get; set; } // True if expense pushes project over budget
+        public string? ComplianceWarningMessage { get; set; }
     }
 
     public class ExpenseCreateDto
@@ -237,11 +237,14 @@ namespace OrbitApi.DTOs
         public int? TaskId { get; set; }
         public int? BankAccountId { get; set; }
 
-        public ExpenseCategory Category { get; set; }
+        public int? CategoryId { get; set; }
 
         [Required(ErrorMessage = "Expense amount is required.")]
         [Range(0.01, 1000000000000.00, ErrorMessage = "Expense amount must be strictly greater than zero ($0.01 or more).")]
         public decimal Amount { get; set; }
+
+        public decimal? GrossAmount { get; set; }
+        public decimal? TaxAmount { get; set; }
 
         [Required(ErrorMessage = "Currency is required.")]
         [StringLength(10, MinimumLength = 3, ErrorMessage = "Currency code must be 3 characters.")]
@@ -263,7 +266,7 @@ namespace OrbitApi.DTOs
     public class GrantReportScheduleDto
     {
         public int Id { get; set; }
-        public int ProjectId { get; set; }
+        public int? ProjectId { get; set; }
         public string ProjectName { get; set; } = string.Empty;
         public int? DonorId { get; set; }
         public string? DonorName { get; set; }
@@ -275,7 +278,7 @@ namespace OrbitApi.DTOs
 
     public class CreateGrantReportScheduleRequest
     {
-        public int ProjectId { get; set; }
+        public int? ProjectId { get; set; }
         public int? DonorId { get; set; }
         public ReportType ReportType { get; set; } = ReportType.Financial;
         public DateTime DeadlineDate { get; set; }

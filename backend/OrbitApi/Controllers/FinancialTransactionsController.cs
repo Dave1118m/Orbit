@@ -4,9 +4,14 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using OrbitApi.DTOs;
 using OrbitApi.Models;
+using OrbitApi.Services;
 
 namespace OrbitApi.Controllers;
 
+/// <summary>
+/// Double-entry bookkeeping and financial ledger controller managing transaction journals,
+/// cash-flow summaries, bank reconciliations, multi-currency conversions, and audit ledger exports.
+/// </summary>
 [ApiController]
 [Route("api/v1/[controller]")]
 [Route("api/[controller]")]
@@ -14,10 +19,12 @@ namespace OrbitApi.Controllers;
 public class FinancialTransactionsController : ControllerBase
 {
     private readonly OrbitDbContext _context;
+    private readonly ICurrencyService _currencyService;
 
-    public FinancialTransactionsController(OrbitDbContext context)
+    public FinancialTransactionsController(OrbitDbContext context, ICurrencyService currencyService)
     {
         _context = context;
+        _currencyService = currencyService;
     }
 
     /// <summary>
@@ -78,7 +85,7 @@ public class FinancialTransactionsController : ControllerBase
 
         var totalCount = await query.CountAsync();
 
-        var transactions = await query
+        var dbTransactions = await query
             .Include(t => t.Category)
             .Include(t => t.BankAccount)
             .Include(t => t.ToBankAccount)
@@ -88,7 +95,12 @@ public class FinancialTransactionsController : ControllerBase
             .ThenByDescending(t => t.Id)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
-            .Select(t => new FinancialTransactionDto
+            .ToListAsync();
+
+        var transactions = new List<FinancialTransactionDto>();
+        foreach (var t in dbTransactions)
+        {
+            var dto = new FinancialTransactionDto
             {
                 Id = t.Id,
                 OrganizationId = t.OrganizationId,
@@ -98,7 +110,7 @@ public class FinancialTransactionsController : ControllerBase
                 Amount = t.Amount,
                 Currency = t.Currency,
                 ExchangeRate = t.ExchangeRate,
-                BaseCurrencyAmount = t.BaseCurrencyAmount,
+                BaseCurrencyAmount = await _currencyService.ConvertAsync(t.Amount, t.Currency, "USD"),
                 CategoryId = t.CategoryId,
                 CategoryName = t.Category != null ? t.Category.Name : null,
                 CategoryColor = t.Category != null ? t.Category.Color : null,
@@ -117,8 +129,9 @@ public class FinancialTransactionsController : ControllerBase
                 CreatedByUserId = t.CreatedByUserId,
                 CreatedByUserName = t.CreatedByUser != null ? t.CreatedByUser.Name : null,
                 CreatedAt = t.CreatedAt
-            })
-            .ToListAsync();
+            };
+            transactions.Add(dto);
+        }
 
         return Ok(new
         {
@@ -149,8 +162,17 @@ public class FinancialTransactionsController : ControllerBase
             .Where(t => t.OrganizationId == orgId)
             .ToListAsync();
 
-        var totalIncome = transactions.Where(t => t.Type == FinancialTransactionType.Income).Sum(t => t.BaseCurrencyAmount);
-        var totalExpensesFromTx = transactions.Where(t => t.Type == FinancialTransactionType.Expense).Sum(t => t.BaseCurrencyAmount);
+        var totalIncome = 0m;
+        foreach (var t in transactions.Where(t => t.Type == FinancialTransactionType.Income))
+        {
+            totalIncome += await _currencyService.ConvertAsync(t.Amount, t.Currency, "USD");
+        }
+
+        var totalExpensesFromTx = 0m;
+        foreach (var t in transactions.Where(t => t.Type == FinancialTransactionType.Expense))
+        {
+            totalExpensesFromTx += await _currencyService.ConvertAsync(t.Amount, t.Currency, "USD");
+        }
 
         var dbExpenses = await _context.Expenses
             .Include(e => e.Project).ThenInclude(p => p.Workspace)
@@ -159,14 +181,20 @@ public class FinancialTransactionsController : ControllerBase
                         (e.BankAccount != null && e.BankAccount.OrganizationId == orgId))
             .ToListAsync();
 
-        var unlinkedExpenseSum = dbExpenses
-            .Where(e => !transactions.Any(t => t.ExpenseId == e.Id))
-            .Sum(e => e.Amount);
+        var unlinkedExpenseSum = 0m;
+        foreach (var e in dbExpenses.Where(e => !transactions.Any(t => t.ExpenseId == e.Id)))
+        {
+            unlinkedExpenseSum += await _currencyService.ConvertAsync(e.Amount, e.Currency, "USD");
+        }
 
         var totalExpenses = totalExpensesFromTx + unlinkedExpenseSum;
         if (totalExpenses == 0 && dbExpenses.Any())
         {
-            totalExpenses = dbExpenses.Sum(e => e.Amount);
+            totalExpenses = 0m;
+            foreach (var e in dbExpenses)
+            {
+                totalExpenses += await _currencyService.ConvertAsync(e.Amount, e.Currency, "USD");
+            }
         }
 
         var netCashFlow = totalIncome - totalExpenses;
@@ -179,19 +207,25 @@ public class FinancialTransactionsController : ControllerBase
 
         foreach (var acc in bankAccounts)
         {
-            var credits = transactions
-                .Where(t => (t.BankAccountId == acc.Id && t.Type == FinancialTransactionType.Income) ||
-                            (t.ToBankAccountId == acc.Id && t.Type == FinancialTransactionType.Transfer))
-                .Sum(t => t.Amount);
+            var credits = 0m;
+            foreach (var t in transactions.Where(t => (t.BankAccountId == acc.Id && t.Type == FinancialTransactionType.Income) ||
+                                                      (t.ToBankAccountId == acc.Id && t.Type == FinancialTransactionType.Transfer)))
+            {
+                credits += await _currencyService.ConvertAsync(t.Amount, t.Currency, acc.Currency);
+            }
 
-            var debits = transactions
-                .Where(t => (t.BankAccountId == acc.Id && t.Type == FinancialTransactionType.Expense) ||
-                            (t.BankAccountId == acc.Id && t.Type == FinancialTransactionType.Transfer))
-                .Sum(t => t.Amount);
+            var debits = 0m;
+            foreach (var t in transactions.Where(t => (t.BankAccountId == acc.Id && t.Type == FinancialTransactionType.Expense) ||
+                                                      (t.BankAccountId == acc.Id && t.Type == FinancialTransactionType.Transfer)))
+            {
+                debits += await _currencyService.ConvertAsync(t.Amount, t.Currency, acc.Currency);
+            }
 
-            var unlinkedExpenses = dbExpenses
-                .Where(e => e.BankAccountId == acc.Id && !transactions.Any(t => t.ExpenseId == e.Id))
-                .Sum(e => e.Amount);
+            var unlinkedExpenses = 0m;
+            foreach (var e in dbExpenses.Where(e => e.BankAccountId == acc.Id && !transactions.Any(t => t.ExpenseId == e.Id)))
+            {
+                unlinkedExpenses += await _currencyService.ConvertAsync(e.Amount, e.Currency, acc.Currency);
+            }
 
             var calculatedBalance = credits - (debits + unlinkedExpenses);
 

@@ -7,6 +7,9 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Controllers;
 
+/// <summary>
+/// API Controller for administering system permissions, role permission mappings, and permission audit logs.
+/// </summary>
 [Authorize]
 [ApiController]
 [Route("api/v1/[controller]")]
@@ -15,12 +18,18 @@ public class PermissionsController : ControllerBase
     private readonly OrbitDbContext _db;
     private readonly IPermissionService _permissionService;
 
+    /// <summary>
+    /// Initializes a new instance of <see cref="PermissionsController"/>.
+    /// </summary>
     public PermissionsController(OrbitDbContext db, IPermissionService permissionService)
     {
         _db = db;
         _permissionService = permissionService;
     }
 
+    /// <summary>
+    /// Helper to extract the authenticated user ID from claims.
+    /// </summary>
     private int? GetCurrentUserId()
     {
         var idValue = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
@@ -28,7 +37,10 @@ public class PermissionsController : ControllerBase
         return int.TryParse(idValue, out var id) ? id : null;
     }
 
-    // GET: api/v1/permissions
+    /// <summary>
+    /// Returns the complete catalog of all available permissions in the system.
+    /// </summary>
+    /// <returns>List of permissions with Id, Name, and Description.</returns>
     [HttpGet]
     public async Task<IActionResult> GetAllPermissions()
     {
@@ -38,7 +50,10 @@ public class PermissionsController : ControllerBase
         return Ok(permissions);
     }
 
-    // GET: api/v1/permissions/roles
+    /// <summary>
+    /// Retrieves all system roles alongside their currently granted permissions for the Permissions Matrix UI.
+    /// </summary>
+    /// <returns>Collection of roles containing granted permission IDs and names.</returns>
     [HttpGet("roles")]
     public async Task<IActionResult> GetRolesWithPermissions()
     {
@@ -57,6 +72,9 @@ public class PermissionsController : ControllerBase
         return Ok(roles);
     }
 
+    /// <summary>
+    /// Request model for granting or revoking a permission on a specific role.
+    /// </summary>
     public class AssignPermissionRequest
     {
         public int RoleId { get; set; }
@@ -64,7 +82,11 @@ public class PermissionsController : ControllerBase
         public bool IsGranted { get; set; }
     }
 
-    // POST: api/v1/permissions/assign
+    /// <summary>
+    /// Dynamically grants or revokes a permission for a role in the database, records an audit log entry, and invalidates permission caches.
+    /// Superuser Owner permissions cannot be revoked.
+    /// </summary>
+    /// <param name="req">The assignment request payload.</param>
     [HttpPost("assign")]
     public async Task<IActionResult> AssignPermission([FromBody] AssignPermissionRequest req)
     {
@@ -128,7 +150,10 @@ public class PermissionsController : ControllerBase
         return Ok(new { message = "Permission updated successfully." });
     }
 
-    // GET: api/v1/permissions/audit-log
+    /// <summary>
+    /// Retrieves the most recent 100 permission modification audit trail logs.
+    /// </summary>
+    /// <returns>List of audit log records detailing permission modifications.</returns>
     [HttpGet("audit-log")]
     public async Task<IActionResult> GetPermissionAuditLogs()
     {

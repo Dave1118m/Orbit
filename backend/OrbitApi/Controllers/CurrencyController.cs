@@ -9,6 +9,10 @@ using System.Threading.Tasks;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Currency and FX controller managing supported currency lookups (USD & ETB),
+    /// live exchange rate feeds, conversion calculations, and offline rate fallbacks.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Route("api/[controller]")]

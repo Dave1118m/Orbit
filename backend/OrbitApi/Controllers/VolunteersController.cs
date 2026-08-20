@@ -12,6 +12,10 @@ using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing volunteer public registrations, background check vetting,
+    /// invitation token dispatch, task assignments, and volunteer hour logging.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -37,6 +41,10 @@ namespace OrbitApi.Controllers
             _config = config;
         }
 
+        /// <summary>
+        /// Lists active organizations for the public volunteer application portal.
+        /// </summary>
+        /// <returns>Public organization list.</returns>
         [HttpGet("public-organizations")]
         [AllowAnonymous]
         public async Task<IActionResult> GetPublicOrganizations()
@@ -62,6 +70,11 @@ namespace OrbitApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Accepts a public volunteer application from external candidates.
+        /// </summary>
+        /// <param name="req">Applicant details.</param>
+        /// <returns>Created volunteer record.</returns>
         [HttpPost("public-apply")]
         [AllowAnonymous]
         public async Task<ActionResult<VolunteerDto>> PublicApply([FromBody] PublicApplyVolunteerDto req)
@@ -118,13 +131,15 @@ namespace OrbitApi.Controllers
         [HttpGet]
         public async Task<ActionResult<IEnumerable<VolunteerDto>>> GetVolunteersQuery([FromQuery] int organizationId)
         {
-            if (organizationId <= 0) return BadRequest("organizationId is required");
+            if (organizationId <= 0) return Ok(new List<VolunteerDto>());
             return await GetByOrganization(organizationId);
         }
 
         [HttpGet("{organizationId}")]
         public async Task<ActionResult<IEnumerable<VolunteerDto>>> GetByOrganization(int organizationId)
         {
+            if (organizationId <= 0) return Ok(new List<VolunteerDto>());
+            
             var userIdStr = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value 
                 ?? User.FindFirst("sub")?.Value 
                 ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value;
@@ -163,6 +178,11 @@ namespace OrbitApi.Controllers
             return Ok(volunteers);
         }
 
+        /// <summary>
+        /// Creates a new volunteer profile within an organization.
+        /// </summary>
+        /// <param name="req">Volunteer creation payload.</param>
+        /// <returns>Created volunteer DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<VolunteerDto>> Create([FromBody] CreateVolunteerDto req)
         {
@@ -208,6 +228,12 @@ namespace OrbitApi.Controllers
             return Ok(dto);
         }
 
+        /// <summary>
+        /// Updates volunteer details or background check vetting status.
+        /// </summary>
+        /// <param name="id">Volunteer ID.</param>
+        /// <param name="req">Updated fields.</param>
+        /// <returns>Updated volunteer DTO with invitation link if passed.</returns>
         [HttpPut("{id}")]
         public async Task<ActionResult<VolunteerDto>> Update(int id, [FromBody] UpdateVolunteerDto req)
         {
@@ -269,6 +295,11 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Generates an onboarding activation and password setup invitation link for an approved volunteer.
+        /// </summary>
+        /// <param name="id">Volunteer ID.</param>
+        /// <returns>Invitation token and registration URL.</returns>
         [HttpPost("{id}/invite-link")]
         public async Task<IActionResult> GenerateInviteLink(int id)
         {
@@ -297,6 +328,11 @@ namespace OrbitApi.Controllers
             }
         }
 
+        /// <summary>
+        /// Lists all task assignments for a specific volunteer.
+        /// </summary>
+        /// <param name="id">Volunteer ID.</param>
+        /// <returns>List of task assignments.</returns>
         [HttpGet("{id}/assignments")]
         public async Task<ActionResult<IEnumerable<object>>> GetAssignments(int id)
         {
@@ -311,7 +347,7 @@ namespace OrbitApi.Controllers
 
             var assignments = await _db.TaskVolunteers
                 .Include(tv => tv.Task)
-                .Where(tv => tv.VolunteerId == id)
+                .Where(tv => tv.VolunteerId == id && (tv.Task == null || !tv.Task.IsDeleted))
                 .Select(tv => new
                 {
                     id = tv.Id,
@@ -475,6 +511,11 @@ namespace OrbitApi.Controllers
             return (token, inviteUrl);
         }
 
+        /// <summary>
+        /// Deletes a volunteer profile.
+        /// </summary>
+        /// <param name="id">Volunteer ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
@@ -493,6 +534,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Lists all volunteers assigned to a specific task.
+        /// </summary>
+        /// <param name="taskId">Task ID.</param>
+        /// <returns>List of task volunteer assignments.</returns>
         [HttpGet("tasks/{taskId}")]
         public async Task<ActionResult<IEnumerable<TaskVolunteerDto>>> GetTaskVolunteers(int taskId)
         {
@@ -538,6 +584,12 @@ namespace OrbitApi.Controllers
             return Ok(taskVolunteers);
         }
 
+        /// <summary>
+        /// Assigns a vetted volunteer to a task.
+        /// </summary>
+        /// <param name="taskId">Task ID.</param>
+        /// <param name="req">Volunteer ID.</param>
+        /// <returns>Ok on success.</returns>
         [HttpPost("tasks/{taskId}/assign")]
         public async Task<ActionResult> AssignToTask(int taskId, [FromBody] AssignVolunteerDto req)
         {
@@ -591,6 +643,12 @@ namespace OrbitApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Unassigns a volunteer from a task.
+        /// </summary>
+        /// <param name="taskId">Task ID.</param>
+        /// <param name="volunteerId">Volunteer ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("tasks/{taskId}/assign/{volunteerId}")]
         public async Task<ActionResult> UnassignFromTask(int taskId, int volunteerId)
         {
@@ -617,6 +675,12 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Logs volunteer contribution hours against a task.
+        /// </summary>
+        /// <param name="id">Volunteer ID.</param>
+        /// <param name="req">Hours, date, and task details.</param>
+        /// <returns>Ok on success.</returns>
         [HttpPost("{id}/log-hours")]
         public async Task<ActionResult> LogHours(int id, [FromBody] LogVolunteerHourDto req)
         {
@@ -659,6 +723,11 @@ namespace OrbitApi.Controllers
             return Ok();
         }
 
+        /// <summary>
+        /// Retrieves all logged volunteer hours for a volunteer.
+        /// </summary>
+        /// <param name="id">Volunteer ID.</param>
+        /// <returns>Collection of volunteer hour logs.</returns>
         [HttpGet("{id}/hours")]
         public async Task<ActionResult<IEnumerable<VolunteerHourDto>>> GetHours(int id)
         {

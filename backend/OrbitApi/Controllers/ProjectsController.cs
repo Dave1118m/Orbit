@@ -12,6 +12,10 @@ using ModelProjectStatus = OrbitApi.Models.ProjectStatus;
 
 namespace OrbitApi.Controllers
 {
+    /// <summary>
+    /// Controller managing project life-cycle, milestone scheduling, team assignments,
+    /// budget allocation, postponements, lead histories, comments, attachments, and risk registers.
+    /// </summary>
     [ApiController]
     [Route("api/v1/[controller]")]
     [Authorize]
@@ -22,16 +26,23 @@ namespace OrbitApi.Controllers
         private readonly IHubContext<OrbitHub> _hubContext;
         private readonly INotificationService _notificationService;
         private readonly IPermissionService _permissionService;
+        private readonly ICurrencyService _currencyService;
 
-        public ProjectsController(OrbitDbContext db, IAuthorizationService authorizationService, IHubContext<OrbitHub> hubContext, INotificationService notificationService, IPermissionService permissionService)
+        public ProjectsController(OrbitDbContext db, IAuthorizationService authorizationService, IHubContext<OrbitHub> hubContext, INotificationService notificationService, IPermissionService permissionService, ICurrencyService currencyService)
         {
             _db = db;
             _authorizationService = authorizationService;
             _hubContext = hubContext;
             _notificationService = notificationService;
             _permissionService = permissionService;
+            _currencyService = currencyService;
         }
 
+        /// <summary>
+        /// Creates a new project in the designated workspace with donor allocations and validation.
+        /// </summary>
+        /// <param name="req">Project creation parameters.</param>
+        /// <returns>Created project record DTO.</returns>
         [HttpPost]
         public async Task<ActionResult<ProjectDto>> Create([FromBody] CreateProjectRequest req)
         {
@@ -49,14 +60,57 @@ namespace OrbitApi.Controllers
             {
                 return BadRequest("Project title cannot exceed 150 characters.");
             }
-            if (req.Budget.HasValue && req.Budget.Value < 0)
+            if (req.Description != null && req.Description.Length > 2000)
             {
-                return BadRequest("Project budget cannot be negative.");
+                return BadRequest("Project description cannot exceed 2000 characters.");
+            }
+            if (req.Budget.HasValue)
+            {
+                if (req.Budget.Value < 0)
+                    return BadRequest("Project budget cannot be negative.");
+                if (req.Budget.Value > 1000000000000m)
+                    return BadRequest("Project budget exceeds maximum allowed value.");
+            }
+
+            var donorIdsToLink = new HashSet<int>();
+            if (req.DonorIds != null && req.DonorIds.Count > 0)
+            {
+                foreach (var dId in req.DonorIds) donorIdsToLink.Add(dId);
+            }
+            else if (req.DonorId.HasValue)
+            {
+                donorIdsToLink.Add(req.DonorId.Value);
+            }
+
+            var resolvedFundingType = !string.IsNullOrWhiteSpace(req.FundingType) ? req.FundingType : "SingleDonor";
+            if (resolvedFundingType == "SingleDonor" && donorIdsToLink.Count != 1)
+            {
+                return BadRequest("A Sole Funder project must have exactly one donor assigned.");
             }
 
             if (req.StartDate.HasValue && req.EndDate.HasValue && req.EndDate.Value < req.StartDate.Value)
             {
                 return BadRequest("Project End Date cannot be earlier than Start Date.");
+            }
+
+            switch (req.Status)
+            {
+                case DTOs.ProjectStatus.Active:
+                    if (!req.StartDate.HasValue || !req.EndDate.HasValue)
+                        return BadRequest("An Active project must have both a Start Date and an End Date.");
+                    if (req.StartDate.Value > DateTime.UtcNow)
+                        return BadRequest("An Active project cannot have a Start Date in the future.");
+                    break;
+                case DTOs.ProjectStatus.Completed:
+                case DTOs.ProjectStatus.Archived:
+                    if (!req.StartDate.HasValue || !req.EndDate.HasValue)
+                        return BadRequest($"A {req.Status} project must have both a Start Date and an End Date.");
+                    if (req.Status == DTOs.ProjectStatus.Completed && req.EndDate.Value > DateTime.UtcNow)
+                        return BadRequest("A Completed project cannot have an End Date in the future.");
+                    break;
+                case DTOs.ProjectStatus.OnHold:
+                    // Dates are optional for OnHold projects
+                    break;
             }
 
             var project = new Project
@@ -87,15 +141,7 @@ namespace OrbitApi.Controllers
                 _db.Budgets.Add(budget);
             }
 
-            var donorIdsToLink = new HashSet<int>();
-            if (req.DonorIds != null && req.DonorIds.Count > 0)
-            {
-                foreach (var dId in req.DonorIds) donorIdsToLink.Add(dId);
-            }
-            else if (req.DonorId.HasValue)
-            {
-                donorIdsToLink.Add(req.DonorId.Value);
-            }
+            // donorIdsToLink already calculated at validation stage
 
             if (donorIdsToLink.Count > 0)
             {
@@ -150,7 +196,7 @@ namespace OrbitApi.Controllers
             }
 
             var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id ?? 2003;
+            return firstOrg?.Id ?? 0;
         }
 
         [HttpGet]
@@ -172,25 +218,51 @@ namespace OrbitApi.Controllers
                 query = query.Where(p => p.WorkspaceId == workspaceId.Value);
             }
 
-            var projects = await query
-                .Select(p => new ProjectDto
+            var projectsRaw = await query
+                .Select(p => new
                 {
                     Id = p.Id,
                     WorkspaceId = p.WorkspaceId,
                     Title = p.Title,
                     Description = p.Description,
-                    Status = (DTOProjectStatus)p.Status,
+                    Status = p.Status,
                     StartDate = p.StartDate,
                     EndDate = p.EndDate,
                     Budget = _db.Budgets.Where(b => b.ProjectId == p.Id).Select(b => (decimal?)b.TotalAmount).FirstOrDefault(),
                     DonorId = p.ProjectDonors.Select(pd => (int?)pd.DonorId).FirstOrDefault(),
-                    FundingType = p.FundingType ?? "SingleDonor",
+                    FundingType = p.FundingType,
+                    Teams = p.ProjectTeams.Select(pt => new { pt.TeamId, pt.Team.Name }).ToList(),
                     TaskCount = p.Tasks.Count(t => !t.IsDeleted)
                 }).ToListAsync();
+
+            var projects = projectsRaw.Select(p => new ProjectDto
+            {
+                Id = p.Id,
+                WorkspaceId = p.WorkspaceId,
+                Title = p.Title,
+                Description = p.Description,
+                Status = Enum.TryParse<DTOProjectStatus>(p.Status.ToString(), out var parsed) ? parsed : DTOProjectStatus.Planning,
+                StartDate = p.StartDate,
+                EndDate = p.EndDate,
+                Budget = p.Budget,
+                DonorId = p.DonorId,
+                FundingType = p.FundingType ?? "SingleDonor",
+                Teams = p.Teams.Select(pt => new TeamSimpleDto
+                {
+                    Id = pt.TeamId,
+                    Name = pt.Name ?? "Unknown"
+                }).ToList(),
+                TaskCount = p.TaskCount
+            }).ToList();
 
             return Ok(projects);
         }
 
+        /// <summary>
+        /// Retrieves a single project by ID with budgets, assigned teams, and donor information.
+        /// </summary>
+        /// <param name="id">Project primary key.</param>
+        /// <returns>Project DTO.</returns>
         [HttpGet("{id}")]
         public async Task<ActionResult<ProjectDto>> Get(int id)
         {
@@ -205,6 +277,13 @@ namespace OrbitApi.Controllers
 
             var budgetAmount = await _db.Budgets.Where(b => b.ProjectId == id).Select(b => (decimal?)b.TotalAmount).FirstOrDefaultAsync();
             var donorId = await _db.ProjectDonors.Where(pd => pd.ProjectId == id).Select(pd => (int?)pd.DonorId).FirstOrDefaultAsync();
+            var teamsList = await _db.ProjectTeams
+                .Where(pt => pt.ProjectId == id)
+                .Select(pt => new TeamSimpleDto
+                {
+                    Id = pt.TeamId,
+                    Name = pt.Team.Name
+                }).ToListAsync();
 
             return Ok(new ProjectDto
             {
@@ -218,6 +297,7 @@ namespace OrbitApi.Controllers
                 Budget = budgetAmount,
                 DonorId = donorId,
                 FundingType = project.FundingType ?? "SingleDonor",
+                Teams = teamsList,
                 TaskCount = project.Tasks.Count
             });
         }
@@ -249,6 +329,12 @@ namespace OrbitApi.Controllers
             return Ok(projectDonors);
         }
 
+        /// <summary>
+        /// Updates project details, date constraints, status transitions, budget, or donors.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <param name="req">Updated fields.</param>
+        /// <returns>Updated project DTO.</returns>
         [HttpPut("{id}")]
         public async Task<ActionResult<ProjectDto>> Update(int id, [FromBody] UpdateProjectRequest req)
         {
@@ -274,11 +360,35 @@ namespace OrbitApi.Controllers
                 project.Title = req.Title.Trim();
             }
 
-            if (req.Budget.HasValue && req.Budget.Value < 0)
+            if (req.Description != null)
             {
-                return BadRequest("Project budget cannot be negative.");
+                if (req.Description.Length > 2000)
+                    return BadRequest("Project description cannot exceed 2000 characters.");
+                project.Description = req.Description;
             }
-            if (req.Description != null) project.Description = req.Description;
+            if (req.Budget.HasValue)
+            {
+                if (req.Budget.Value < 0)
+                    return BadRequest("Project budget cannot be negative.");
+                if (req.Budget.Value > 1000000000000m)
+                    return BadRequest("Project budget exceeds maximum allowed value.");
+            }
+
+            var updateDonorIdsToLink = new HashSet<int>();
+            if (req.DonorIds != null && req.DonorIds.Count > 0)
+            {
+                foreach (var dId in req.DonorIds) updateDonorIdsToLink.Add(dId);
+            }
+            else if (req.DonorId.HasValue)
+            {
+                updateDonorIdsToLink.Add(req.DonorId.Value);
+            }
+
+            var resolvedUpdateFundingType = !string.IsNullOrWhiteSpace(req.FundingType) ? req.FundingType : (!string.IsNullOrWhiteSpace(project.FundingType) ? project.FundingType : "SingleDonor");
+            if (resolvedUpdateFundingType == "SingleDonor" && updateDonorIdsToLink.Count != 1)
+            {
+                return BadRequest("A Sole Funder project must have exactly one donor assigned.");
+            }
             if (req.Status.HasValue && project.Status != (OrbitApi.Models.ProjectStatus)req.Status.Value)
             {
                 var oldStatus = project.Status.ToString();
@@ -301,6 +411,27 @@ namespace OrbitApi.Controllers
             if (targetStartDate.HasValue && targetEndDate.HasValue && targetEndDate.Value < targetStartDate.Value)
             {
                 return BadRequest("Project End Date cannot be earlier than Start Date.");
+            }
+            
+            var targetStatus = req.Status.HasValue ? (OrbitApi.Models.ProjectStatus)req.Status.Value : project.Status;
+            switch (targetStatus)
+            {
+                case OrbitApi.Models.ProjectStatus.Active:
+                    if (!targetStartDate.HasValue || !targetEndDate.HasValue)
+                        return BadRequest("An Active project must have both a Start Date and an End Date.");
+                    if (targetStartDate.Value > DateTime.UtcNow)
+                        return BadRequest("An Active project cannot have a Start Date in the future.");
+                    break;
+                case OrbitApi.Models.ProjectStatus.Completed:
+                case OrbitApi.Models.ProjectStatus.Archived:
+                    if (!targetStartDate.HasValue || !targetEndDate.HasValue)
+                        return BadRequest($"A {targetStatus} project must have both a Start Date and an End Date.");
+                    if (targetStatus == OrbitApi.Models.ProjectStatus.Completed && targetEndDate.Value > DateTime.UtcNow)
+                        return BadRequest("A Completed project cannot have an End Date in the future.");
+                    break;
+                case OrbitApi.Models.ProjectStatus.OnHold:
+                    // Dates are optional for OnHold projects
+                    break;
             }
 
             if (req.StartDate.HasValue) project.StartDate = req.StartDate;
@@ -354,6 +485,12 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Records an authorized timeline postponement for a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <param name="req">New end date and postponement justification.</param>
+        /// <returns>Created postponement record.</returns>
         [HttpPost("{id}/postpone")]
         public async Task<ActionResult<ProjectPostponementDto>> Postpone(int id, [FromBody] PostponeProjectRequest req)
         {
@@ -414,6 +551,11 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Lists all historical timeline postponement requests for a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <returns>Collection of project postponements.</returns>
         [HttpGet("{id}/postponements")]
         public async Task<ActionResult<IEnumerable<ProjectPostponementDto>>> GetPostponements(int id)
         {
@@ -445,6 +587,11 @@ namespace OrbitApi.Controllers
             return Ok(postponements);
         }
 
+        /// <summary>
+        /// Retrieves the historical leadership succession log for a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <returns>List of past and present project leads.</returns>
         [HttpGet("{id}/lead-history")]
         public async Task<ActionResult<IEnumerable<ProjectLeadHistoryDto>>> GetLeadHistory(int id)
         {
@@ -474,6 +621,12 @@ namespace OrbitApi.Controllers
             return Ok(histories);
         }
 
+        /// <summary>
+        /// Reassigns or designates the active project lead user.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <param name="req">New lead user ID.</param>
+        /// <returns>New project lead history record.</returns>
         [HttpPost("{id}/assign-lead")]
         public async Task<ActionResult> AssignLead(int id, [FromBody] AssignProjectLeadRequest req)
         {
@@ -523,6 +676,11 @@ namespace OrbitApi.Controllers
             });
         }
 
+        /// <summary>
+        /// Soft-deletes a project and cascades deletion to associated tasks.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{id}")]
         public async Task<ActionResult> Delete(int id)
         {
@@ -550,6 +708,11 @@ namespace OrbitApi.Controllers
 
         // --- Comments ---
 
+        /// <summary>
+        /// Lists discussion comments and nested replies on a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <returns>List of comment DTOs.</returns>
         [HttpGet("{id}/comments")]
         public async Task<ActionResult> GetComments(int id)
         {
@@ -609,6 +772,12 @@ namespace OrbitApi.Controllers
             return Ok(dtos);
         }
 
+        /// <summary>
+        /// Posts a new comment or threaded reply on a project and dispatches @mention notifications.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <param name="req">Comment content and parent comment ID.</param>
+        /// <returns>Created comment record.</returns>
         [HttpPost("{id}/comments")]
         public async Task<ActionResult> CreateComment(int id, [FromBody] CreateCommentRequest req)
         {
@@ -672,6 +841,11 @@ namespace OrbitApi.Controllers
 
         // --- Attachments ---
 
+        /// <summary>
+        /// Retrieves file attachments and cloud link references associated with a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <returns>List of attachment DTOs.</returns>
         [HttpGet("{id}/attachments")]
         public async Task<ActionResult> GetAttachments(int id)
         {
@@ -721,6 +895,15 @@ namespace OrbitApi.Controllers
             return Ok(attachments);
         }
 
+        /// <summary>
+        /// Uploads a physical file or links an external cloud document (Google Drive, OneDrive) to a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <param name="file">Form file payload.</param>
+        /// <param name="cloudUrl">External cloud URL.</param>
+        /// <param name="cloudProvider">Cloud provider name.</param>
+        /// <param name="cloudFileName">Document name.</param>
+        /// <returns>Created attachment metadata.</returns>
         [HttpPost("{id}/attachments")]
         public async Task<ActionResult> UploadAttachment(int id, [FromForm] IFormFile? file, [FromForm] string? cloudUrl, [FromForm] string? cloudProvider, [FromForm] string? cloudFileName)
         {
@@ -968,6 +1151,11 @@ namespace OrbitApi.Controllers
 
         // --- Risk / Issue Log ---
 
+        /// <summary>
+        /// Retrieves the Risk and Issue register entries for a project.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <returns>Collection of risk and issue records.</returns>
         [HttpGet("{id}/risks")]
         public async Task<ActionResult> GetRisks(int id)
         {
@@ -999,6 +1187,8 @@ namespace OrbitApi.Controllers
                     r.ResolutionNotes,
                     r.ResolvedAt,
                     ResolvedByUserName = r.ResolvedByUser != null ? r.ResolvedByUser.Name : null,
+                    LogframeLevel = r.LogframeLevel.HasValue ? r.LogframeLevel.ToString() : null,
+                    r.LogframeEntityId,
                     r.CreatedAt
                 })
                 .ToListAsync();
@@ -1006,6 +1196,12 @@ namespace OrbitApi.Controllers
             return Ok(risks);
         }
 
+        /// <summary>
+        /// Creates a new Risk or Issue entry in the project register and broadcasts via SignalR.
+        /// </summary>
+        /// <param name="id">Project ID.</param>
+        /// <param name="req">Risk/issue details.</param>
+        /// <returns>Created risk payload.</returns>
         [HttpPost("{id}/risks")]
         public async Task<ActionResult> CreateRisk(int id, [FromBody] CreateRiskIssueRequest req)
         {
@@ -1036,6 +1232,8 @@ namespace OrbitApi.Controllers
                 MitigationPlan = req.MitigationPlan,
                 Owner = req.Owner ?? string.Empty,
                 Status = req.Status ?? "Open",
+                LogframeLevel = string.IsNullOrEmpty(req.LogframeLevel) ? null : Enum.Parse<LogframeLevel>(req.LogframeLevel, true),
+                LogframeEntityId = req.LogframeEntityId,
                 CreatedAt = DateTime.UtcNow
             };
 
@@ -1056,6 +1254,8 @@ namespace OrbitApi.Controllers
                 risk.MitigationPlan,
                 risk.Owner,
                 risk.Status,
+                LogframeLevel = risk.LogframeLevel.HasValue ? risk.LogframeLevel.ToString() : null,
+                risk.LogframeEntityId,
                 risk.CreatedAt
             };
 
@@ -1063,6 +1263,13 @@ namespace OrbitApi.Controllers
             return Ok(payload);
         }
 
+        /// <summary>
+        /// Updates a Risk/Issue entry, scores, mitigation plans, or resolution notes.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="riskId">Risk primary key.</param>
+        /// <param name="req">Updated fields.</param>
+        /// <returns>Updated risk payload.</returns>
         [HttpPut("{projectId}/risks/{riskId}")]
         public async Task<ActionResult> UpdateRisk(int projectId, int riskId, [FromBody] UpdateRiskIssueRequest req)
         {
@@ -1098,6 +1305,8 @@ namespace OrbitApi.Controllers
             if (req.Owner != null) risk.Owner = req.Owner;
             if (req.Status != null) risk.Status = req.Status;
             if (req.ResolutionNotes != null) risk.ResolutionNotes = req.ResolutionNotes;
+            if (req.LogframeLevel != null) risk.LogframeLevel = Enum.Parse<LogframeLevel>(req.LogframeLevel, true);
+            if (req.LogframeEntityId.HasValue) risk.LogframeEntityId = req.LogframeEntityId.Value;
 
             if (req.MarkResolved == true && risk.ResolvedAt == null)
             {
@@ -1129,6 +1338,8 @@ namespace OrbitApi.Controllers
                 risk.MitigationPlan,
                 risk.Owner,
                 risk.Status,
+                LogframeLevel = risk.LogframeLevel.HasValue ? risk.LogframeLevel.ToString() : null,
+                risk.LogframeEntityId,
                 risk.ResolutionNotes,
                 risk.ResolvedAt,
                 ResolvedByUserName = resolvedByUser?.Name,
@@ -1139,6 +1350,12 @@ namespace OrbitApi.Controllers
             return Ok(payload);
         }
 
+        /// <summary>
+        /// Deletes a Risk/Issue entry and broadcasts deletion via SignalR.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <param name="riskId">Risk ID.</param>
+        /// <returns>NoContent on success.</returns>
         [HttpDelete("{projectId}/risks/{riskId}")]
         public async Task<ActionResult> DeleteRisk(int projectId, int riskId)
         {
@@ -1159,6 +1376,11 @@ namespace OrbitApi.Controllers
             return NoContent();
         }
 
+        /// <summary>
+        /// Generates a comprehensive ZIP audit support package containing multi-sheet Excel workbooks and CSV ledgers.
+        /// </summary>
+        /// <param name="projectId">Project ID.</param>
+        /// <returns>ZIP file download stream.</returns>
         [HttpGet("{projectId}/export-audit-package")]
         public async Task<IActionResult> ExportAuditPackage(int projectId)
         {
@@ -1206,13 +1428,18 @@ namespace OrbitApi.Controllers
                         summarySheet.Cell(6, 2).Value = DateTime.UtcNow.ToString("yyyy-MM-dd HH:mm:ss");
 
                         summarySheet.Cell(8, 1).Value = "Financial Metric";
-                        summarySheet.Cell(8, 2).Value = "Amount ($)";
+                        summarySheet.Cell(8, 2).Value = "Amount (USD eq.)";
                         summarySheet.Row(8).Style.Font.Bold = true;
 
                         summarySheet.Cell(9, 1).Value = "Total Project Budget";
                         summarySheet.Cell(9, 2).Value = budget?.TotalAmount ?? 0m;
                         summarySheet.Cell(10, 1).Value = "Total Approved Expenses";
-                        summarySheet.Cell(10, 2).Value = expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Approved).Sum(e => e.Amount);
+                        var approvedExpensesTotal = 0m;
+                        foreach (var e in expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Approved))
+                        {
+                            approvedExpensesTotal += await _currencyService.ConvertAsync(e.Amount, e.Currency, "USD");
+                        }
+                        summarySheet.Cell(10, 2).Value = approvedExpensesTotal;
                         summarySheet.Cell(11, 1).Value = "Total Donor Allocations";
                         summarySheet.Cell(11, 2).Value = donorAllocations.Sum(da => da.AllocatedAmount);
 
@@ -1232,7 +1459,7 @@ namespace OrbitApi.Controllers
                             foreach (var item in budget.LineItems)
                             {
                                 budgetSheet.Cell(bRow, 1).Value = item.Id;
-                                budgetSheet.Cell(bRow, 2).Value = item.Category.ToString();
+                                budgetSheet.Cell(bRow, 2).Value = item.FinancialCategory?.Name ?? "General Line Item";
                                 budgetSheet.Cell(bRow, 3).Value = item.Description;
                                 budgetSheet.Cell(bRow, 4).Value = item.Amount;
                                 bRow++;
