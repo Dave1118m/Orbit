@@ -119,7 +119,7 @@ export default function InteractiveReportsDemo() {
         position: 'top',
         labels: {
           color: '#cbd5e1',
-          font: { family: 'Plus Jakarta Sans', size: 12, weight: 'bold' }
+          font: { family: 'Inter, sans-serif', size: 12, weight: 'bold' }
         }
       },
       tooltip: {
@@ -134,11 +134,11 @@ export default function InteractiveReportsDemo() {
     },
     scales: {
       x: {
-        ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11 } },
+        ticks: { color: '#94a3b8', font: { family: 'Inter, sans-serif', size: 11 } },
         grid: { color: 'rgba(255, 255, 255, 0.05)' }
       },
       y: {
-        ticks: { color: '#94a3b8', font: { family: 'Plus Jakarta Sans', size: 11 } },
+        ticks: { color: '#94a3b8', font: { family: 'Inter, sans-serif', size: 11 } },
         grid: { color: 'rgba(255, 255, 255, 0.05)' }
       }
     }
@@ -222,7 +222,7 @@ export default function InteractiveReportsDemo() {
                   plugins: {
                     legend: {
                       position: 'right',
-                      labels: { color: '#cbd5e1', font: { family: 'Plus Jakarta Sans', size: 12 } }
+                      labels: { color: '#cbd5e1', font: { family: 'Inter, sans-serif', size: 12 } }
                     }
                   }
                 }}

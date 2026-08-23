@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import SearchSelect from '../SearchSelect';
 import { useUser } from '../../contexts/UserContext';
+import { getShortBankName } from '../../lib/ethiopianBanks';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
@@ -291,7 +292,8 @@ export default function Expenses() {
     try {
       const res = await fetch(`${API_BASE}/tasks?projectId=${projectId}`, { headers: authHeaders() });
       if (res.ok) {
-        setTasks(await res.json());
+        const allTasks = await res.json();
+        setTasks(Array.isArray(allTasks) ? allTasks : []);
       } else {
         setTasks([]);
       }
@@ -878,31 +880,72 @@ export default function Expenses() {
 
               {form.projectId && (
                 <div>
-                  <label className="block font-semibold text-slate-700 mb-1">Task</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block font-semibold text-slate-700">Project Task / Activity</label>
+                    <span className="text-[10px] text-slate-500 font-medium">
+                      {(form.categoryId || form.category)
+                        ? `Showing tasks under selected category`
+                        : `All tasks for ${selectedProjectInfo?.title || 'Project'}`}
+                    </span>
+                  </div>
                   <select
                     value={form.taskId}
                     onChange={(e) => {
-                      const selectedTask = tasks.find(t => String(t.id) === String(e.target.value));
-                      setForm({ 
-                        ...form, 
-                        taskId: e.target.value,
-                        // Auto-select category if they select a task that has a category
-                        ...(selectedTask?.categoryId ? { categoryId: String(selectedTask.categoryId), category: String(selectedTask.categoryId) } : {})
-                      });
+                      const selectedTaskId = e.target.value;
+                      const selectedTask = tasks.find(t => String(t.id) === String(selectedTaskId));
+                      if (selectedTask) {
+                        const newCatId = selectedTask.categoryId ? String(selectedTask.categoryId) : (form.categoryId || form.category);
+                        setForm({ 
+                          ...form, 
+                          taskId: selectedTaskId,
+                          ...(newCatId ? { categoryId: newCatId, category: newCatId } : {})
+                        });
+                        if (newCatId && form.projectId) {
+                          fetchBudgetInfo(form.projectId, newCatId);
+                        }
+                      } else {
+                        setForm({ ...form, taskId: '' });
+                      }
                     }}
                     className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
                   >
                     <option value="">General Project Expense</option>
-                    {tasks
-                      .filter(t => {
-                        const currentCat = form.categoryId || form.category;
-                        if (!currentCat) return true; // show all if no category selected
-                        return String(t.categoryId) === String(currentCat); // only show matching tasks
-                      })
-                      .map((t) => (
-                      <option key={t.id} value={t.id}>{t.title}</option>
-                    ))}
+                    {(() => {
+                      const currentCat = form.categoryId || form.category;
+                      const filteredTasks = currentCat 
+                        ? tasks.filter(t => String(t.categoryId) === String(currentCat))
+                        : tasks;
+
+                      if (currentCat && filteredTasks.length === 0) {
+                        return (
+                          <option value="" disabled>
+                            No specific tasks created under this category
+                          </option>
+                        );
+                      }
+
+                      return filteredTasks.map((t) => {
+                        const cat = dynamicCategories.find(c => String(c.id) === String(t.categoryId));
+                        return (
+                          <option key={t.id} value={t.id}>
+                            {t.title} {cat ? `[${cat.fullName || cat.name}]` : ''} {t.status ? `(${t.status})` : ''}
+                          </option>
+                        );
+                      });
+                    })()}
                   </select>
+                  {form.taskId && (
+                    <div className="mt-1.5 p-2 bg-slate-50 border border-slate-200/80 rounded-lg text-[11px] text-slate-600 flex items-center justify-between">
+                      <span>Linked Activity: <strong>{tasks.find(t => String(t.id) === String(form.taskId))?.title}</strong></span>
+                      <button 
+                        type="button" 
+                        onClick={() => setForm(f => ({ ...f, taskId: '' }))}
+                        className="text-rose-600 hover:underline font-semibold"
+                      >
+                        ✕ Unlink Task
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -915,7 +958,7 @@ export default function Expenses() {
                 >
                   <option value="">Select Account</option>
                   {bankAccounts.map((b) => (
-                    <option key={b.id} value={b.id}>{b.bankName} - {b.accountName} ({b.currency})</option>
+                    <option key={b.id} value={b.id}>{getShortBankName(b.bankName)} - {b.accountName} ({b.currency})</option>
                   ))}
                 </select>
               </div>

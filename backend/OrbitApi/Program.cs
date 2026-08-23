@@ -18,26 +18,41 @@ using System.Text.Json.Serialization;
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls("https://localhost:7065");
 
-Dictionary<string, string>? envValues = null;
-var envFile = Path.Combine(builder.Environment.ContentRootPath, ".env");
-if (File.Exists(envFile))
+// Load .env file overrides (from project root, cwd, or content root)
+var candidateEnvPaths = new[]
 {
-    envValues = File.ReadAllLines(envFile)
-        .Select(line => line.Trim())
-        .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith("#"))
-        .Select(line =>
+    Path.Combine(builder.Environment.ContentRootPath, ".env"),
+    Path.Combine(Directory.GetCurrentDirectory(), ".env"),
+    Path.Combine(AppContext.BaseDirectory, ".env"),
+    Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", "..", ".env")),
+    Path.GetFullPath(Path.Combine(builder.Environment.ContentRootPath, "..", ".env"))
+};
+
+var envValues = new Dictionary<string, string>();
+foreach (var candidate in candidateEnvPaths.Distinct())
+{
+    if (File.Exists(candidate))
+    {
+        Console.WriteLine($"[Config] Loading environment variables from .env: {candidate}");
+        foreach (var line in File.ReadAllLines(candidate))
         {
-            var separatorIndex = line.IndexOf('=');
-            if (separatorIndex <= 0) return default(KeyValuePair<string, string>?);
-            var key = line.Substring(0, separatorIndex).Trim();
-            var value = line.Substring(separatorIndex + 1).Trim();
-            key = key.Replace("__", ":");
-            return new KeyValuePair<string, string>(key, value);
-        })
-        .Where(kvp => kvp.HasValue)
-        .Select(kvp => kvp.Value)
-        .ToDictionary(kvp => kvp.Key, kvp => kvp.Value);
-    Console.WriteLine($"DEBUG: .env file found at {envFile}");
+            var trimmed = line.Trim();
+            if (string.IsNullOrWhiteSpace(trimmed) || trimmed.StartsWith("#")) continue;
+            var separatorIndex = trimmed.IndexOf('=');
+            if (separatorIndex <= 0) continue;
+            var rawKey = trimmed.Substring(0, separatorIndex).Trim();
+            var rawValue = trimmed.Substring(separatorIndex + 1).Trim();
+
+            // Set system environment variable directly
+            Environment.SetEnvironmentVariable(rawKey, rawValue);
+
+            // Add both colon format and underscore format for IConfiguration
+            var configKey = rawKey.Replace("__", ":");
+            envValues[configKey] = rawValue;
+            envValues[rawKey] = rawValue;
+        }
+        break;
+    }
 }
 
 builder.Configuration
@@ -45,7 +60,7 @@ builder.Configuration
     .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
     .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true);
 
-if (envValues != null && envValues.Count > 0)
+if (envValues.Count > 0)
 {
     builder.Configuration.AddInMemoryCollection(envValues!);
 }

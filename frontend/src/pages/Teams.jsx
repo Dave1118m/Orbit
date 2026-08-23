@@ -218,8 +218,8 @@ export default function Teams() {
         setIsCreating(false);
         fetchTeams(selectedWorkspaceId);
       } else {
-        const err = await res.json();
-        showErrorToast(err.title || err.message || 'Failed to create team.');
+        const errText = await parseApiResponse(res);
+        showErrorToast(errText, 'Failed to create team.');
       }
     } catch (err) { console.error(err); }
   };
@@ -297,8 +297,8 @@ export default function Teams() {
         fetchHistory(selectedTeam.id);
         fetchTeams(selectedWorkspaceId);
       } else {
-        const err = await res.json();
-        showErrorToast(err.title || err.message || 'Failed to assign team to project.');
+        const errText = await parseApiResponse(res);
+        showErrorToast(errText, 'Failed to assign team to project.');
       }
     } catch (err) { console.error(err); }
   };
@@ -353,8 +353,8 @@ export default function Teams() {
         fetchHistory(selectedTeam.id);
         fetchTeams(selectedWorkspaceId);
       } else {
-        const err = await res.json();
-        showErrorToast(err.title || err.message || 'Failed to replace team.');
+        const errText = await parseApiResponse(res);
+        showErrorToast(errText, 'Failed to replace team.');
       }
     } catch (err) { console.error(err); }
   };
@@ -478,7 +478,7 @@ export default function Teams() {
                       )}
                     </div>
                     <p className="truncate text-xs text-slate-500 mt-0.5">
-                      {team.members?.length || 0} members · {team.projects?.length || 0} projects
+                      {(team.members && team.members.length > 0) ? team.members.length : (team.teamLeadUserId ? 1 : 0)} members · {team.projects?.length || 0} projects
                     </p>
                   </div>
                 </button>

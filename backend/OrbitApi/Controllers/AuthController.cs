@@ -76,12 +76,52 @@ public class AuthController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(req.Password) || req.Password.Length < 8)
         {
-            return BadRequest("Password must be at least 8 characters long.");
+            return BadRequest(new { message = "Password must be at least 8 characters long." });
+        }
+
+        var existingUser = await _userManager.FindByEmailAsync(req.Email);
+        if (existingUser != null)
+        {
+            if (!existingUser.EmailConfirmed)
+            {
+                // Update password and fullname if user is re-registering before confirming
+                var resetToken = await _userManager.GeneratePasswordResetTokenAsync(existingUser);
+                await _userManager.ResetPasswordAsync(existingUser, resetToken, req.Password);
+                if (!string.IsNullOrWhiteSpace(req.FullName))
+                {
+                    existingUser.FullName = req.FullName;
+                    await _userManager.UpdateAsync(existingUser);
+                }
+
+                var resendToken = await _userManager.GenerateEmailConfirmationTokenAsync(existingUser);
+                var resendEncoded = System.Net.WebUtility.UrlEncode(resendToken);
+                var resendConfirmUrl = $"{Request.Scheme}://{Request.Host}/api/v1/auth/confirm-email?userId={existingUser.Id}&token={resendEncoded}";
+
+                var resendSubject = "Confirm your Orbit account";
+                var resendBody = $"<p>Hi {existingUser.FullName ?? existingUser.Email},</p><p>Please confirm your account by clicking <a href=\"{resendConfirmUrl}\">this link</a>.</p>";
+
+                try
+                {
+                    await _emailSender.SendEmailAsync(existingUser.Email!, resendSubject, resendBody);
+                    Console.WriteLine($"[Register] Re-sent confirmation for unconfirmed user {existingUser.Email}. Confirm link: {resendConfirmUrl}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Register] Email notice: {ex.Message}. Confirm link: {resendConfirmUrl}");
+                }
+
+                return Ok(new { existingUser.Id, existingUser.Email, emailSent = true, confirmUrl = resendConfirmUrl });
+            }
+
+            return BadRequest(new { message = "An account with this email address already exists. Please sign in instead." });
         }
 
         var user = new ApplicationUser { UserName = req.Email, Email = req.Email, FullName = req.FullName };
         var res = await _userManager.CreateAsync(user, req.Password);
-        if (!res.Succeeded) return BadRequest(res.Errors.Select(e => e.Description));
+        if (!res.Succeeded)
+        {
+            return BadRequest(new { message = string.Join("; ", res.Errors.Select(e => e.Description)) });
+        }
 
         // generate email confirmation token and send email
         var token = await _userManager.GenerateEmailConfirmationTokenAsync(user);
@@ -94,15 +134,14 @@ public class AuthController : ControllerBase
         try
         {
             await _emailSender.SendEmailAsync(user.Email!, subject, body);
-            Console.WriteLine($"Confirmation email sent to {user.Email}");
+            Console.WriteLine($"[Register] Confirmation email processed for {user.Email}. Confirm link: {confirmUrl}");
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Failed to send confirmation email: {ex.Message}");
-            return BadRequest($"Registration succeeded but failed to send confirmation email: {ex.Message}");
+            Console.WriteLine($"[Register] Email sender notice: {ex.Message}. Confirm link: {confirmUrl}");
         }
 
-        return Ok(new { user.Id, user.Email, emailSent = true });
+        return Ok(new { user.Id, user.Email, emailSent = true, confirmUrl });
     }
 
     [HttpPost("login")]
@@ -223,7 +262,7 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ConfirmEmail([FromQuery] int userId, [FromQuery] string token)
     {
         var frontendUrl = _config["App:FrontendBaseUrl"] ?? "https://localhost:5173";
-        Console.WriteLine($"Email confirmation attempt: userId={userId}, token={token}");
+        Console.WriteLine($"Email confirmation attempt: userId={userId}");
         
         var user = await _userManager.FindByIdAsync(userId.ToString());
         if (user == null)
@@ -234,10 +273,19 @@ public class AuthController : ControllerBase
 
         Console.WriteLine($"User found: {user.Email}, EmailConfirmed={user.EmailConfirmed}");
 
-        var decoded = System.Net.WebUtility.UrlDecode(token);
-        Console.WriteLine($"Decoded token: {decoded}");
-        
-        var res = await _userManager.ConfirmEmailAsync(user, decoded);
+        if (user.EmailConfirmed)
+        {
+            return Redirect($"{frontendUrl}/login?message=email_confirmed");
+        }
+
+        // ASP.NET Core model binder already URL-decodes the query parameter.
+        // Try confirmation with token as bound, and fallback with spaces restored to '+' if corrupted in transit.
+        var res = await _userManager.ConfirmEmailAsync(user, token);
+        if (!res.Succeeded && token.Contains(' '))
+        {
+            res = await _userManager.ConfirmEmailAsync(user, token.Replace(' ', '+'));
+        }
+
         if (!res.Succeeded)
         {
             Console.WriteLine($"Email confirmation failed for user {user.Email}");

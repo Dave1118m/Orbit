@@ -82,6 +82,8 @@ namespace OrbitApi.Controllers
 
             var query = _db.Teams
                 .Include(t => t.Workspace)
+                .Include(t => t.TeamMembers)
+                .Include(t => t.ProjectTeams).ThenInclude(p => p.Project)
                 .Where(t => t.Workspace != null && t.Workspace.OrganizationId == activeOrgId);
 
             if (workspaceId.HasValue)
@@ -93,33 +95,56 @@ namespace OrbitApi.Controllers
                 query = query.Where(t => t.WorkspaceId == workspaceId.Value);
             }
 
-            var teams = await query
-                .Select(t => new TeamDto
+            var teamEntities = await query.ToListAsync();
+
+            // Self-healing: Ensure any team with a designated TeamLeadUserId has the leader enrolled in TeamMembers
+            bool needsDbSave = false;
+            foreach (var team in teamEntities)
+            {
+                if (team.TeamLeadUserId.HasValue && team.TeamLeadUserId.Value > 0 && !team.TeamMembers.Any(m => m.UserId == team.TeamLeadUserId.Value))
                 {
-                    Id = t.Id,
-                    WorkspaceId = t.WorkspaceId,
-                    Name = t.Name,
-                    Description = t.Description,
-                    TeamLeadUserId = t.TeamLeadUserId,
-                    IsArchived = t.IsArchived,
-                    Members = t.TeamMembers.Select(m => new TeamMemberDto
+                    var newLeadMember = new TeamMember
                     {
-                        Id = m.Id,
-                        TeamId = m.TeamId,
-                        UserId = m.UserId,
-                        JoinedAt = m.JoinedAt
-                    }).ToList(),
-                    Projects = t.ProjectTeams
-                        .Where(p => p.Project != null && !p.Project.IsDeleted)
-                        .Select(p => new ProjectTeamDto
-                        {
-                            Id = p.Id,
-                            ProjectId = p.ProjectId,
-                            ProjectTitle = p.Project!.Title,
-                            TeamId = p.TeamId,
-                            AssignedAt = p.AssignedAt
-                        }).ToList()
-                }).ToListAsync();
+                        TeamId = team.Id,
+                        UserId = team.TeamLeadUserId.Value,
+                        JoinedAt = DateTime.UtcNow
+                    };
+                    _db.TeamMembers.Add(newLeadMember);
+                    team.TeamMembers.Add(newLeadMember);
+                    needsDbSave = true;
+                }
+            }
+            if (needsDbSave)
+            {
+                await _db.SaveChangesAsync();
+            }
+
+            var teams = teamEntities.Select(t => new TeamDto
+            {
+                Id = t.Id,
+                WorkspaceId = t.WorkspaceId,
+                Name = t.Name,
+                Description = t.Description,
+                TeamLeadUserId = t.TeamLeadUserId,
+                IsArchived = t.IsArchived,
+                Members = t.TeamMembers.Select(m => new TeamMemberDto
+                {
+                    Id = m.Id,
+                    TeamId = m.TeamId,
+                    UserId = m.UserId,
+                    JoinedAt = m.JoinedAt
+                }).ToList(),
+                Projects = t.ProjectTeams
+                    .Where(p => p.Project != null && !p.Project.IsDeleted)
+                    .Select(p => new ProjectTeamDto
+                    {
+                        Id = p.Id,
+                        ProjectId = p.ProjectId,
+                        ProjectTitle = p.Project!.Title,
+                        TeamId = p.TeamId,
+                        AssignedAt = p.AssignedAt
+                    }).ToList()
+            }).ToList();
 
             return Ok(teams);
         }
@@ -205,7 +230,39 @@ namespace OrbitApi.Controllers
             _db.Teams.Add(team);
             await _db.SaveChangesAsync();
 
-            var dto = new TeamDto { Id = team.Id, WorkspaceId = team.WorkspaceId, Name = team.Name, Description = team.Description, TeamLeadUserId = team.TeamLeadUserId, IsArchived = team.IsArchived };
+            var membersList = new List<TeamMemberDto>();
+
+            // Automatically enroll designated team leader as an initial member of the team
+            if (req.TeamLeadUserId.HasValue && req.TeamLeadUserId.Value > 0)
+            {
+                var leadMember = new TeamMember
+                {
+                    TeamId = team.Id,
+                    UserId = req.TeamLeadUserId.Value,
+                    JoinedAt = DateTime.UtcNow
+                };
+                _db.TeamMembers.Add(leadMember);
+                await _db.SaveChangesAsync();
+
+                membersList.Add(new TeamMemberDto
+                {
+                    Id = leadMember.Id,
+                    TeamId = team.Id,
+                    UserId = leadMember.UserId,
+                    JoinedAt = leadMember.JoinedAt
+                });
+            }
+
+            var dto = new TeamDto
+            {
+                Id = team.Id,
+                WorkspaceId = team.WorkspaceId,
+                Name = team.Name,
+                Description = team.Description,
+                TeamLeadUserId = team.TeamLeadUserId,
+                IsArchived = team.IsArchived,
+                Members = membersList
+            };
 
             return CreatedAtAction(nameof(Get), new { id = team.Id }, dto);
         }
@@ -584,6 +641,20 @@ namespace OrbitApi.Controllers
                 .Where(pt => pt.TeamId == id)
                 .Select(pt => pt.ProjectId)
                 .ToListAsync();
+
+            // If team lead was not in TeamMembers table, auto-enroll them
+            if (team.TeamLeadUserId.HasValue && team.TeamLeadUserId.Value > 0 && !team.TeamMembers.Any(m => m.UserId == team.TeamLeadUserId.Value))
+            {
+                var newLeadMember = new TeamMember
+                {
+                    TeamId = team.Id,
+                    UserId = team.TeamLeadUserId.Value,
+                    JoinedAt = DateTime.UtcNow
+                };
+                _db.TeamMembers.Add(newLeadMember);
+                await _db.SaveChangesAsync();
+                team.TeamMembers.Add(newLeadMember);
+            }
 
             foreach (var member in team.TeamMembers)
             {

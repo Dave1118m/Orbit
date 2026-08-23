@@ -36,19 +36,19 @@ const FEATURES = [
         </div>
         <div className="space-y-2.5 text-xs">
           <div className="flex items-center justify-between rounded-lg bg-indigo-50 p-2.5 border border-indigo-100">
-            <span className="font-bold text-indigo-900">RoleName.Owner</span>
-            <span className="rounded bg-indigo-600 px-2 py-0.5 font-semibold text-white">Full Permission (All Scopes)</span>
+            <span className="font-bold text-indigo-900">Organization Owner</span>
+            <span className="rounded bg-indigo-600 px-2 py-0.5 font-semibold text-white">Full Access (All Scopes)</span>
           </div>
           <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-200">
-            <span className="font-medium text-slate-700">RoleName.Admin</span>
-            <span className="text-slate-600">Org + Workspace Management</span>
+            <span className="font-medium text-slate-700">Administrator</span>
+            <span className="text-slate-600">Org & Workspace Management</span>
           </div>
           <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-200">
-            <span className="font-medium text-slate-700">RoleName.Manager</span>
-            <span className="text-slate-600">Project Ownership & Expenses</span>
+            <span className="font-medium text-slate-700">Project Manager</span>
+            <span className="text-slate-600">Project Ownership & Approvals</span>
           </div>
           <div className="flex items-center justify-between rounded-lg bg-slate-50 p-2.5 border border-slate-200">
-            <span className="font-medium text-slate-700">RoleName.FinanceOfficer</span>
+            <span className="font-medium text-slate-700">Finance Officer</span>
             <span className="text-slate-600">Expense Approvals & Ledger</span>
           </div>
         </div>

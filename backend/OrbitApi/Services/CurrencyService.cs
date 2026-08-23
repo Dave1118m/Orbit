@@ -59,15 +59,13 @@ namespace OrbitApi.Services
 
             try
             {
-                var apiKey = _configuration["ExchangeRateApi:Key"];
-                if (string.IsNullOrEmpty(apiKey))
-                {
-                    _logger.LogWarning("ExchangeRateApi:Key is missing. Falling back to hardcoded rate.");
-                    return GetFallbackRate(fromCurrency, toCurrency);
-                }
+                var apiKey = _configuration["ExchangeRateApi:Key"] ?? _configuration["ExchangeApi:ApiKey"];
+                string requestUrl = (!string.IsNullOrWhiteSpace(apiKey) && !apiKey.StartsWith("YOUR_", StringComparison.OrdinalIgnoreCase))
+                    ? $"https://v6.exchangerate-api.com/v6/{apiKey}/latest/{fromCurrency.ToUpper()}"
+                    : $"https://open.er-api.com/v6/latest/{fromCurrency.ToUpper()}";
 
                 var client = _httpClientFactory.CreateClient();
-                var response = await client.GetAsync($"https://v6.exchangerate-api.com/v6/{apiKey}/latest/{fromCurrency.ToUpper()}");
+                var response = await client.GetAsync(requestUrl);
                 
                 if (response.IsSuccessStatusCode)
                 {
@@ -75,7 +73,7 @@ namespace OrbitApi.Services
                     using var doc = JsonDocument.Parse(content);
                     var root = doc.RootElement;
                     
-                    if (root.TryGetProperty("conversion_rates", out var rates) &&
+                    if ((root.TryGetProperty("conversion_rates", out var rates) || root.TryGetProperty("rates", out rates)) &&
                         rates.TryGetProperty(toCurrency.ToUpper(), out var rateElement))
                     {
                         if (rateElement.TryGetDecimal(out var rate))

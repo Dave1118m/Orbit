@@ -97,6 +97,22 @@ namespace OrbitApi.Controllers
                 return BadRequest("Organization budget cannot be negative.");
             }
 
+            if (!string.IsNullOrWhiteSpace(req.Country) && req.Country.Trim().Equals("Ethiopia", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(req.RegistrationNumber))
+                {
+                    var trimmedReg = req.RegistrationNumber.Trim();
+                    bool isCso = System.Text.RegularExpressions.Regex.IsMatch(trimmedReg, @"^(CSO|NGO|ACSO|ETH)[/-]?\d{3,8}(/\d{2,4})?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    bool isTradeLicense = System.Text.RegularExpressions.Regex.IsMatch(trimmedReg, @"^[A-Za-z]{2,4}[/-]\d{3,8}[/-]\d{2,4}$");
+                    bool isStandardValid = System.Text.RegularExpressions.Regex.IsMatch(trimmedReg, @"^[A-Za-z0-9/-]{3,25}$");
+
+                    if (!isCso && !isTradeLicense && !isStandardValid)
+                    {
+                        return BadRequest(new { message = "Invalid Ethiopian Registration Number. Expected format: e.g. CSO/3421, AA/12345/2016, or Reg #12345." });
+                    }
+                }
+            }
+
             int currentUserId;
             try
             {
@@ -321,6 +337,24 @@ namespace OrbitApi.Controllers
             if (req.Budget.HasValue && req.Budget.Value < 0)
             {
                 return BadRequest("Organization budget cannot be negative.");
+            }
+
+            var targetCountry = req.Country ?? org.Country;
+            var targetReg = req.RegistrationNumber ?? org.RegistrationNumber;
+            if (!string.IsNullOrWhiteSpace(targetCountry) && targetCountry.Trim().Equals("Ethiopia", StringComparison.OrdinalIgnoreCase))
+            {
+                if (!string.IsNullOrWhiteSpace(targetReg))
+                {
+                    var trimmedReg = targetReg.Trim();
+                    bool isCso = System.Text.RegularExpressions.Regex.IsMatch(trimmedReg, @"^(CSO|NGO|ACSO|ETH)[/-]?\d{3,8}(/\d{2,4})?$", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+                    bool isTradeLicense = System.Text.RegularExpressions.Regex.IsMatch(trimmedReg, @"^[A-Za-z]{2,4}[/-]\d{3,8}[/-]\d{2,4}$");
+                    bool isStandardValid = System.Text.RegularExpressions.Regex.IsMatch(trimmedReg, @"^[A-Za-z0-9/-]{3,25}$");
+
+                    if (!isCso && !isTradeLicense && !isStandardValid)
+                    {
+                        return BadRequest(new { message = "Invalid Ethiopian Registration Number. Expected format: e.g. CSO/3421, AA/12345/2016, or Reg #12345." });
+                    }
+                }
             }
 
             if (req.Description != null) org.Description = req.Description;
@@ -922,6 +956,12 @@ namespace OrbitApi.Controllers
 
         private OrganizationDto MapToDto(Organization org)
         {
+            var activeMemberCount = org.Members.Count(m => m.Status == OrgMemberStatus.Active);
+            if (activeMemberCount == 0 && org.OwnerId.HasValue && org.OwnerId.Value > 0)
+            {
+                activeMemberCount = 1;
+            }
+
             return new OrganizationDto
             {
                 Id = org.Id,
@@ -936,7 +976,7 @@ namespace OrbitApi.Controllers
                 DeletedAt = org.DeletedAt,
                 HasCompliance = org.Compliance != null,
                 PartnerCount = org.PartnersInitiated.Count + org.PartnersReceived.Count,
-                MemberCount = org.Members.Count(m => m.Status == OrgMemberStatus.Active)
+                MemberCount = activeMemberCount
             };
         }
     }

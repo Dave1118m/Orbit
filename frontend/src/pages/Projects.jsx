@@ -23,6 +23,11 @@ const STATUS_CONFIG = {
   "OnHold":    { label: 'On Hold',   color: 'bg-amber-50 text-amber-700',     dot: 'bg-amber-500'   },
   "Completed": { label: 'Completed', color: 'bg-blue-50 text-blue-700',       dot: 'bg-blue-500'    },
   "Cancelled": { label: 'Cancelled', color: 'bg-red-50 text-red-700',         dot: 'bg-red-500'     },
+  0:           { label: 'Planning',  color: 'bg-slate-100 text-slate-600',    dot: 'bg-slate-400'  },
+  1:           { label: 'Active',    color: 'bg-emerald-50 text-emerald-700', dot: 'bg-emerald-500' },
+  2:           { label: 'On Hold',   color: 'bg-amber-50 text-amber-700',     dot: 'bg-amber-500'   },
+  3:           { label: 'Completed', color: 'bg-blue-50 text-blue-700',       dot: 'bg-blue-500'    },
+  4:           { label: 'Cancelled', color: 'bg-red-50 text-red-700',         dot: 'bg-red-500'     },
 };
 
 /**
@@ -40,9 +45,11 @@ function getStatusConfig(status) {
  * @returns {{ label: string, color: string }} Health badge label and class.
  */
 function getHealthBadge(project) {
-  if (project.status === 'Completed') return { label: 'Completed', color: 'bg-blue-50 text-blue-700' };
-  if (project.status === 'Cancelled') return { label: 'Cancelled', color: 'bg-red-50 text-red-600' };
-  if (project.status === 'OnHold') return { label: 'On Hold', color: 'bg-amber-50 text-amber-700' };
+  const statusStr = String(project.status || '').toLowerCase();
+  if (statusStr === 'completed' || statusStr === '3') return { label: 'Completed', color: 'bg-blue-50 text-blue-700' };
+  if (statusStr === 'cancelled') return { label: 'Cancelled', color: 'bg-red-50 text-red-600' };
+  if (statusStr === 'onhold' || statusStr === '2') return { label: 'On Hold', color: 'bg-amber-50 text-amber-700' };
+  if (statusStr === 'planning' || statusStr === '0') return { label: 'Planning', color: 'bg-slate-100 text-slate-700' };
 
   const now = new Date();
   if (project.endDate) {
@@ -60,12 +67,16 @@ function getHealthBadge(project) {
  * @returns {number} Completion percentage (0 - 100).
  */
 function getProgress(project) {
-  if (!project.taskCount || project.taskCount === 0) return 0;
-  if (project.completedTaskCount !== undefined) {
+  if (project.completedTaskCount !== undefined && project.taskCount > 0) {
     return Math.round((project.completedTaskCount / project.taskCount) * 100);
   }
-  const heuristic = { "Planning": 10, "Active": 45, "OnHold": 30, "Completed": 100, "Cancelled": 0 };
-  return heuristic[project.status] ?? 0;
+  if (project.progress !== undefined && project.progress !== null) {
+    return project.progress;
+  }
+  if (!project.taskCount || project.taskCount === 0) {
+    return (project.status === 'Completed' || project.status === 3) ? 100 : 0;
+  }
+  return 0;
 }
 
 const AVATAR_COLORS = [
@@ -726,14 +737,41 @@ export default function Projects() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!selectedWorkspaceId) { showSuccessToast('Select a workspace first.'); return; }
-    if (formData.startDate && formData.endDate && new Date(formData.endDate) < new Date(formData.startDate)) {
-      showSuccessToast('Project Deadline (End Date) cannot be earlier than Start Date.');
+    if (!selectedWorkspaceId) {
+      showErrorToast('Please select or create a workspace first.');
       return;
     }
-    if ((String(formData.status) === '1' || formData.status === 'Active') && (!formData.startDate || !formData.endDate)) {
-      showSuccessToast('An Active project must have both a Start Date and an End Date.');
+    
+    const today = new Date().toISOString().split('T')[0];
+
+    if (formData.startDate && formData.endDate && formData.endDate < formData.startDate) {
+      showErrorToast('Project Deadline (End Date) cannot be earlier than Start Date.');
       return;
+    }
+
+    const isStatusActive = String(formData.status) === '1' || String(formData.status).toLowerCase() === 'active';
+    const isStatusCompleted = String(formData.status) === '3' || String(formData.status).toLowerCase() === 'completed';
+
+    if (isStatusActive) {
+      if (!formData.startDate || !formData.endDate) {
+        showErrorToast('An Active project must have both a Start Date and an End Date.');
+        return;
+      }
+      if (formData.startDate > today) {
+        showErrorToast("An Active project cannot have a Start Date in the future. Please set status to 'Planning' or select today as the Start Date.");
+        return;
+      }
+    }
+
+    if (isStatusCompleted) {
+      if (!formData.startDate || !formData.endDate) {
+        showErrorToast('A Completed project must have both a Start Date and an End Date.');
+        return;
+      }
+      if (formData.endDate > today) {
+        showErrorToast('A Completed project cannot have an End Date in the future.');
+        return;
+      }
     }
     try {
       const res = await fetch(API_URL, {
@@ -792,13 +830,37 @@ export default function Projects() {
   const handleEditSubmit = async (e) => {
     e.preventDefault();
     if (!selectedProject) return;
-    if (editFormData.startDate && editFormData.endDate && new Date(editFormData.endDate) < new Date(editFormData.startDate)) {
-      showSuccessToast('End Date cannot be earlier than Start Date.');
+
+    const today = new Date().toISOString().split('T')[0];
+
+    if (editFormData.startDate && editFormData.endDate && editFormData.endDate < editFormData.startDate) {
+      showErrorToast('Project Deadline (End Date) cannot be earlier than Start Date.');
       return;
     }
-    if ((String(editFormData.status) === '1' || editFormData.status === 'Active') && (!editFormData.startDate || !editFormData.endDate)) {
-      showSuccessToast('An Active project must have both a Start Date and an End Date.');
-      return;
+
+    const isStatusActive = String(editFormData.status) === '1' || String(editFormData.status).toLowerCase() === 'active';
+    const isStatusCompleted = String(editFormData.status) === '3' || String(editFormData.status).toLowerCase() === 'completed';
+
+    if (isStatusActive) {
+      if (!editFormData.startDate || !editFormData.endDate) {
+        showErrorToast('An Active project must have both a Start Date and an End Date.');
+        return;
+      }
+      if (editFormData.startDate > today) {
+        showErrorToast("An Active project cannot have a Start Date in the future. Please set status to 'Planning' or select today as the Start Date.");
+        return;
+      }
+    }
+
+    if (isStatusCompleted) {
+      if (!editFormData.startDate || !editFormData.endDate) {
+        showErrorToast('A Completed project must have both a Start Date and an End Date.');
+        return;
+      }
+      if (editFormData.endDate > today) {
+        showErrorToast('A Completed project cannot have an End Date in the future.');
+        return;
+      }
     }
     try {
       const body = {

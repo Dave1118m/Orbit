@@ -389,14 +389,26 @@ namespace OrbitApi.Controllers
                 if (bankAccount == null) return BadRequest("Bank account not found or does not belong to active organization.");
             }
 
+            // Received Cash grants require a bank account
+            if (dto.Status == OrbitApi.Models.ContributionStatus.Received && dto.Type == OrbitApi.Models.ContributionType.Cash && !dto.BankAccountId.HasValue)
+            {
+                return BadRequest("A 'Received' cash contribution must specify a target Bank Account for deposit reconciliation.");
+            }
+
             // Verify project belongs to active org workspace if provided
+            Project? project = null;
             if (dto.AllocatedProjectId.HasValue)
             {
-                var project = await _db.Projects
+                project = await _db.Projects
                     .Include(p => p.Workspace)
                     .FirstOrDefaultAsync(p => p.Id == dto.AllocatedProjectId.Value);
                 if (project == null || (project.Workspace != null && project.Workspace.OrganizationId != orgId.Value))
                     return BadRequest("Allocated project not found or does not belong to active organization.");
+
+                if (project.EndDate.HasValue && dto.Date.Date > project.EndDate.Value.Date)
+                {
+                    return BadRequest($"Contribution date cannot exceed the allocated project's End Date ({project.EndDate.Value:yyyy-MM-dd}).");
+                }
             }
 
             if (dto.AllocatedTaskId.HasValue)
@@ -417,9 +429,10 @@ namespace OrbitApi.Controllers
                 }
             }
 
-            if (dto.Status == OrbitApi.Models.ContributionStatus.Received && dto.Date.Date > DateTime.UtcNow.Date)
+            var todayUtc = DateTime.UtcNow.Date;
+            if (dto.Status == OrbitApi.Models.ContributionStatus.Received && dto.Date.Date > todayUtc)
             {
-                return BadRequest("A 'Received' contribution cannot have a date in the future.");
+                return BadRequest("A 'Received' contribution cannot have a date in the future. If the disbursement is scheduled for the future, please select status 'Pledged'.");
             }
 
             var contribution = new DonorContribution
@@ -437,6 +450,27 @@ namespace OrbitApi.Controllers
             };
 
             _db.DonorContributions.Add(contribution);
+
+            // Auto-link donor to project if not already linked
+            if (dto.AllocatedProjectId.HasValue)
+            {
+                var existingLink = await _db.ProjectDonors
+                    .FirstOrDefaultAsync(pd => pd.DonorId == id && pd.ProjectId == dto.AllocatedProjectId.Value);
+                if (existingLink == null)
+                {
+                    _db.ProjectDonors.Add(new ProjectDonor
+                    {
+                        DonorId = id,
+                        ProjectId = dto.AllocatedProjectId.Value,
+                        AllocatedAmount = dto.Amount
+                    });
+                }
+                else
+                {
+                    existingLink.AllocatedAmount += dto.Amount;
+                }
+            }
+
             await _db.SaveChangesAsync();
 
             // Auto-post to FinancialTransaction Ledger if Received

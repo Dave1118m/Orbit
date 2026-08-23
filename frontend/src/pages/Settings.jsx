@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import Modal from '../components/Modal';
 import SearchSelect from '../components/SearchSelect';
 import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
+import { COUNTRY_OPTIONS, validateRegistrationNumber } from '../utils/countryData';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/organizations`;
 
@@ -993,40 +994,33 @@ export default function Settings() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div>
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700">Country</label>
-                    <input
+                    <SearchSelect
+                      options={COUNTRY_OPTIONS}
                       value={editOrgData.country}
-                      onChange={(e) => setEditOrgData({ ...editOrgData, country: e.target.value })}
-                      placeholder="e.g. Kenya, United States"
-                      className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 transition"
+                      onChange={(countryVal) => setEditOrgData({ ...editOrgData, country: countryVal || '' })}
+                      placeholder="Select country..."
+                      isClearable={false}
                     />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700">Registration Number</label>
+                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                      Registration Number / TIN {editOrgData.country === 'Ethiopia' && <span className="text-indigo-600 font-semibold">(Ethiopia)</span>}
+                    </label>
                     <input
                       value={editOrgData.registrationNumber}
                       onChange={(e) => setEditOrgData({ ...editOrgData, registrationNumber: e.target.value })}
-                      placeholder="e.g. NGO-84920"
+                      placeholder={editOrgData.country === 'Ethiopia' ? 'e.g. CSO/3421 or AA/12345/2016' : 'Registration code'}
                       className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 transition"
                     />
+                    {editOrgData.country === 'Ethiopia' && (
+                      <p className="mt-1 text-[11px] text-slate-400">Accepted: CSO/NGO code, Trade License, or Reg ID</p>
+                    )}
                   </div>
                 </div>
 
                 <div>
-                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700">Logo Image & URL</label>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-700">Organization Logo</label>
                   <div className="flex flex-col gap-3">
-                    <input
-                      value={editOrgData.logoUrl}
-                      onChange={(e) => {
-                        setEditOrgData({ ...editOrgData, logoUrl: e.target.value });
-                        if (editOrgLogoFile) {
-                          setEditOrgLogoFile(null);
-                          setEditOrgLogoPreview('');
-                        }
-                      }}
-                      placeholder="https://example.com/logo.png"
-                      className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 transition"
-                    />
-
                     <div className="flex min-h-[110px] items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50/50 p-4 text-center transition hover:border-[#5A45FF]">
                       {editOrgLogoPreview ? (
                         <div className="flex flex-col items-center gap-2">
@@ -1038,14 +1032,14 @@ export default function Settings() {
                               setEditOrgLogoPreview('');
                               setEditOrgData({ ...editOrgData, logoUrl: '' });
                             }}
-                            className="text-xs text-rose-600 hover:underline font-medium"
+                            className="text-xs text-rose-600 hover:underline font-semibold"
                           >
-                            Remove logo
+                            Remove Logo
                           </button>
                         </div>
                       ) : (
                         <div className="space-y-2 text-slate-500">
-                          <p className="text-xs">Drag & drop logo file here or browse</p>
+                          <p className="text-xs">Drag & drop logo image here or browse</p>
                           <button
                             type="button"
                             onClick={() => editOrgLogoInputRef.current?.click()}

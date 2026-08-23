@@ -36,12 +36,13 @@ const customStyles = {
   menu: (base) => ({
     ...base,
     borderRadius: '0.75rem',
-    boxShadow: '0 10px 25px -5px rgba(90, 69, 255, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.05)',
-    zIndex: 9999,
+    boxShadow: '0 10px 25px -5px rgba(90, 69, 255, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+    zIndex: 99999,
     overflow: 'hidden',
-    border: '1px solid rgba(90, 69, 255, 0.15)'
+    border: '1px solid rgba(90, 69, 255, 0.15)',
+    backgroundColor: '#ffffff'
   }),
-  menuPortal: (base) => ({ ...base, zIndex: 9999 }),
+  menuPortal: (base) => ({ ...base, zIndex: 99999 }),
   multiValue: (base) => ({
     ...base,
     backgroundColor: 'rgba(90, 69, 255, 0.12)', // brand-500 translucent
@@ -130,6 +131,8 @@ export default function SearchSelect({
       isLoading={isLoading}
       styles={customStyles}
       menuPortalTarget={menuPortalTarget}
+      menuPosition="fixed"
+      menuPlacement="auto"
       className={className}
     />
   );

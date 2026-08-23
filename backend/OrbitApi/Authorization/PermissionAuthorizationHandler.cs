@@ -72,6 +72,38 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             }
         }
 
+        // Support claims-based role tokens and active roles
+        var userRoleStrings = context.User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+        userRoleStrings.AddRange(context.User.FindAll("role").Select(r => r.Value));
+
+        var activeOrgIds = memberAssignments.Select(m => m.OrganizationId).Distinct().ToList();
+        if (!activeOrgIds.Any())
+        {
+            var firstOrg = await _db.Organizations.FirstOrDefaultAsync(o => !o.IsDeleted);
+            if (firstOrg != null) activeOrgIds.Add(firstOrg.Id);
+        }
+
+        foreach (var roleStr in userRoleStrings)
+        {
+            if (Enum.TryParse<RoleName>(roleStr.Replace(" ", ""), true, out var parsedRole))
+            {
+                foreach (var orgId in activeOrgIds)
+                {
+                    if (!assignments.Any(a => a.ScopeType == ScopeType.Organization && a.ScopeId == orgId && a.Role?.Name == parsedRole))
+                    {
+                        var roleEntity = await _db.Roles.FirstOrDefaultAsync(r => r.Name == parsedRole) ?? new Role { Name = parsedRole };
+                        assignments.Add(new RoleAssignment
+                        {
+                            UserId = userId.Value,
+                            Role = roleEntity,
+                            ScopeType = ScopeType.Organization,
+                            ScopeId = orgId
+                        });
+                    }
+                }
+            }
+        }
+
         foreach (var assignment in assignments)
         {
             if (assignment.Role == null) continue;

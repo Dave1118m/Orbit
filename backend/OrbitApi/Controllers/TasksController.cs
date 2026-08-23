@@ -55,6 +55,8 @@ namespace OrbitApi.Controllers
                 return BadRequest("Task title cannot exceed 200 characters.");
             }
 
+            var todayUtc = DateTime.UtcNow.Date;
+
             if (req.StartDate.HasValue && req.Deadline.HasValue && req.Deadline.Value.Date < req.StartDate.Value.Date)
             {
                 return BadRequest("Task End Date (Deadline) cannot be earlier than Task Start Date.");
@@ -69,8 +71,29 @@ namespace OrbitApi.Controllers
                 }
                 if (req.Deadline.HasValue && project.EndDate.HasValue && req.Deadline.Value.Date > project.EndDate.Value.Date)
                 {
-                    return BadRequest($"Task deadline ({req.Deadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}). Please postpone the project end date first.");
+                    return BadRequest($"Task deadline ({req.Deadline.Value:yyyy-MM-dd}) cannot exceed the project end date ({project.EndDate.Value:yyyy-MM-dd}).");
                 }
+            }
+
+            switch (req.Status)
+            {
+                case DTOs.TaskStatus.InProgress:
+                case DTOs.TaskStatus.InReview:
+                    if (req.StartDate.HasValue && req.StartDate.Value.Date > todayUtc)
+                    {
+                        return BadRequest("An In Progress task cannot have a Start Date in the future. Please set status to 'To Do' or select today as the Start Date.");
+                    }
+                    break;
+                case DTOs.TaskStatus.Done:
+                    if (req.Deadline.HasValue && req.Deadline.Value.Date > todayUtc)
+                    {
+                        return BadRequest("A Completed (Done) task cannot have a Deadline in the future.");
+                    }
+                    break;
+                case DTOs.TaskStatus.ToDo:
+                case DTOs.TaskStatus.Blocked:
+                    // Dates are flexible
+                    break;
             }
 
             if (req.ParentTaskId.HasValue)
@@ -98,11 +121,18 @@ namespace OrbitApi.Controllers
                 Priority = (OrbitApi.Models.PriorityLevel)req.Priority,
                 StartDate = req.StartDate,
                 Deadline = req.Deadline,
-                ParentTaskId = req.ParentTaskId
+                ParentTaskId = req.ParentTaskId,
+                CategoryId = req.CategoryId.HasValue && req.CategoryId.Value > 0 ? req.CategoryId.Value : null
             };
 
             _db.Tasks.Add(task);
             await _db.SaveChangesAsync();
+
+            // Load category navigation if assigned
+            if (task.CategoryId.HasValue)
+            {
+                await _db.Entry(task).Reference(t => t.Category).LoadAsync();
+            }
 
             return Ok(MapToDto(task));
         }
@@ -137,12 +167,25 @@ namespace OrbitApi.Controllers
             var query = _db.Tasks
                 .Include(t => t.Project)
                 .ThenInclude(p => p!.Workspace)
+                .Include(t => t.Category)
                 .Where(t => !t.IsDeleted && t.ParentTaskId == null && t.Project != null && !t.Project.IsDeleted && t.Project.Workspace != null && t.Project.Workspace.OrganizationId == activeOrgId);
 
             if (projectId.HasValue)
             {
                 var projectResource = new ScopedResource(ScopeType.Project, projectId.Value);
-                if (!(await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.TaskView))).Succeeded)
+                var isAuth = (await _authorizationService.AuthorizeAsync(User, projectResource, new PermissionRequirement(Permission.TaskView))).Succeeded;
+                
+                if (!isAuth)
+                {
+                    var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                    if (int.TryParse(userIdClaim, out var userId))
+                    {
+                        isAuth = await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.OrganizationId == activeOrgId && m.Status == OrgMemberStatus.Active)
+                              || await _db.Organizations.AnyAsync(o => o.Id == activeOrgId && o.OwnerId == userId && !o.IsDeleted);
+                    }
+                }
+
+                if (!isAuth)
                 {
                     return Forbid();
                 }
@@ -156,7 +199,9 @@ namespace OrbitApi.Controllers
         [HttpGet("{id}")]
         public async Task<ActionResult<TaskDto>> Get(int id)
         {
-            var task = await _db.Tasks.FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted);
+            var task = await _db.Tasks
+                .Include(t => t.Category)
+                .FirstOrDefaultAsync(t => t.Id == id && !t.IsDeleted);
             if (task == null) return NotFound();
 
             var projectResource = new ScopedResource(ScopeType.Project, task.ProjectId);
@@ -259,6 +304,25 @@ namespace OrbitApi.Controllers
                 }
             }
 
+            var todayUtcDate = DateTime.UtcNow.Date;
+            var currentStatus = req.Status.HasValue ? (OrbitApi.Models.TaskStatus)req.Status.Value : task.Status;
+            switch (currentStatus)
+            {
+                case OrbitApi.Models.TaskStatus.InProgress:
+                case OrbitApi.Models.TaskStatus.InReview:
+                    if (finalStartDate.HasValue && finalStartDate.Value.Date > todayUtcDate)
+                    {
+                        return BadRequest("An In Progress task cannot have a Start Date in the future. Please set status to 'To Do' or select today as the Start Date.");
+                    }
+                    break;
+                case OrbitApi.Models.TaskStatus.Done:
+                    if (finalDeadline.HasValue && finalDeadline.Value.Date > todayUtcDate)
+                    {
+                        return BadRequest("A Completed (Done) task cannot have a Deadline in the future.");
+                    }
+                    break;
+            }
+
             if (finalStartDate.HasValue)
             {
                 var dependencies = await _db.TaskDependencies
@@ -319,7 +383,17 @@ namespace OrbitApi.Controllers
                 }
             }
 
+            if (req.CategoryId.HasValue)
+            {
+                task.CategoryId = req.CategoryId.Value > 0 ? req.CategoryId.Value : null;
+            }
+
             await _db.SaveChangesAsync();
+
+            if (task.CategoryId.HasValue)
+            {
+                await _db.Entry(task).Reference(t => t.Category).LoadAsync();
+            }
 
             return Ok(MapToDto(task));
         }
@@ -1086,7 +1160,9 @@ namespace OrbitApi.Controllers
                 StartDate = task.StartDate,
                 Deadline = task.Deadline,
                 CompletedDate = task.CompletedDate,
-                ParentTaskId = task.ParentTaskId
+                ParentTaskId = task.ParentTaskId,
+                CategoryId = task.CategoryId,
+                CategoryName = task.Category?.Name
             };
         }
     }

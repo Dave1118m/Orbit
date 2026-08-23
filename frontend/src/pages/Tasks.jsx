@@ -117,7 +117,7 @@ export default function Tasks() {
   const [dynamicCategories, setDynamicCategories] = useState([]);
   const fetchDynamicCategories = useCallback(async () => {
     try {
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/FinancialCategories`, { headers: authHeaders() });
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/FinancialCategories/flat`, { headers: authHeaders() });
       if (res.ok) {
         const data = await res.json();
         setDynamicCategories(Array.isArray(data) ? data : []);
@@ -159,10 +159,38 @@ export default function Tasks() {
     setCreateError('');
     const projectId = formData.projectId ? parseInt(formData.projectId, 10) : selectedProjectId;
     if (!projectId) { setCreateError('Please select a project for this task.'); return; }
-    if (formData.startDate && formData.deadline && new Date(formData.deadline) < new Date(formData.startDate)) {
+    
+    const today = new Date().toISOString().split('T')[0];
+    const project = projects.find(p => p.id === projectId);
+
+    if (formData.startDate && formData.deadline && formData.deadline < formData.startDate) {
       setCreateError('Task End Date (Deadline) cannot be earlier than Task Start Date.');
       return;
     }
+
+    if (project?.startDate && formData.startDate && formData.startDate < project.startDate.split('T')[0]) {
+      setCreateError(`Task Start Date cannot be earlier than Project Start Date (${project.startDate.split('T')[0]}).`);
+      return;
+    }
+
+    if (project?.endDate && formData.deadline && formData.deadline > project.endDate.split('T')[0]) {
+      setCreateError(`Task Deadline cannot exceed Project End Date (${project.endDate.split('T')[0]}).`);
+      return;
+    }
+
+    const isStatusInProgress = String(formData.status).toLowerCase() === 'inprogress' || String(formData.status).toLowerCase() === 'inreview';
+    const isStatusDone = String(formData.status).toLowerCase() === 'done';
+
+    if (isStatusInProgress && formData.startDate && formData.startDate > today) {
+      setCreateError("An In Progress task cannot have a Start Date in the future. Please set status to 'To Do' or select today as the Start Date.");
+      return;
+    }
+
+    if (isStatusDone && formData.deadline && formData.deadline > today) {
+      setCreateError("A Completed (Done) task cannot have a Deadline in the future.");
+      return;
+    }
+
     try {
       const res = await fetch(API_URL, {
         method: 'POST',
@@ -181,10 +209,9 @@ export default function Tasks() {
       if (res.ok) {
         setIsModalOpen(false);
         setCreateError('');
-        setFormData({ title: '', description: '', status: 0, priority: 1, startDate: '', deadline: '', projectId: '', categoryId: '' });
+        setFormData({ title: '', description: '', status: 'ToDo', priority: 'Medium', startDate: '', deadline: '', projectId: '', categoryId: '' });
         fetchTasks(selectedProjectId);
       } else {
-        // Parse error – could be JSON or plain text
         let errMsg = 'Failed to create task.';
         try { const j = await res.json(); errMsg = j.title || j.message || JSON.stringify(j); } catch { errMsg = await parseApiResponse(res); }
         setCreateError(errMsg);
@@ -222,6 +249,7 @@ export default function Tasks() {
       priority: task.priority ?? 'Medium',
       startDate: toDateStr(task.startDate),
       deadline: toDateStr(task.deadline),
+      categoryId: task.categoryId ? String(task.categoryId) : '',
     });
     setSelectedTask(task);
     setIsEditTaskOpen(true);
@@ -233,10 +261,38 @@ export default function Tasks() {
     e.preventDefault();
     setEditError('');
     if (!selectedTask) return;
-    if (editTaskData.startDate && editTaskData.deadline && new Date(editTaskData.deadline) < new Date(editTaskData.startDate)) {
-      setEditError('Deadline cannot be earlier than Start Date.');
+
+    const today = new Date().toISOString().split('T')[0];
+    const project = projects.find(p => p.id === selectedTask.projectId);
+
+    if (editTaskData.startDate && editTaskData.deadline && editTaskData.deadline < editTaskData.startDate) {
+      setEditError('Task End Date (Deadline) cannot be earlier than Task Start Date.');
       return;
     }
+
+    if (project?.startDate && editTaskData.startDate && editTaskData.startDate < project.startDate.split('T')[0]) {
+      setEditError(`Task Start Date cannot be earlier than Project Start Date (${project.startDate.split('T')[0]}).`);
+      return;
+    }
+
+    if (project?.endDate && editTaskData.deadline && editTaskData.deadline > project.endDate.split('T')[0]) {
+      setEditError(`Task Deadline cannot exceed Project End Date (${project.endDate.split('T')[0]}).`);
+      return;
+    }
+
+    const isStatusInProgress = String(editTaskData.status).toLowerCase() === 'inprogress' || String(editTaskData.status).toLowerCase() === 'inreview';
+    const isStatusDone = String(editTaskData.status).toLowerCase() === 'done';
+
+    if (isStatusInProgress && editTaskData.startDate && editTaskData.startDate > today) {
+      setEditError("An In Progress task cannot have a Start Date in the future. Please set status to 'To Do' or select today as the Start Date.");
+      return;
+    }
+
+    if (isStatusDone && editTaskData.deadline && editTaskData.deadline > today) {
+      setEditError("A Completed (Done) task cannot have a Deadline in the future.");
+      return;
+    }
+
     try {
       const res = await fetch(`${API_URL}/${selectedTask.id}`, {
         method: 'PUT',
@@ -248,6 +304,7 @@ export default function Tasks() {
           priority: editTaskData.priority,
           startDate: editTaskData.startDate || null,
           deadline: editTaskData.deadline || null,
+          categoryId: editTaskData.categoryId ? parseInt(editTaskData.categoryId, 10) : null
         }),
       });
       if (res.ok) {
@@ -483,7 +540,15 @@ export default function Tasks() {
 
       {/* ── Task Detail Side Drawer ── */}
       {selectedTask && (
-        <TaskDetailsDrawer task={selectedTask} onClose={() => { setSelectedTask(null); fetchTasks(selectedProjectId); }} />
+        <TaskDetailsDrawer 
+          task={selectedTask} 
+          onClose={() => { setSelectedTask(null); fetchTasks(selectedProjectId); }}
+          onEdit={(t) => {
+            setSelectedTask(null);
+            handleOpenTaskEdit(t);
+          }}
+          onTaskUpdated={() => fetchTasks(selectedProjectId)}
+        />
       )}
 
       {/* ── Create Task Modal ── */}
@@ -495,7 +560,6 @@ export default function Tasks() {
               options={projects.map(p => ({ value: p.id, label: p.title }))}
               value={formData.projectId || selectedProjectId}
               onChange={val => handleChange({ target: { name: 'projectId', value: val } })}
-              placeholder="Select project..."
               isClearable={false}
             />
           </div>
@@ -511,12 +575,12 @@ export default function Tasks() {
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
             <input required name="title" value={formData.title} onChange={handleChange}
-              placeholder="E.g. Setup database schema" className={inputClass} />
+              className={inputClass} />
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
             <textarea name="description" value={formData.description} onChange={handleChange}
-              rows={3} placeholder="Add more details..." className={inputClass} />
+              rows={3} className={inputClass} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -583,12 +647,21 @@ export default function Tasks() {
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Title *</label>
             <input required name="title" value={editTaskData.title} onChange={handleEditTaskChange}
-              className={inputClass} placeholder="Task title" />
+              className={inputClass} />
+          </div>
+          <div>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Financial Category</label>
+            <select name="categoryId" value={editTaskData.categoryId || ''} onChange={handleEditTaskChange} className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 bg-white">
+              <option value="">No Financial Category</option>
+              {dynamicCategories.map(c => (
+                <option key={c.id} value={c.id}>{c.fullName || c.name}</option>
+              ))}
+            </select>
           </div>
           <div>
             <label className="mb-1 block text-sm font-medium text-slate-700">Description</label>
             <textarea name="description" value={editTaskData.description} onChange={handleEditTaskChange}
-              rows={3} className={inputClass} placeholder="Add more details..." />
+              rows={3} className={inputClass} />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>

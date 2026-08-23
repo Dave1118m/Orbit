@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import { useUser } from '../../contexts/UserContext';
-import { parseApiResponse, showSuccessToast } from '../../utils/toastHelper';
+import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
 
@@ -73,17 +73,17 @@ export default function Budgets() {
   const [error, setError] = useState(null);
   const [expandedId, setExpandedId] = useState(null);
 
-  // Determine active role for 2-step sign-off restriction
+  // Determine active role for strict Segregation of Duties
   const primaryRole = (getPrimaryRole && getPrimaryRole()) || localStorage.getItem('selectedRole') || '';
   const userRolesList = (user?.roles || []).map(r => r.name);
+  const activeRoleName = primaryRole || (userRolesList.length > 0 ? userRolesList[0] : '');
 
-  const canApproveBudget = 
-    ['FinanceOfficer', 'Finance Officer', 'Admin', 'Owner'].includes(primaryRole) ||
-    userRolesList.some(r => ['FinanceOfficer', 'Finance Officer', 'Admin', 'Owner'].includes(r));
+  const isFinanceOfficer = activeRoleName === 'FinanceOfficer' || activeRoleName === 'Finance Officer';
+  const isAdminOrOwner = ['Admin', 'Owner', 'SystemOwner'].includes(activeRoleName) || (!activeRoleName && userRolesList.some(r => ['Admin', 'Owner', 'SystemOwner'].includes(r)));
+  const isManagerOrCoord = ['Manager', 'Coordinator'].includes(activeRoleName) || (!activeRoleName && userRolesList.some(r => ['Manager', 'Coordinator'].includes(r)));
 
-  const canReviseOrDraftBudget = 
-    ['Manager', 'Coordinator', 'Admin', 'Owner'].includes(primaryRole) ||
-    userRolesList.some(r => ['Manager', 'Coordinator', 'Admin', 'Owner'].includes(r));
+  const canReviseOrDraftBudget = isAdminOrOwner || (isManagerOrCoord && !isFinanceOfficer);
+  const canApproveBudget = isAdminOrOwner || isFinanceOfficer;
 
   // Entity lists for dropdowns
   const [projects, setProjects] = useState([]);
@@ -212,12 +212,31 @@ export default function Budgets() {
     finally { setIsSubmitting(false); }
   }
 
-  async function handleApprove(id) {
+  async function handleApprove(budget) {
+    const b = typeof budget === 'object' ? budget : budgets.find(x => x.id === budget);
+    if (b && (b.level === 2 || b.level === 'Project')) {
+      const allocated = (b.lineItems || []).reduce((sum, item) => sum + (item.amount || 0), 0);
+      if (allocated !== b.totalAmount) {
+        const diff = Math.abs(b.totalAmount - allocated);
+        if (allocated < b.totalAmount) {
+          showErrorToast(`Budget Allocation Incomplete: Total category allocations (${formatCurrency(allocated, b.currency)}) must equal the total project budget (${formatCurrency(b.totalAmount, b.currency)}). There is ${formatCurrency(diff, b.currency)} unallocated. Please distribute all remaining funds before approval.`);
+          return;
+        } else {
+          showErrorToast(`Budget Allocation Over-Ceiling: Total category allocations (${formatCurrency(allocated, b.currency)}) exceed the total budget (${formatCurrency(b.totalAmount, b.currency)}) by ${formatCurrency(diff, b.currency)}.`);
+          return;
+        }
+      }
+    }
     try {
+      const id = typeof budget === 'object' ? budget.id : budget;
       const res = await fetch(`${API_BASE}/budgets/${id}/approve`, { method: 'POST', headers: authHeaders() });
-      if (!res.ok) throw new Error((await res.json()).message || 'Failed to approve');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.message || 'Failed to approve');
+      }
+      showSuccessToast('Budget approved successfully.');
       fetchBudgets();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
   }
 
   async function handleReturnRemainingSubmit(e) {
@@ -234,10 +253,11 @@ export default function Budgets() {
         const errText = await parseApiResponse(res);
         throw new Error(errText || 'Failed to return remaining budget');
       }
+      showSuccessToast('Remaining unspent budget returned.');
       setReturnTarget(null);
       setReturnNotes('');
       fetchBudgets();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -258,9 +278,10 @@ export default function Budgets() {
         } catch {}
         throw new Error(errMsg);
       }
+      showSuccessToast('Budget deleted.');
       setBudgets(prev => prev.filter(b => b.id !== id));
       if (expandedId === id) setExpandedId(null);
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
   }
 
   function openRevise(budget) {
@@ -278,9 +299,10 @@ export default function Budgets() {
         body: JSON.stringify({ totalAmount: parseFloat(reviseForm.totalAmount), currency: reviseForm.currency, notes: reviseForm.notes })
       });
       if (!res.ok) throw new Error('Failed to revise budget');
+      showSuccessToast('Budget revised.');
       setReviseTarget(null);
       fetchBudgets();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -309,17 +331,32 @@ export default function Budgets() {
 
   async function handleAddLineItem(e) {
     e.preventDefault();
+    const enteredAmount = parseFloat(lineItemForm.amount);
+    if (!enteredAmount || enteredAmount <= 0) {
+      showErrorToast('Line item amount must be greater than zero.');
+      return;
+    }
+    const currentAllocated = (lineItemTarget?.lineItems || []).reduce((s, it) => s + (it.amount || 0), 0);
+    if (currentAllocated + enteredAmount > lineItemTarget?.totalAmount) {
+      const remaining = Math.max(0, lineItemTarget.totalAmount - currentAllocated);
+      showErrorToast(`Cannot allocate ${formatCurrency(enteredAmount, lineItemTarget.currency)}. This exceeds the remaining available budget (${formatCurrency(remaining, lineItemTarget.currency)}).`);
+      return;
+    }
     try {
       setIsSubmitting(true);
       const res = await fetch(`${API_BASE}/budgets/${lineItemTarget.id}/line-items`, {
         method: 'POST',
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryId: parseInt(lineItemForm.category), description: lineItemForm.description, amount: parseFloat(lineItemForm.amount) })
+        body: JSON.stringify({ categoryId: parseInt(lineItemForm.category), description: lineItemForm.description, amount: enteredAmount })
       });
-      if (!res.ok) throw new Error('Failed to add line item');
+      if (!res.ok) {
+        const errText = await parseApiResponse(res);
+        throw new Error(errText || 'Failed to add line item');
+      }
+      showSuccessToast('Line item added successfully.');
       setLineItemTarget(null);
       fetchBudgets();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
     finally { setIsSubmitting(false); }
   }
 
@@ -346,13 +383,33 @@ export default function Budgets() {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight">Master Budgets & Expenditure Ceilings</h2>
           <p className="text-sm text-slate-500 mt-1">Configure ceilings, track real-time utilization, and return remaining unspent funds.</p>
         </div>
-        <button
-          onClick={() => setIsCreateOpen(true)}
-          className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm self-start sm:self-auto"
-        >
-          + Create Master Budget
-        </button>
+        {canReviseOrDraftBudget && (
+          <button
+            onClick={() => setIsCreateOpen(true)}
+            className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm self-start sm:self-auto"
+          >
+            + Create Master Budget
+          </button>
+        )}
       </div>
+
+      {/* Finance Officer Segregation of Duties Banner */}
+      {isFinanceOfficer && (
+        <div className="bg-sky-50 border border-sky-200/80 rounded-2xl p-4 text-xs text-sky-950 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+          <div className="flex items-center gap-3">
+            <span className="text-xl">🛡️</span>
+            <div>
+              <div className="font-bold text-sm">Finance Officer Audit & Approval Mode</div>
+              <div className="text-sky-800 text-[11px] mt-0.5">
+                You have sign-off and approval authority for master budgets. Budget drafting and category line item allocations are segregated to Project Managers.
+              </div>
+            </div>
+          </div>
+          <span className="font-semibold text-[10px] bg-sky-100/90 text-sky-900 border border-sky-300 px-3 py-1 rounded-full uppercase tracking-wider self-start sm:self-auto">
+            Segregation of Duties
+          </span>
+        </div>
+      )}
 
       {/* KPI Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -389,12 +446,14 @@ export default function Budgets() {
             <p className="text-sm text-slate-500 mt-1 max-w-sm mb-6">
               Establish organization, workspace, or project-level budget ceilings to control financial expenditure.
             </p>
-            <button
-              onClick={() => setIsCreateOpen(true)}
-              className="bg-[#5A45FF] text-white font-semibold py-2.5 px-6 rounded-full hover:bg-indigo-600 transition"
-            >
-              Create First Budget
-            </button>
+            {canReviseOrDraftBudget && (
+              <button
+                onClick={() => setIsCreateOpen(true)}
+                className="bg-[#5A45FF] text-white font-semibold py-2.5 px-6 rounded-full hover:bg-indigo-600 transition"
+              >
+                Create First Budget
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -464,7 +523,7 @@ export default function Budgets() {
                         </td>
                         <td className="px-6 py-4 text-right text-xs">
                           <div className="flex flex-wrap items-center justify-end gap-1.5">
-                            {unspentRemaining > 0 && b.status !== 4 && b.status !== 'Closed' && (
+                            {canReviseOrDraftBudget && unspentRemaining > 0 && b.status !== 4 && b.status !== 'Closed' && (
                               <button
                                 onClick={() => {
                                   setReturnTarget(b);
@@ -493,23 +552,25 @@ export default function Budgets() {
                             </button>
                             {(b.status === 0 || b.status === 'Draft' || b.status === 1 || b.status === 'PendingApproval') && canApproveBudget && (
                               <button
-                                onClick={() => handleApprove(b.id)}
+                                onClick={() => handleApprove(b)}
                                 className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 transition shadow-xs"
                                 title="Manager Sign-off / Approve Budget"
                               >
                                 ✓ Approve
                               </button>
                             )}
-                            <button
-                              onClick={() => {
-                                setExpandedId(b.id);
-                                openAddLineItem(b);
-                              }}
-                              className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200/80 transition shadow-2xs"
-                              title="Add budget line item"
-                            >
-                              + Line Item
-                            </button>
+                            {canReviseOrDraftBudget && (
+                              <button
+                                onClick={() => {
+                                  setExpandedId(b.id);
+                                  openAddLineItem(b);
+                                }}
+                                className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-bold bg-brand-50 text-brand-700 hover:bg-brand-100 border border-brand-200/80 transition shadow-2xs"
+                                title="Add budget line item"
+                              >
+                                + Line Item
+                              </button>
+                            )}
                             <button
                               onClick={() => setExpandedId(expandedId === b.id ? null : b.id)}
                               className="inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200 transition shadow-2xs"
@@ -542,6 +603,46 @@ export default function Budgets() {
                                   </button>
                                 )}
                               </div>
+
+                              {/* Modern Allocation Balance Banner */}
+                              {(() => {
+                                const lineTotal = (b.lineItems || []).reduce((s, it) => s + (it.amount || 0), 0);
+                                const unallocated = b.totalAmount - lineTotal;
+                                const isBalanced = unallocated === 0;
+                                return (
+                                  <div className={`p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs ${
+                                    isBalanced
+                                      ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                                      : unallocated > 0
+                                      ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                                      : 'bg-rose-50/80 border-rose-200 text-rose-950'
+                                  }`}>
+                                    <div className="flex items-start gap-3">
+                                      <span className="text-xl">{isBalanced ? '✅' : unallocated > 0 ? '⚠️' : '🚨'}</span>
+                                      <div>
+                                        <div className="font-extrabold text-sm">
+                                          {isBalanced
+                                            ? '100% Balanced & Fully Allocated'
+                                            : unallocated > 0
+                                            ? `Allocation Incomplete: ${formatCurrency(unallocated, b.currency)} Remaining to Distribute`
+                                            : `Over-Allocated by ${formatCurrency(Math.abs(unallocated), b.currency)}`}
+                                        </div>
+                                        <div className="text-xs text-slate-600 mt-0.5">
+                                          Budget Ceiling: <strong className="text-slate-900">{formatCurrency(b.totalAmount, b.currency)}</strong> • Total Allocated: <strong className="text-slate-900">{formatCurrency(lineTotal, b.currency)}</strong> across {(b.lineItems || []).length} categories
+                                        </div>
+                                      </div>
+                                    </div>
+                                    {canReviseOrDraftBudget && unallocated > 0 && (
+                                      <button
+                                        onClick={() => openAddLineItem(b)}
+                                        className="bg-brand-600 hover:bg-brand-700 text-white font-bold px-3 py-1.5 rounded-xl shadow-xs transition text-xs flex items-center gap-1.5 self-start sm:self-auto"
+                                      >
+                                        + Allocate Remaining {formatCurrency(unallocated, b.currency)}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })()}
 
                               {b.lineItems.length === 0 ? (
                                 <p className="text-xs text-slate-500 py-4 text-center">No line items configured.</p>
@@ -651,7 +752,7 @@ export default function Budgets() {
                     onChange={(e) => setCreateForm({ ...createForm, workspaceId: e.target.value })}
                     className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
                   >
-                    <option value="">Choose Workspace</option>
+                    <option value="">Select Workspace</option>
                     {workspaces.map((w) => (
                       <option key={w.id} value={w.id}>{w.name}</option>
                     ))}
@@ -665,14 +766,24 @@ export default function Budgets() {
                   <select
                     required
                     value={createForm.projectId}
-                    onChange={(e) => setCreateForm({ ...createForm, projectId: e.target.value })}
+                    onChange={(e) => {
+                      const pId = e.target.value;
+                      setCreateForm({ ...createForm, projectId: pId });
+                      fetchProjectBalancing(pId);
+                    }}
                     className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 bg-white"
                   >
-                    <option value="">Choose Project</option>
+                    <option value="">Select Project</option>
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>{p.title}</option>
                     ))}
                   </select>
+                  {projectBalancing && projectBalancing.totalDonorFunding > 0 && (
+                    <div className="mt-1.5 p-2 bg-indigo-50 border border-indigo-100 rounded-lg text-[11px] text-slate-700 flex justify-between">
+                      <span>Total Active Grant Funding:</span>
+                      <span className="font-bold text-emerald-700">{formatCurrency(projectBalancing.totalDonorFunding, 'USD')}</span>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -882,6 +993,21 @@ export default function Budgets() {
               </button>
             </div>
             <form onSubmit={handleAddLineItem} className="p-6 space-y-4">
+              {(() => {
+                const currentAllocated = (lineItemTarget.lineItems || []).reduce((s, it) => s + (it.amount || 0), 0);
+                const remainingAvailable = Math.max(0, lineItemTarget.totalAmount - currentAllocated);
+                return (
+                  <div className="bg-indigo-50/70 border border-indigo-200/80 rounded-2xl p-3 text-xs flex justify-between items-center">
+                    <div>
+                      <span className="text-slate-500">Budget Ceiling:</span> <strong className="text-slate-800">{formatCurrency(lineItemTarget.totalAmount, lineItemTarget.currency)}</strong>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Available to Allocate:</span> <strong className="text-emerald-700">{formatCurrency(remainingAvailable, lineItemTarget.currency)}</strong>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1">Category</label>
                 <select

@@ -77,18 +77,15 @@ namespace OrbitApi.Controllers
             {
                 foreach (var dId in req.DonorIds) donorIdsToLink.Add(dId);
             }
-            else if (req.DonorId.HasValue)
-            {
-                donorIdsToLink.Add(req.DonorId.Value);
-            }
-
             var resolvedFundingType = !string.IsNullOrWhiteSpace(req.FundingType) ? req.FundingType : "SingleDonor";
-            if (resolvedFundingType == "SingleDonor" && donorIdsToLink.Count != 1)
+            if (resolvedFundingType == "SingleDonor" && donorIdsToLink.Count > 1)
             {
-                return BadRequest("A Sole Funder project must have exactly one donor assigned.");
+                return BadRequest("A Sole Funder project cannot have multiple donors assigned.");
             }
 
-            if (req.StartDate.HasValue && req.EndDate.HasValue && req.EndDate.Value < req.StartDate.Value)
+            var todayUtc = DateTime.UtcNow.Date;
+
+            if (req.StartDate.HasValue && req.EndDate.HasValue && req.EndDate.Value.Date < req.StartDate.Value.Date)
             {
                 return BadRequest("Project End Date cannot be earlier than Start Date.");
             }
@@ -98,18 +95,22 @@ namespace OrbitApi.Controllers
                 case DTOs.ProjectStatus.Active:
                     if (!req.StartDate.HasValue || !req.EndDate.HasValue)
                         return BadRequest("An Active project must have both a Start Date and an End Date.");
-                    if (req.StartDate.Value > DateTime.UtcNow)
-                        return BadRequest("An Active project cannot have a Start Date in the future.");
+                    if (req.StartDate.Value.Date > todayUtc)
+                        return BadRequest("An Active project cannot have a Start Date in the future. Please set status to 'Planning' or select today as the Start Date.");
                     break;
                 case DTOs.ProjectStatus.Completed:
-                case DTOs.ProjectStatus.Archived:
                     if (!req.StartDate.HasValue || !req.EndDate.HasValue)
-                        return BadRequest($"A {req.Status} project must have both a Start Date and an End Date.");
-                    if (req.Status == DTOs.ProjectStatus.Completed && req.EndDate.Value > DateTime.UtcNow)
+                        return BadRequest("A Completed project must have both a Start Date and an End Date.");
+                    if (req.EndDate.Value.Date > todayUtc)
                         return BadRequest("A Completed project cannot have an End Date in the future.");
                     break;
+                case DTOs.ProjectStatus.Archived:
+                    if (!req.StartDate.HasValue || !req.EndDate.HasValue)
+                        return BadRequest("An Archived project must have both a Start Date and an End Date.");
+                    break;
+                case DTOs.ProjectStatus.Planning:
                 case DTOs.ProjectStatus.OnHold:
-                    // Dates are optional for OnHold projects
+                    // Dates are flexible for Planning and OnHold projects
                     break;
             }
 
@@ -232,7 +233,8 @@ namespace OrbitApi.Controllers
                     DonorId = p.ProjectDonors.Select(pd => (int?)pd.DonorId).FirstOrDefault(),
                     FundingType = p.FundingType,
                     Teams = p.ProjectTeams.Select(pt => new { pt.TeamId, pt.Team.Name }).ToList(),
-                    TaskCount = p.Tasks.Count(t => !t.IsDeleted)
+                    TaskCount = p.Tasks.Count(t => !t.IsDeleted),
+                    CompletedTaskCount = p.Tasks.Count(t => !t.IsDeleted && t.Status == Models.TaskStatus.Done)
                 }).ToListAsync();
 
             var projects = projectsRaw.Select(p => new ProjectDto
@@ -252,7 +254,11 @@ namespace OrbitApi.Controllers
                     Id = pt.TeamId,
                     Name = pt.Name ?? "Unknown"
                 }).ToList(),
-                TaskCount = p.TaskCount
+                TaskCount = p.TaskCount,
+                CompletedTaskCount = p.CompletedTaskCount,
+                Progress = p.TaskCount > 0
+                    ? (int)Math.Round((double)p.CompletedTaskCount / p.TaskCount * 100)
+                    : (p.Status == Models.ProjectStatus.Completed ? 100 : 0)
             }).ToList();
 
             return Ok(projects);
@@ -285,6 +291,12 @@ namespace OrbitApi.Controllers
                     Name = pt.Team.Name
                 }).ToListAsync();
 
+            var taskCount = await _db.Tasks.CountAsync(t => t.ProjectId == id && !t.IsDeleted);
+            var completedTaskCount = await _db.Tasks.CountAsync(t => t.ProjectId == id && !t.IsDeleted && t.Status == Models.TaskStatus.Done);
+            var progress = taskCount > 0 
+                ? (int)Math.Round((double)completedTaskCount / taskCount * 100) 
+                : (project.Status == Models.ProjectStatus.Completed ? 100 : 0);
+
             return Ok(new ProjectDto
             {
                 Id = project.Id,
@@ -298,7 +310,9 @@ namespace OrbitApi.Controllers
                 DonorId = donorId,
                 FundingType = project.FundingType ?? "SingleDonor",
                 Teams = teamsList,
-                TaskCount = project.Tasks.Count
+                TaskCount = taskCount,
+                CompletedTaskCount = completedTaskCount,
+                Progress = progress
             });
         }
 
@@ -385,9 +399,9 @@ namespace OrbitApi.Controllers
             }
 
             var resolvedUpdateFundingType = !string.IsNullOrWhiteSpace(req.FundingType) ? req.FundingType : (!string.IsNullOrWhiteSpace(project.FundingType) ? project.FundingType : "SingleDonor");
-            if (resolvedUpdateFundingType == "SingleDonor" && updateDonorIdsToLink.Count != 1)
+            if (resolvedUpdateFundingType == "SingleDonor" && updateDonorIdsToLink.Count > 1)
             {
-                return BadRequest("A Sole Funder project must have exactly one donor assigned.");
+                return BadRequest("A Sole Funder project cannot have multiple donors assigned.");
             }
             if (req.Status.HasValue && project.Status != (OrbitApi.Models.ProjectStatus)req.Status.Value)
             {
@@ -408,7 +422,9 @@ namespace OrbitApi.Controllers
             }
             var targetStartDate = req.StartDate ?? project.StartDate;
             var targetEndDate = req.EndDate ?? project.EndDate;
-            if (targetStartDate.HasValue && targetEndDate.HasValue && targetEndDate.Value < targetStartDate.Value)
+            var todayUtcDate = DateTime.UtcNow.Date;
+
+            if (targetStartDate.HasValue && targetEndDate.HasValue && targetEndDate.Value.Date < targetStartDate.Value.Date)
             {
                 return BadRequest("Project End Date cannot be earlier than Start Date.");
             }
@@ -419,18 +435,22 @@ namespace OrbitApi.Controllers
                 case OrbitApi.Models.ProjectStatus.Active:
                     if (!targetStartDate.HasValue || !targetEndDate.HasValue)
                         return BadRequest("An Active project must have both a Start Date and an End Date.");
-                    if (targetStartDate.Value > DateTime.UtcNow)
-                        return BadRequest("An Active project cannot have a Start Date in the future.");
+                    if (targetStartDate.Value.Date > todayUtcDate)
+                        return BadRequest("An Active project cannot have a Start Date in the future. Please set status to 'Planning' or select today as the Start Date.");
                     break;
                 case OrbitApi.Models.ProjectStatus.Completed:
-                case OrbitApi.Models.ProjectStatus.Archived:
                     if (!targetStartDate.HasValue || !targetEndDate.HasValue)
-                        return BadRequest($"A {targetStatus} project must have both a Start Date and an End Date.");
-                    if (targetStatus == OrbitApi.Models.ProjectStatus.Completed && targetEndDate.Value > DateTime.UtcNow)
+                        return BadRequest("A Completed project must have both a Start Date and an End Date.");
+                    if (targetEndDate.Value.Date > todayUtcDate)
                         return BadRequest("A Completed project cannot have an End Date in the future.");
                     break;
+                case OrbitApi.Models.ProjectStatus.Archived:
+                    if (!targetStartDate.HasValue || !targetEndDate.HasValue)
+                        return BadRequest("An Archived project must have both a Start Date and an End Date.");
+                    break;
+                case OrbitApi.Models.ProjectStatus.Planning:
                 case OrbitApi.Models.ProjectStatus.OnHold:
-                    // Dates are optional for OnHold projects
+                    // Dates are flexible for Planning and OnHold projects
                     break;
             }
 

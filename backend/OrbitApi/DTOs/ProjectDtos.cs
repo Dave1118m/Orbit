@@ -27,6 +27,8 @@ namespace OrbitApi.DTOs
         public List<int>? TeamIds { get; set; }
         public List<TeamSimpleDto>? Teams { get; set; }
         public int TaskCount { get; set; }
+        public int CompletedTaskCount { get; set; }
+        public int Progress { get; set; }
         public byte[]? RowVersion { get; set; }
     }
 

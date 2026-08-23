@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import DonorProgressReportModal from './DonorProgressReportModal';
 import { COUNTRY_OPTIONS } from '../../lib/countries';
+import { getShortBankName } from '../../lib/ethiopianBanks';
 import { parseApiResponse, showErrorToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
@@ -674,7 +675,15 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-slate-700">{c.allocatedProjectName || 'Unallocated'}</td>
-                    <td className="px-4 py-3 text-slate-600">{c.bankAccountName || '-'}</td>
+                    <td className="px-4 py-3 text-slate-600 font-medium">
+                      {c.bankAccountName ? (() => {
+                        const parts = c.bankAccountName.split(' - ');
+                        if (parts.length > 1) {
+                          return `${getShortBankName(parts[0])} - ${parts.slice(1).join(' - ')}`;
+                        }
+                        return getShortBankName(c.bankAccountName);
+                      })() : '-'}
+                    </td>
                     <td className="px-4 py-3 text-slate-500 max-w-xs truncate" title={c.notes}>{c.notes || '-'}</td>
                   </tr>
                 ))}
@@ -805,7 +814,7 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
               <div>
                 <label className="block font-bold uppercase text-slate-700 mb-1">Target Bank Account</label>
                 <SearchSelect
-                  options={bankAccounts.map(ba => ({ value: ba.id, label: `${ba.bankName} - ${ba.accountName} (${ba.currency})` }))}
+                  options={bankAccounts.map(ba => ({ value: ba.id, label: `${getShortBankName(ba.bankName)} - ${ba.accountName} (${ba.currency})` }))}
                   value={contributionFormData.bankAccountId ? parseInt(contributionFormData.bankAccountId) : null}
                   onChange={val => setContributionFormData({ ...contributionFormData, bankAccountId: val ? String(val) : '' })}
                   placeholder="Select Account"

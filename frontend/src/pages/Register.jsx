@@ -36,26 +36,18 @@ export default function Register() {
       });
 
       if (!res.ok) {
-        const text = await parseApiResponse(res);
-        let errorMsg = 'Registration failed';
-        try {
-          const parsed = JSON.parse(text);
-          if (Array.isArray(parsed)) {
-            errorMsg = parsed.join(', ');
-          } else if (parsed.error) {
-            errorMsg = parsed.error;
-          } else {
-            errorMsg = text;
-          }
-        } catch {
-          errorMsg = text;
-        }
-        setMessage(errorMsg);
+        const errorMsg = await parseApiResponse(res);
+        setMessage(errorMsg || 'Registration failed.');
         setStatus('error');
         return;
       }
 
-      setMessage('Registered successfully. Check your email to confirm your account.');
+      const data = await res.json().catch(() => ({}));
+      setMessage(
+        data.confirmUrl
+          ? 'Registered successfully! Please check your email or verify using the confirmation link logged in server console.'
+          : 'Registered successfully. Please check your email to confirm your account.'
+      );
       setStatus('success');
     } catch (err) {
       setMessage('Network error: ' + err.message);

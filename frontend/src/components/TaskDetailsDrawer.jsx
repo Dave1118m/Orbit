@@ -2,17 +2,18 @@ import React, { useState, useEffect } from 'react';
 import CommentSection from './CommentSection';
 import AttachmentList from './AttachmentList';
 import TaskVolunteersTab from './TaskVolunteersTab';
-import { Calendar, CheckCircle, Clock, Link as LinkIcon, Target, X } from 'lucide-react';
+import { Calendar, CheckCircle, Clock, Link as LinkIcon, Pencil, Target, X } from 'lucide-react';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/tasks`;
 
 /**
  * Task Details Drawer component rendering a flyout panel for managing subtasks,
  * team member assignments, task dependencies, volunteer assignments, comments, attachments, and audit history.
- * @param {{ task: Object, onClose: () => void }} props
+ * @param {{ task: Object, onClose: () => void, onEdit?: (task: Object) => void, onTaskUpdated?: () => void }} props
  */
-export default function TaskDetailsDrawer({ task, onClose }) {
+export default function TaskDetailsDrawer({ task, onClose, onEdit, onTaskUpdated }) {
   const [activeTab, setActiveTab] = useState('subtasks'); // subtasks, activity, attachments
+  const [currentTask, setCurrentTask] = useState(task);
 
   const [subtasks, setSubtasks] = useState([]);
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
@@ -30,9 +31,12 @@ export default function TaskDetailsDrawer({ task, onClose }) {
   const [loadingDeps, setLoadingDeps] = useState(false);
 
   const [logframeActivity, setLogframeActivity] = useState(null);
+  const [dynamicCategories, setDynamicCategories] = useState([]);
+  const [updatingCategory, setUpdatingCategory] = useState(false);
 
   useEffect(() => {
     if (task) {
+      setCurrentTask(task);
       fetchSubtasks();
       fetchHistory();
       fetchMembers();
@@ -40,8 +44,45 @@ export default function TaskDetailsDrawer({ task, onClose }) {
       fetchDependencies();
       fetchProjectTasks();
       fetchLogframe();
+      fetchDynamicCategories();
     }
   }, [task]);
+
+  const fetchDynamicCategories = async () => {
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/FinancialCategories/flat`, { headers: authHeaders() });
+      if (res.ok) {
+        const data = await res.json();
+        setDynamicCategories(Array.isArray(data) ? data : []);
+      }
+    } catch {}
+  };
+
+  const handleCategoryChange = async (newCategoryId) => {
+    try {
+      setUpdatingCategory(true);
+      const parsedCatId = newCategoryId ? parseInt(newCategoryId, 10) : null;
+      const res = await fetch(`${API_URL}/${currentTask.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ categoryId: parsedCatId })
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        const matchedCat = dynamicCategories.find(c => c.id === parsedCatId);
+        setCurrentTask(prev => ({
+          ...prev,
+          categoryId: parsedCatId,
+          categoryName: matchedCat?.name || updated.categoryName || ''
+        }));
+        onTaskUpdated?.();
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUpdatingCategory(false);
+    }
+  };
 
   function authHeaders() {
     const token = localStorage.getItem('token');
@@ -115,18 +156,52 @@ export default function TaskDetailsDrawer({ task, onClose }) {
 
 
   const fetchLogframe = async () => {
-    if (!task.projectId) return;
+    if (!task || !task.projectId) return;
     try {
       const res = await fetch(`${import.meta.env.VITE_API_URL}/projects/${task.projectId}/logframe`, { headers: authHeaders() });
       if (res.ok) {
         const lf = await res.json();
-        // Basic scan for any activity linked to this task
-        if (lf && Array.isArray(lf.indicators)) {
-            // Find activity
-            // Since we just need to display it if it's linked for compliance
+        let matchedActivity = null;
+        let matchedOutput = null;
+        let matchedOutcome = null;
+        let matchedGoal = null;
+
+        if (lf && Array.isArray(lf.goals)) {
+          for (const g of lf.goals) {
+            for (const o of (g.outcomes || [])) {
+              for (const op of (o.outputs || [])) {
+                for (const a of (op.activities || [])) {
+                  if (String(a.linkedTaskId) === String(task.id)) {
+                    matchedActivity = a;
+                    matchedOutput = op;
+                    matchedOutcome = o;
+                    matchedGoal = g;
+                    break;
+                  }
+                }
+                if (matchedActivity) break;
+              }
+              if (matchedActivity) break;
+            }
+            if (matchedActivity) break;
+          }
+        }
+
+        if (matchedActivity) {
+          setLogframeActivity({
+            activityId: matchedActivity.id,
+            description: matchedActivity.description,
+            outputTitle: matchedOutput?.description,
+            outcomeTitle: matchedOutcome?.description,
+            goalTitle: matchedGoal?.description,
+          });
+        } else {
+          setLogframeActivity(null);
         }
       }
-    } catch (err) {}
+    } catch (err) {
+      setLogframeActivity(null);
+    }
   };
 
   // Subtask handlers
@@ -264,6 +339,15 @@ export default function TaskDetailsDrawer({ task, onClose }) {
             <h2 className="text-xl font-black text-slate-900 tracking-tight">{task.title}</h2>
           </div>
           <div className="flex items-center gap-2">
+            {onEdit && (
+              <button
+                onClick={() => onEdit(currentTask)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-brand-50 px-3 py-1.5 text-sm font-bold text-brand-600 border border-brand-200 hover:bg-brand-100 transition shadow-sm"
+              >
+                <Pencil className="w-3.5 h-3.5" />
+                Edit Task
+              </button>
+            )}
             <button
               onClick={handleGoogleCalendarSync}
               className="inline-flex items-center gap-2 rounded-lg bg-blue-50 px-3 py-1.5 text-sm font-bold text-blue-600 border border-blue-200 hover:bg-blue-100 transition shadow-sm"
@@ -290,16 +374,22 @@ export default function TaskDetailsDrawer({ task, onClose }) {
             )}
 
             {/* Tabs Navigation */}
-            <div className="flex gap-4 border-b border-slate-200 mb-6">
-              {['subtasks', 'activity', 'attachments', 'volunteers'].map(tab => (
+            <div className="flex gap-4 border-b border-slate-200 mb-6 flex-wrap">
+              {[
+                { key: 'subtasks', label: 'Checklist' },
+                { key: 'comments', label: 'Comments' },
+                { key: 'activity', label: 'Activity Log' },
+                { key: 'attachments', label: 'Attachments' },
+                { key: 'volunteers', label: 'Volunteers' }
+              ].map(tab => (
                 <button
-                  key={tab}
-                  onClick={() => setActiveTab(tab)}
-                  className={`pb-3 text-sm font-bold capitalize transition border-b-2 ${
-                    activeTab === tab ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`pb-3 text-sm font-bold transition border-b-2 ${
+                    activeTab === tab.key ? 'border-brand-500 text-brand-600' : 'border-transparent text-slate-500 hover:text-slate-700'
                   }`}
                 >
-                  {tab}
+                  {tab.label}
                 </button>
               ))}
             </div>
@@ -357,8 +447,31 @@ export default function TaskDetailsDrawer({ task, onClose }) {
               </div>
             )}
 
+            {activeTab === 'comments' && (
+              <CommentSection entityType="tasks" entityId={task.id} />
+            )}
+
             {activeTab === 'activity' && (
-              <CommentSection entityType="tasks" entityId={task.id} additionalActivity={additionalActivity} />
+              <div className="space-y-4">
+                <h4 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Audit Trail & Status History</h4>
+                {history.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic py-4">No status change events recorded yet.</p>
+                ) : (
+                  <div className="relative border-l-2 border-slate-200 ml-4 space-y-4 pl-4 py-2">
+                    {history.map((h, i) => (
+                      <div key={h.id || i} className="relative group">
+                        <div className="absolute -left-[23px] top-1.5 h-3 w-3 rounded-full bg-brand-500 border-2 border-white ring-2 ring-slate-100" />
+                        <p className="text-xs font-semibold text-slate-900">
+                          {h.changedByUserName || 'User'} moved status from <span className="font-bold text-slate-600">{h.oldStatus}</span> → <span className="font-bold text-brand-600">{h.newStatus}</span>
+                        </p>
+                        <p className="text-[11px] text-slate-400 mt-0.5">
+                          {new Date(h.changedAt).toLocaleString()}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
 
             {activeTab === 'attachments' && (
@@ -381,12 +494,32 @@ export default function TaskDetailsDrawer({ task, onClose }) {
               </div>
               <div className="p-4 space-y-4">
                 <div>
-                  <p className="text-[10px] font-semibold text-slate-400 uppercase">Logframe Alignment</p>
-                  <div className="flex items-start gap-2 mt-1">
-                    <LinkIcon className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
-                    <p className="text-xs font-medium text-slate-700">
-                      {logframeActivity ? logframeActivity.description : 'Not linked to Logframe Output'}
-                    </p>
+                  <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Logframe Alignment</p>
+                  <div className="flex items-start gap-2.5 mt-2">
+                    <LinkIcon className="w-4 h-4 text-brand-600 shrink-0 mt-0.5" />
+                    <div className="text-xs">
+                      {logframeActivity ? (
+                        <div className="space-y-1">
+                          <p className="font-bold text-slate-900 leading-snug">
+                            {logframeActivity.description}
+                          </p>
+                          {logframeActivity.outputTitle && (
+                            <p className="text-[11px] text-slate-600 bg-slate-100 px-2 py-0.5 rounded inline-block font-medium">
+                              Output: {logframeActivity.outputTitle}
+                            </p>
+                          )}
+                          {logframeActivity.goalTitle && (
+                            <p className="text-[10px] text-slate-400">
+                              Goal: {logframeActivity.goalTitle}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        <p className="font-medium text-slate-400 italic">
+                          Not linked to Logframe Activity
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -394,6 +527,28 @@ export default function TaskDetailsDrawer({ task, onClose }) {
 
             {/* Properties */}
             <div className="space-y-4 mb-8">
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <p className="text-xs font-semibold text-slate-500">Financial Category</p>
+                  {updatingCategory && <span className="text-[10px] text-brand-600 font-bold animate-pulse">Saving...</span>}
+                </div>
+                <select
+                  value={currentTask.categoryId || ''}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  disabled={updatingCategory}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-semibold focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 bg-white"
+                >
+                  <option value="">No Financial Category Assigned</option>
+                  {dynamicCategories.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.fullName || c.name}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Assign to a financial category for project expense claims and budget tracking.
+                </p>
+              </div>
               <div>
                 <p className="text-xs font-semibold text-slate-500 mb-1">Priority</p>
                 <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-semibold ${

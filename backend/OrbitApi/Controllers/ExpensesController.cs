@@ -246,6 +246,23 @@ namespace OrbitApi.Controllers
                 }
             }
 
+            // Task financial category check
+            if (dto.TaskId.HasValue)
+            {
+                var task = await _db.Tasks.FindAsync(dto.TaskId.Value);
+                if (task != null)
+                {
+                    if (!task.CategoryId.HasValue || task.CategoryId.Value <= 0)
+                    {
+                        return BadRequest(new { message = $"Cannot link expense to task '{task.Title}'. This task does not have a Financial Category assigned." });
+                    }
+                    if (!dto.CategoryId.HasValue)
+                    {
+                        dto.CategoryId = task.CategoryId;
+                    }
+                }
+            }
+
             // Budget validation: check if this expense would cause overspend
             if (dto.ProjectId.HasValue)
             {

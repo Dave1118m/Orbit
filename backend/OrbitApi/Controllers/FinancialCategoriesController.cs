@@ -113,7 +113,11 @@ public class FinancialCategoriesController : ControllerBase
     [HttpGet("organization/{orgId}/flat")]
     public async Task<IActionResult> GetFlatByOrganization(int orgId, [FromQuery] FinancialCategoryType? type = null)
     {
-        // Auto-seeding disabled to allow starting from 0 categories for clean testing.
+        var existingCount = await _context.FinancialCategories.CountAsync(c => c.OrganizationId == orgId);
+        if (existingCount == 0)
+        {
+            await SeedStandardCoATemplate(orgId);
+        }
 
         var query = _context.FinancialCategories
             .Where(c => c.OrganizationId == orgId && c.IsActive);

@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import KanbanLandingDemo from '../components/landing/KanbanLandingDemo';
 import SystemFeaturesSection from '../components/landing/SystemFeaturesSection';
+import InteractiveReportsDemo from '../components/landing/InteractiveReportsDemo';
 import RoiCalculator from '../components/landing/RoiCalculator';
 import { 
   Sparkles, 
@@ -27,29 +28,30 @@ import {
   MapPin,
   Send,
   MessageSquare,
-  Clock
+  Clock,
+  BarChart3
 } from 'lucide-react';
 
 const FAQS = [
   {
-    q: 'How does Orbit enforce system permissions and owner access?',
-    a: 'Orbit uses strict Role-Based Access Control (RBAC). System Owners receive full administrative privileges. Admins manage settings, Coordinators oversee Workspaces, Managers control Projects, Finance Officers approve Expenses, and Members execute tasks.'
+    q: 'How does OrbitDesk enforce system permissions and role access?',
+    a: 'OrbitDesk uses strict Role-Based Access Control (RBAC). Organization Owners receive full administrative privileges. Admins manage settings, Coordinators oversee Workspaces, Managers control Projects, Finance Officers approve Expenses, and Members execute tasks.'
   },
   {
-    q: 'How do Logframes (MEL) and Indicator targets work in Orbit?',
-    a: 'Orbit features a Goal ➔ Outcome ➔ Output ➔ Activity results tree. Officers attach verification evidence, set target metrics, and track progress live.'
+    q: 'How do Logframes (MEL) and Indicator targets work in OrbitDesk?',
+    a: 'OrbitDesk features a standardized Goal ➔ Outcome ➔ Output ➔ Activity results framework. Officers attach verification evidence, set target metrics, and track progress in real time.'
   },
   {
-    q: 'What is the $500 expense threshold enforcement rule?',
-    a: 'Expenses equal to or exceeding $500 automatically require receipt attachment verification before approval, preventing audit flags.'
+    q: 'What is the $500 expense threshold audit rule?',
+    a: 'Expenses equal to or exceeding $500 automatically require an attached invoice or receipt before approval, preventing audit compliance flags.'
   },
   {
     q: 'How does the Public Volunteer recruitment portal work?',
-    a: 'Orbit provides a public link for volunteer applications. Staff screen background checks (Passed, Pending, Failed) and assign volunteers to project tasks.'
+    a: 'OrbitDesk provides a public link for volunteer applications. Coordinators screen background checks (Passed, Pending, Failed) and assign approved volunteers directly to project tasks.'
   },
   {
     q: 'What currency conversions are supported in financial ledgers?',
-    a: 'Orbit runs a dual-currency engine operating natively in USD ($) and ETB (Br) across budget lines and donor reports.'
+    a: 'OrbitDesk includes a dual-currency engine operating natively in USD ($) and ETB (Br) across budget lines, expenses, and donor reports.'
   }
 ];
 
@@ -69,6 +71,7 @@ export default function Landing() {
 
   // Contact Form State
   const [contactForm, setContactForm] = useState({ name: '', email: '', subject: 'Demo Request', message: '' });
+  const [submittedEmail, setSubmittedEmail] = useState('');
   const [contactSubmitted, setContactSubmitted] = useState(false);
   const [contactSending, setContactSending] = useState(false);
   const [contactError, setContactError] = useState('');
@@ -91,6 +94,7 @@ export default function Landing() {
         body: JSON.stringify(contactForm)
       });
       if (res.ok) {
+        setSubmittedEmail(contactForm.email);
         setContactSubmitted(true);
         setContactForm({ name: '', email: '', subject: 'Demo Request', message: '' });
       } else {
@@ -136,7 +140,7 @@ export default function Landing() {
               O
             </div>
             <div className="flex flex-col">
-              <span className="font-black text-xl text-slate-900 tracking-tight">Orbit Platform</span>
+              <span className="font-black text-xl text-slate-900 tracking-tight">OrbitDesk</span>
               <span className="text-[11px] font-extrabold bg-gradient-to-r from-violet-600 to-cyan-600 bg-clip-text text-transparent uppercase tracking-wider">Enterprise & NGO OS</span>
             </div>
           </Link>
@@ -146,6 +150,7 @@ export default function Landing() {
             <a href="#kanban-section" className="hover:text-indigo-600 transition">Live Kanban</a>
             <a href="#metrics" className="hover:text-indigo-600 transition">System Telemetry</a>
             <a href="#governance" className="hover:text-indigo-600 transition">RBAC Governance</a>
+            <a href="#reports" className="hover:text-indigo-600 transition">Analytics</a>
             <a href="#faq" className="hover:text-indigo-600 transition">FAQ</a>
             <a href="#contact" className="hover:text-indigo-600 transition">Contact</a>
           </div>
@@ -202,6 +207,8 @@ export default function Landing() {
             <a href="#kanban-section" onClick={() => setMobileMenuOpen(false)} className="block py-1">Live Drag & Drop Kanban</a>
             <a href="#metrics" onClick={() => setMobileMenuOpen(false)} className="block py-1">System Metrics</a>
             <a href="#governance" onClick={() => setMobileMenuOpen(false)} className="block py-1">Governance & RBAC</a>
+            <a href="#reports" onClick={() => setMobileMenuOpen(false)} className="block py-1">Analytics & Reports</a>
+            <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="block py-1">Contact Team</a>
             <Link to="/apply-volunteer" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-rose-600">Public Volunteer Portal</Link>
             <div className="pt-2 border-t border-slate-100 flex gap-2">
               <Link to="/login" className="flex-1 text-center py-2.5 rounded-xl bg-slate-100 text-xs font-extrabold">Sign In</Link>
@@ -211,19 +218,16 @@ export default function Landing() {
         )}
       </nav>
 
-      {/* ── HERO SECTION WITH VIBRANT GRADIENTS ── */}
+      {/* ── HERO SECTION ── */}
       <section className="bg-white py-16 md:py-24 border-b border-slate-200 relative overflow-hidden">
-        {/* Soft Background Accent Blobs */}
         <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-r from-violet-200/50 via-indigo-200/50 to-cyan-200/50 blur-3xl rounded-full pointer-events-none"></div>
 
         <div className="mx-auto max-w-5xl px-4 text-center space-y-6 relative z-10">
-          {/* Vibrant Badge */}
           <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-gradient-to-r from-indigo-50 to-cyan-50 px-4 py-1.5 text-xs sm:text-sm font-extrabold text-indigo-700 shadow-xs">
             <Sparkles className="h-4 w-4 text-indigo-600" />
             <span>ENTERPRISE PROJECT & NGO GOVERNANCE PLATFORM</span>
           </div>
 
-          {/* Large High-Legibility Title with Vibrant Gradient Text */}
           <h1 className="text-4xl font-black text-slate-900 sm:text-6xl md:text-7xl tracking-tight leading-tight">
             Centralized Workspaces, <br className="hidden sm:inline" />
             <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 bg-clip-text text-transparent">
@@ -231,12 +235,10 @@ export default function Landing() {
             </span>
           </h1>
 
-          {/* Subheadline with Readable Font Size */}
           <p className="mx-auto max-w-3xl text-base sm:text-lg text-slate-600 font-semibold leading-relaxed">
             Manage multi-tenant workspaces, drag-and-drop Kanban task pipelines, <span className="text-emerald-700 font-extrabold">$500 receipt audit rules</span>, MEL indicator target trees, and public volunteer recruitment.
           </p>
 
-          {/* Action Buttons */}
           <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
             <Link
               to="/register"
@@ -257,7 +259,7 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── 100% MANDATORY DRAG AND DROP KANBAN DEMO SECTION ── */}
+      {/* ── DRAG AND DROP KANBAN DEMO SECTION ── */}
       <section id="kanban-section" className="py-20 bg-slate-900 text-white border-b border-slate-800">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="text-center max-w-3xl mx-auto mb-10">
@@ -276,15 +278,15 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── LIVE SYSTEM METRICS (FETCHED FROM BACKEND API) ── */}
+      {/* ── LIVE SYSTEM METRICS ── */}
       <section id="metrics" className="py-16 bg-slate-100 border-b border-slate-200">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-6">
             <span className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-2">
-              <Activity className="h-4 w-4 text-indigo-600" /> Live Database System Telemetry
+              <Activity className="h-4 w-4 text-indigo-600" /> Live System Telemetry
             </span>
             <span className="text-xs font-mono font-bold text-slate-600 bg-white px-3.5 py-1.5 rounded-xl border border-slate-300">
-              Synced with C# .NET API & PostgreSQL
+              Live Database Telemetry • Real-time Sync
             </span>
           </div>
 
@@ -313,7 +315,7 @@ export default function Landing() {
                 <span className="text-xs font-extrabold uppercase bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full">Teams</span>
               </div>
               <p className="text-4xl font-black text-slate-900 font-mono">{totalTeams}</p>
-              <p className="text-xs font-bold text-slate-600 mt-1">Active Squads</p>
+              <p className="text-xs font-bold text-slate-600 mt-1">Assigned Teams</p>
             </div>
 
             <div className="rounded-3xl border border-amber-200 bg-gradient-to-b from-amber-50 to-white p-6 shadow-sm">
@@ -332,6 +334,13 @@ export default function Landing() {
       <section id="governance" className="py-20 bg-white border-b border-slate-200">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <SystemFeaturesSection />
+        </div>
+      </section>
+
+      {/* ── INTERACTIVE REPORTS & ANALYTICS SHOWCASE ── */}
+      <section id="reports" className="py-20 bg-slate-950 border-b border-slate-800">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <InteractiveReportsDemo />
         </div>
       </section>
 
@@ -379,7 +388,6 @@ export default function Landing() {
 
       {/* ── CONTACT US SECTION ── */}
       <section id="contact" className="py-20 bg-slate-900 text-white relative overflow-hidden border-t border-slate-800">
-        {/* Background glow accents */}
         <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-violet-600/20 blur-3xl pointer-events-none"></div>
         <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-cyan-600/20 blur-3xl pointer-events-none"></div>
 
@@ -392,7 +400,7 @@ export default function Landing() {
               Ready to Accelerate Your Projects & Donor Impact?
             </h2>
             <p className="mt-3 text-slate-400 text-sm sm:text-base">
-              Have questions about custom NGO setups, donor compliance, or enterprise onboarding? Speak directly with our solution engineering team.
+              Have questions about custom NGO setups, donor compliance, or enterprise onboarding? Speak directly with our solutions engineering team.
             </p>
           </div>
 
@@ -418,7 +426,7 @@ export default function Landing() {
                   <div>
                     <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Operating Hours</h4>
                     <p className="text-sm font-bold text-white mt-1">Monday – Friday (8:00 AM – 6:00 PM UTC)</p>
-                    <p className="text-xs text-slate-400 mt-0.5">24/7 Monitoring for Live Systems</p>
+                    <p className="text-xs text-slate-400 mt-0.5">24/7 System Health Monitoring</p>
                   </div>
                 </div>
 
@@ -428,7 +436,7 @@ export default function Landing() {
                   </div>
                   <div>
                     <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Security & Compliance</h4>
-                    <p className="text-sm font-bold text-white mt-1">GDPR, Audit Logs & RBAC Protected</p>
+                    <p className="text-sm font-bold text-white mt-1">Audit Logs, Receipts & RBAC Protected</p>
                     <p className="text-xs text-slate-400 mt-0.5">Strict end-to-end data encryption</p>
                   </div>
                 </div>
@@ -452,9 +460,9 @@ export default function Landing() {
                     <div className="mx-auto h-16 w-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
                       <CheckCircle2 className="h-10 w-10" />
                     </div>
-                    <h3 className="text-2xl font-black text-white">Message Received!</h3>
+                    <h3 className="text-2xl font-black text-white">Message Sent Successfully!</h3>
                     <p className="text-sm text-slate-300 max-w-md mx-auto leading-relaxed">
-                      Thank you for contacting Orbit Platform. Our solutions team will review your inquiry and respond to <span className="font-bold text-white">{contactForm.email}</span> shortly.
+                      Thank you for reaching out to OrbitDesk! Our solutions team has received your message and will respond to <span className="font-bold text-white">{submittedEmail}</span> shortly.
                     </p>
                     <button
                       onClick={() => setContactSubmitted(false)}
@@ -544,12 +552,12 @@ export default function Landing() {
       </section>
 
       {/* ── FOOTER ── */}
-      <footer className="border-t border-slate-200 bg-slate-900 py-12 text-slate-400 text-xs sm:text-sm">
+      <footer className="border-t border-slate-800 bg-slate-900 py-12 text-slate-400 text-xs sm:text-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-800">
             <div className="flex items-center gap-3">
               <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 flex items-center justify-center font-black text-white text-sm">O</div>
-              <span className="font-black text-white text-lg tracking-tight">Orbit Platform</span>
+              <span className="font-black text-white text-lg tracking-tight">OrbitDesk</span>
             </div>
             <div className="flex items-center gap-4">
               <Link to="/login" className="font-extrabold text-slate-300 hover:text-white">Sign In</Link>
@@ -558,7 +566,7 @@ export default function Landing() {
           </div>
 
           <div className="pt-8 flex flex-wrap items-center justify-between gap-4 text-slate-400">
-            <p>© {new Date().getFullYear()} Orbit Local Development Platform.</p>
+            <p>© {new Date().getFullYear()} OrbitDesk. All rights reserved.</p>
             <div className="flex items-center gap-2 text-emerald-400 font-bold">
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
               <span>All API Services Connected & Active</span>

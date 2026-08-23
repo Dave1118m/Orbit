@@ -69,7 +69,7 @@ namespace OrbitApi.Controllers
 
             try
             {
-                string requestUrl = !string.IsNullOrWhiteSpace(apiKey)
+                string requestUrl = (!string.IsNullOrWhiteSpace(apiKey) && !apiKey.StartsWith("YOUR_", StringComparison.OrdinalIgnoreCase))
                     ? $"{baseUrl}/{apiKey}/latest/{baseCurrency}"
                     : $"https://open.er-api.com/v6/latest/{baseCurrency}";
 
@@ -131,7 +131,7 @@ namespace OrbitApi.Controllers
                 });
             }
 
-            decimal rate = 130.0m;
+            decimal rate = 160.0m;
             bool isLive = false;
 
             var apiKey = _config["ExchangeApi:ApiKey"];
@@ -139,7 +139,7 @@ namespace OrbitApi.Controllers
 
             try
             {
-                string requestUrl = !string.IsNullOrWhiteSpace(apiKey)
+                string requestUrl = (!string.IsNullOrWhiteSpace(apiKey) && !apiKey.StartsWith("YOUR_", StringComparison.OrdinalIgnoreCase))
                     ? $"{baseUrl}/{apiKey}/latest/{from}"
                     : $"https://open.er-api.com/v6/latest/{from}";
 

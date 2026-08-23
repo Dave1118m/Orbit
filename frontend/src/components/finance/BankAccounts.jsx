@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import { AutoText } from '../../contexts/TranslationContext';
-import { ETHIOPIAN_BANKS } from '../../lib/ethiopianBanks';
+import { ETHIOPIAN_BANKS, getShortBankName } from '../../lib/ethiopianBanks';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
@@ -386,7 +386,7 @@ export default function BankAccounts() {
                             🏦
                           </div>
                           <div>
-                            <div className="font-bold text-slate-900 text-sm">{acc.bankName}</div>
+                            <div className="font-bold text-slate-900 text-sm">{getShortBankName(acc.bankName)}</div>
                             <div className="text-xs text-slate-500">{acc.accountName}</div>
                           </div>
                         </div>
@@ -435,7 +435,7 @@ export default function BankAccounts() {
                           <div className="space-y-3">
                             <div className="flex items-center justify-between">
                               <h4 className="font-bold text-slate-900 text-sm">
-                                Transaction Ledger for {acc.bankName} ({acc.accountName})
+                                Transaction Ledger for {getShortBankName(acc.bankName)} ({acc.accountName})
                               </h4>
                               <span className="text-xs text-slate-500 font-medium">
                                 Account Currency: <strong className="text-slate-800">{acc.currency}</strong>
@@ -608,7 +608,7 @@ export default function BankAccounts() {
                 >
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.bankName} - {a.accountName} ({a.currency})
+                      {getShortBankName(a.bankName)} - {a.accountName} ({a.currency})
                     </option>
                   ))}
                 </select>
@@ -627,7 +627,7 @@ export default function BankAccounts() {
                 >
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>
-                      {a.bankName} - {a.accountName} ({a.currency})
+                      {getShortBankName(a.bankName)} - {a.accountName} ({a.currency})
                     </option>
                   ))}
                 </select>

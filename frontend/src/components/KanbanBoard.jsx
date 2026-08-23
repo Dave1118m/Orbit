@@ -68,6 +68,13 @@ function SortableTaskItem({ task, onClick, isSelected }) {
             <span className="shrink-0 h-2 w-2 mt-1.5 rounded-full bg-brand-500" />
           )}
         </div>
+        {task.categoryName && (
+          <div className="mt-2">
+            <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200/80">
+              🏷️ {task.categoryName}
+            </span>
+          </div>
+        )}
         <div className="mt-4 flex items-center justify-between">
           <span className={`rounded-full px-2.5 py-0.5 text-xs font-medium ${getPriorityColor(task.priority)}`}>
             <AutoText text={priorityMap[task.priority]} />

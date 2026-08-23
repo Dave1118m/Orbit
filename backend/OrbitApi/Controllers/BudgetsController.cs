@@ -59,6 +59,36 @@ namespace OrbitApi.Controllers
             return int.TryParse(val, out var id) ? id : null;
         }
 
+        private async Task<bool> UserHasRoleAsync(int userId, int orgId, params RoleName[] allowedRoles)
+        {
+            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == orgId);
+            if (isOrgOwner && allowedRoles.Contains(RoleName.Owner)) return true;
+
+            var orgMember = await _db.OrganizationMembers
+                .Include(m => m.Role)
+                .FirstOrDefaultAsync(m => m.UserId == userId && m.OrganizationId == orgId && m.Status == OrgMemberStatus.Active);
+
+            if (orgMember?.Role != null && allowedRoles.Contains(orgMember.Role.Name))
+            {
+                return true;
+            }
+
+            var userRoleStrings = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+            userRoleStrings.AddRange(User.FindAll("role").Select(r => r.Value));
+
+            foreach (var role in allowedRoles)
+            {
+                var roleStr = role.ToString();
+                if (userRoleStrings.Any(r => string.Equals(r, roleStr, StringComparison.OrdinalIgnoreCase)
+                    || (role == RoleName.FinanceOfficer && (string.Equals(r, "Finance Officer", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "Finance", StringComparison.OrdinalIgnoreCase)))))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
         private static BudgetDto MapToDto(Budget b, decimal spentAmount = 0)
         {
             return new BudgetDto
@@ -211,12 +241,65 @@ namespace OrbitApi.Controllers
 
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest(new { message = "Organization context is required." });
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can create/draft budgets. Finance Officers are restricted to auditing and approval." });
+            }
 
             if (dto.TotalAmount <= 0)
                 return BadRequest(new { message = "Budget total amount must be strictly greater than zero." });
 
-            if (dto.Level == BudgetLevel.Project && !dto.ProjectId.HasValue)
-                return BadRequest(new { message = "Strict Validation: Project ID is required for a Project-level budget." });
+            var fiscalYear = dto.FiscalYear > 0 ? dto.FiscalYear : DateTime.UtcNow.Year;
+            if (fiscalYear < 2000 || fiscalYear > 2100)
+            {
+                return BadRequest(new { message = "Fiscal Year must be a valid 4-digit calendar year between 2000 and 2100." });
+            }
+
+            if (dto.Level == BudgetLevel.Project)
+            {
+                if (!dto.ProjectId.HasValue)
+                    return BadRequest(new { message = "Strict Validation: Project ID is required for a Project-level budget." });
+
+                var project = await _db.Projects.FindAsync(dto.ProjectId.Value);
+                if (project != null)
+                {
+                    if (project.StartDate.HasValue && fiscalYear < project.StartDate.Value.Year)
+                    {
+                        return BadRequest(new { message = $"Fiscal Year ({fiscalYear}) cannot precede the project Start Date ({project.StartDate.Value:yyyy-MM-dd})." });
+                    }
+                    if (project.EndDate.HasValue && fiscalYear > project.EndDate.Value.Year)
+                    {
+                        return BadRequest(new { message = $"Fiscal Year ({fiscalYear}) cannot exceed the project End Date ({project.EndDate.Value:yyyy-MM-dd})." });
+                    }
+                }
+            }
+
+            if (dto.Level == BudgetLevel.Task && dto.TaskId.HasValue)
+            {
+                var task = await _db.Tasks.FindAsync(dto.TaskId.Value);
+                if (task != null && (!task.CategoryId.HasValue || task.CategoryId.Value <= 0))
+                {
+                    return BadRequest(new { message = $"Cannot allocate budget to task '{task.Title}'. This task does not have a Financial Category assigned." });
+                }
+            }
+
+            // Check if budget for this entity already exists for the same Fiscal Year
+            var existingBudget = await _db.Budgets.AnyAsync(b =>
+                b.OrganizationId == orgId.Value &&
+                b.Level == dto.Level &&
+                b.ProjectId == dto.ProjectId &&
+                b.WorkspaceId == dto.WorkspaceId &&
+                b.TaskId == dto.TaskId &&
+                b.FiscalYear == fiscalYear);
+
+            if (existingBudget)
+            {
+                return BadRequest(new { message = $"A budget for this entity already exists for Fiscal Year {fiscalYear}. Please revise or add line items to the existing budget." });
+            }
 
             var budget = new Budget
             {
@@ -227,7 +310,7 @@ namespace OrbitApi.Controllers
                 TaskId = dto.TaskId,
                 TotalAmount = dto.TotalAmount,
                 Currency = string.IsNullOrWhiteSpace(dto.Currency) ? "USD" : dto.Currency.Trim().ToUpper(),
-                FiscalYear = dto.FiscalYear > 0 ? dto.FiscalYear : DateTime.UtcNow.Year,
+                FiscalYear = fiscalYear,
                 Status = BudgetStatus.Draft
             };
 
@@ -254,6 +337,12 @@ namespace OrbitApi.Controllers
             if (orgId == null) return BadRequest(new { message = "Organization context is required." });
             var userId = GetCurrentUserId();
             if (userId == null) return Unauthorized();
+
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can revise budget ceilings." });
+            }
 
             if (dto.TotalAmount <= 0)
                 return BadRequest(new { message = "Revised budget total amount must be strictly greater than zero." });
@@ -299,6 +388,12 @@ namespace OrbitApi.Controllers
             var userId = GetCurrentUserId();
             if (userId == null) return Unauthorized();
 
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can return unspent funds." });
+            }
+
             var budget = await _db.Budgets
                 .Include(b => b.Revisions)
                 .Where(b => b.OrganizationId == orgId.Value)
@@ -324,9 +419,7 @@ namespace OrbitApi.Controllers
                 NewAmount = newTotal,
                 ApprovedByUserId = userId.Value,
                 DateApproved = DateTime.UtcNow,
-                Notes = string.IsNullOrWhiteSpace(dto?.Notes) 
-                    ? $"Returned remaining unspent budget of ${remaining:N2} {budget.Currency} back to parent pool."
-                    : dto.Notes,
+                Notes = dto?.Notes?.Trim() ?? "Returned remaining unspent budget to general funds.",
                 VersionNo = budget.Revisions.Count + 1
             };
 
@@ -358,22 +451,14 @@ namespace OrbitApi.Controllers
             var userId = GetCurrentUserId();
             if (userId == null) return Unauthorized();
 
-            var userRoles = User.FindAll(System.Security.Claims.ClaimTypes.Role).Select(r => r.Value).ToList();
-            userRoles.AddRange(User.FindAll("role").Select(r => r.Value));
-
-            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted);
-            var isDbAuthorized = isOrgOwner
-                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && (a.Role.Name == RoleName.Owner || a.Role.Name == RoleName.Admin || a.Role.Name == RoleName.FinanceOfficer))
-                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && (m.Role.Name == RoleName.Owner || m.Role.Name == RoleName.Admin || m.Role.Name == RoleName.FinanceOfficer));
-
-            var isFinanceOfficerOrAdmin = isOrgOwner || isDbAuthorized || userRoles.Any(r => r == "Owner" || r == "Admin" || r == "SystemOwner" || r == "FinanceOfficer" || r == "Finance");
-
+            var isFinanceOfficerOrAdmin = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.FinanceOfficer);
             if (!isFinanceOfficerOrAdmin)
             {
-                return BadRequest(new { message = "Segregation of Duties Enforcement: Only Finance Officers or Admins can approve budgets. The budget drafter cannot approve their own budget." });
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Finance Officers or Admins can approve budgets. The budget drafter cannot approve their own budget." });
             }
 
             var budget = await _db.Budgets
+                .Include(b => b.LineItems)
                 .Include(b => b.Revisions)
                 .Where(b => b.OrganizationId == orgId.Value)
                 .FirstOrDefaultAsync(b => b.Id == id);
@@ -382,6 +467,24 @@ namespace OrbitApi.Controllers
 
             if (budget.Status == BudgetStatus.Approved || budget.Status == BudgetStatus.Active)
                 return BadRequest("Budget is already approved or active.");
+
+            // Strict Institutional Validation: For Project-level budgets, total line item allocations must equal the total budget ceiling
+            if (budget.Level == BudgetLevel.Project)
+            {
+                var totalAllocated = budget.LineItems?.Sum(l => l.Amount) ?? 0m;
+                if (totalAllocated != budget.TotalAmount)
+                {
+                    var diff = Math.Abs(budget.TotalAmount - totalAllocated);
+                    if (totalAllocated < budget.TotalAmount)
+                    {
+                        return BadRequest(new { message = $"Budget Allocation Incomplete: Total category allocations (${totalAllocated:N2}) do not equal the total project budget (${budget.TotalAmount:N2}). There is ${diff:N2} unallocated. Please distribute all remaining funds across project line items before approval." });
+                    }
+                    else
+                    {
+                        return BadRequest(new { message = $"Budget Allocation Over-Ceiling: Total category allocations (${totalAllocated:N2}) exceed the total budget ceiling (${budget.TotalAmount:N2}) by ${diff:N2}. Please adjust line items before approving." });
+                    }
+                }
+            }
 
             var revision = new BudgetRevisionLog
             {
@@ -412,6 +515,14 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can delete budgets." });
+            }
 
             var budget = await _db.Budgets
                 .Include(b => b.LineItems)
@@ -446,6 +557,14 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can add budget line items. Finance Officers cannot create line items." });
+            }
 
             var budget = await _db.Budgets.Where(b => b.OrganizationId == orgId.Value).FirstOrDefaultAsync(b => b.Id == id);
             if (budget == null) return NotFound();
@@ -502,6 +621,14 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can update budget line items." });
+            }
 
             var budget = await _db.Budgets.FirstOrDefaultAsync(b => b.Id == id && b.OrganizationId == orgId.Value);
             if (budget == null) return NotFound();
@@ -543,6 +670,14 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+            var userId = GetCurrentUserId();
+            if (userId == null) return Unauthorized();
+
+            var canDraft = await UserHasRoleAsync(userId.Value, orgId.Value, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator);
+            if (!canDraft)
+            {
+                return StatusCode(403, new { message = "Segregation of Duties Enforcement: Only Project Managers, Coordinators, Admins, or Owners can remove budget line items." });
+            }
 
             var budgetExists = await _db.Budgets.AnyAsync(b => b.Id == id && b.OrganizationId == orgId.Value);
             if (!budgetExists) return NotFound();

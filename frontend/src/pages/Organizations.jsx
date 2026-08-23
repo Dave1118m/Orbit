@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import Modal from '../components/Modal';
+import SearchSelect from '../components/SearchSelect';
 import OrgRiskRollup from '../components/OrgRiskRollup';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
+import { COUNTRY_OPTIONS, validateRegistrationNumber } from '../utils/countryData';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/organizations`;
 
@@ -18,9 +20,10 @@ export default function Organizations() {
     description: '',
     logoUrl: '',
     registrationNumber: '',
-    country: '',
+    country: 'Ethiopia',
     budget: ''
   });
+  const [regValidation, setRegValidation] = useState({ isValid: true });
   const [logoFile, setLogoFile] = useState(null);
   const [logoPreview, setLogoPreview] = useState('');
   const [uploadProgress, setUploadProgress] = useState(0);
@@ -91,6 +94,20 @@ export default function Organizations() {
     fetchCurrentUser();
   }, []);
 
+  const handleCountryChange = (countryVal) => {
+    const nextCountry = countryVal || '';
+    setFormData(prev => ({ ...prev, country: nextCountry }));
+    const result = validateRegistrationNumber(nextCountry, formData.registrationNumber);
+    setRegValidation(result);
+  };
+
+  const handleRegNumberChange = (e) => {
+    const val = e.target.value;
+    setFormData(prev => ({ ...prev, registrationNumber: val }));
+    const result = validateRegistrationNumber(formData.country, val);
+    setRegValidation(result);
+  };
+
   const handleChange = (e) => {
     setFormData({ ...formData, [e.target.name]: e.target.value });
   };
@@ -128,14 +145,22 @@ export default function Organizations() {
   };
 
   const resetForm = () => {
-    setFormData({ name: '', description: '', logoUrl: '', registrationNumber: '', country: '', budget: '' });
+    setFormData({ name: '', description: '', logoUrl: '', registrationNumber: '', country: 'Ethiopia', budget: '' });
+    setRegValidation({ isValid: true });
     setLogoFile(null);
     setLogoPreview('');
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    console.log('Organizations.create submit', formData, logoFile);
+
+    const validation = validateRegistrationNumber(formData.country, formData.registrationNumber);
+    if (!validation.isValid) {
+      setRegValidation(validation);
+      showErrorToast(validation.error || 'Invalid Registration Number');
+      return;
+    }
+
     try {
       const token = localStorage.getItem('token');
       if (!token) {
@@ -151,7 +176,7 @@ export default function Organizations() {
         body: JSON.stringify({
           name: formData.name,
           description: formData.description,
-          logoUrl: formData.logoUrl, // Only use string if no file
+          logoUrl: formData.logoUrl,
           registrationNumber: formData.registrationNumber,
           country: formData.country,
           budget: formData.budget ? parseFloat(formData.budget) : null
@@ -190,19 +215,18 @@ export default function Organizations() {
             newOrg.logoUrl = uploadResult.LogoUrl;
           }
 
-          // Insert the new org into the current list for immediate UX feedback
           setOrganizations(prev => [newOrg, ...prev]);
           setUploadProgress(0);
         } else {
-          // No file: just prepend the created org
           setOrganizations(prev => [newOrg, ...prev]);
         }
 
         setIsModalOpen(false);
         resetForm();
+        showSuccessToast(`Organization "${newOrg.name}" created successfully!`);
       } else {
         const errorText = await parseApiResponse(response);
-        showErrorToast(`Failed to create organization: ${response.status} ${response.statusText}\n${errorText}`);
+        showErrorToast(`Failed to create organization: ${errorText}`);
       }
     } catch (err) {
       console.error(err);
@@ -442,61 +466,71 @@ export default function Organizations() {
               className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
             />
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="mb-1 block text-sm font-medium text-slate-700">Country</label>
-              <input
-                name="country"
+              <SearchSelect
+                options={COUNTRY_OPTIONS}
                 value={formData.country}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                onChange={handleCountryChange}
+                placeholder="Select country..."
+                isClearable={false}
               />
             </div>
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">Reg Number</label>
+              <label className="mb-1 block text-sm font-medium text-slate-700">
+                Registration Number {formData.country === 'Ethiopia' && <span className="text-xs text-indigo-600 font-semibold">(Ethiopia)</span>}
+              </label>
               <input
                 name="registrationNumber"
                 value={formData.registrationNumber}
-                onChange={handleChange}
-                className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                onChange={handleRegNumberChange}
+                placeholder={formData.country === 'Ethiopia' ? 'e.g. CSO/3421 or AA/12345/2016' : 'Registration code'}
+                className={`w-full rounded-xl border px-4 py-2 text-sm focus:outline-none focus:ring-1 ${
+                  !regValidation.isValid 
+                    ? 'border-rose-400 bg-rose-50/40 text-rose-900 focus:border-rose-500 focus:ring-rose-500' 
+                    : 'border-slate-300 focus:border-brand-500 focus:ring-brand-500'
+                }`}
               />
+              {!regValidation.isValid && (
+                <p className="mt-1 text-[11px] text-rose-600 font-medium">{regValidation.error}</p>
+              )}
+              {formData.country === 'Ethiopia' && regValidation.isValid && (
+                <p className="mt-1 text-[11px] text-slate-400">Accepted: CSO/NGO code, Trade License, or Reg ID</p>
+              )}
             </div>
           </div>
 
           <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Logo URL</label>
-            <input
-              name="logoUrl"
-              value={formData.logoUrl}
-              onChange={(e) => {
-                setFormData({ ...formData, logoUrl: e.target.value });
-                if (logoFile) {
-                  setLogoFile(null);
-                  setLogoPreview('');
-                }
-              }}
-              placeholder="https://example.com/logo.png"
-              className="w-full rounded-xl border border-slate-300 px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium text-slate-700">Upload logo</label>
+            <label className="mb-1 block text-sm font-medium text-slate-700">Upload Logo</label>
             <div
               onDrop={handleDrop}
               onDragOver={handleDragOver}
-              className="flex min-h-[140px] items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-center transition hover:border-brand-500"
+              className="flex min-h-[120px] items-center justify-center rounded-2xl border-2 border-dashed border-slate-300 bg-slate-50 p-4 text-center transition hover:border-brand-500"
             >
               {logoPreview ? (
-                <img src={logoPreview} alt="Logo preview" className="max-h-32 rounded-xl object-contain" />
+                <div className="flex flex-col items-center gap-2">
+                  <img src={logoPreview} alt="Logo preview" className="max-h-24 rounded-xl object-contain shadow-xs" />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLogoFile(null);
+                      setLogoPreview('');
+                    }}
+                    className="text-xs text-rose-600 hover:underline font-semibold"
+                  >
+                    Remove Logo
+                  </button>
+                </div>
               ) : (
                 <div className="space-y-2 text-slate-500">
-                  <p className="text-sm">Drag & drop an image here, or browse to upload.</p>
+                  <p className="text-xs">Drag & drop logo image here, or browse to upload</p>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
-                    className="rounded-full bg-brand-500 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-600"
+                    className="rounded-full bg-brand-500 px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand-600 shadow-xs"
                   >
-                    Browse file
+                    Browse Image
                   </button>
                 </div>
               )}
