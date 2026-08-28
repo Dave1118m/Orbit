@@ -12,18 +12,18 @@ export default function RoiCalculator() {
   const reportingAcceleration = (2.5 + (projectsCount * 0.15)).toFixed(1);
 
   return (
-    <div className="rounded-3xl border border-indigo-100 bg-gradient-to-br from-indigo-900 via-slate-900 to-slate-950 p-6 md:p-10 text-white shadow-2xl">
-      <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-5">
+    <div className="glass-obsidian-card rounded-3xl p-6 md:p-10 text-white shadow-2xl border border-white/[0.08]">
+      <div className="mb-8 flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
         <div>
           <div className="flex items-center gap-2">
             <Calculator className="h-5 w-5 text-indigo-400" />
-            <h3 className="text-xl font-extrabold text-white">Interactive Impact & ROI Calculator</h3>
+            <h3 className="text-xl sm:text-2xl font-black text-white">Interactive Impact & ROI Calculator</h3>
           </div>
           <p className="mt-1 text-sm text-slate-400">
             Adjust the sliders below to estimate weekly time savings and financial efficiency gains with Orbit.
           </p>
         </div>
-        <span className="rounded-full bg-indigo-500/20 px-3 py-1 text-xs font-semibold text-indigo-300 border border-indigo-500/30">
+        <span className="rounded-full bg-indigo-500/10 px-3.5 py-1 text-xs font-bold text-indigo-300 border border-indigo-500/20 backdrop-blur-md">
           Live Estimator
         </span>
       </div>
@@ -32,10 +32,10 @@ export default function RoiCalculator() {
         {/* Sliders Input Column */}
         <div className="lg:col-span-6 space-y-6">
           {/* Slider 1: Projects */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+          <div className="rounded-2xl border border-white/[0.08] bg-[#08090a]/60 p-4 backdrop-blur-md">
             <div className="mb-2 flex justify-between text-sm font-bold">
               <span className="text-slate-300">Active Projects Managed</span>
-              <span className="font-mono text-indigo-400">{projectsCount} Projects</span>
+              <span className="font-mono font-black text-indigo-400">{projectsCount} Projects</span>
             </div>
             <input
               type="range"
@@ -52,10 +52,10 @@ export default function RoiCalculator() {
           </div>
 
           {/* Slider 2: Team Size */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+          <div className="rounded-2xl border border-white/[0.08] bg-[#08090a]/60 p-4 backdrop-blur-md">
             <div className="mb-2 flex justify-between text-sm font-bold">
               <span className="text-slate-300">Team Members & Volunteers</span>
-              <span className="font-mono text-indigo-400">{teamSize} Members</span>
+              <span className="font-mono font-black text-indigo-400">{teamSize} Members</span>
             </div>
             <input
               type="range"
@@ -72,10 +72,10 @@ export default function RoiCalculator() {
           </div>
 
           {/* Slider 3: Operating Budget */}
-          <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
+          <div className="rounded-2xl border border-white/[0.08] bg-[#08090a]/60 p-4 backdrop-blur-md">
             <div className="mb-2 flex justify-between text-sm font-bold">
               <span className="text-slate-300">Annual Managed Budget ($)</span>
-              <span className="font-mono text-indigo-400">${(annualBudget).toLocaleString()}</span>
+              <span className="font-mono font-black text-indigo-400">${(annualBudget).toLocaleString()}</span>
             </div>
             <input
               type="range"
@@ -95,42 +95,42 @@ export default function RoiCalculator() {
 
         {/* Calculated Results Display Column */}
         <div className="lg:col-span-6">
-          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/60 p-6 shadow-xl backdrop-blur-xl">
+          <div className="rounded-2xl border border-indigo-500/30 bg-indigo-950/40 p-6 shadow-2xl backdrop-blur-2xl">
             <div className="mb-6 flex items-center justify-between border-b border-indigo-900/60 pb-3">
               <span className="text-xs font-bold uppercase tracking-wider text-indigo-300">Estimated Annual ROI</span>
-              <Sparkles className="h-4 w-4 text-amber-400" />
+              <Sparkles className="h-4 w-4 text-amber-400 animate-pulse" />
             </div>
 
             <div className="space-y-6">
               {/* Metric 1 */}
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600/80 text-white shadow-lg">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-indigo-600/30 border border-indigo-500/30 text-indigo-300 shadow-lg">
                   <Clock className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-2xl font-extrabold text-white font-mono">{hoursSavedPerWeek} hrs / week</p>
+                  <p className="text-2xl font-black text-white font-mono">{hoursSavedPerWeek} hrs / week</p>
                   <p className="text-xs text-slate-400">Team Admin Time Saved per Week</p>
                 </div>
               </div>
 
               {/* Metric 2 */}
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600/80 text-white shadow-lg">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600/30 border border-emerald-500/30 text-emerald-300 shadow-lg">
                   <DollarSign className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-2xl font-extrabold text-emerald-400 font-mono">${annualSavingsDollars.toLocaleString()}</p>
+                  <p className="text-2xl font-black text-emerald-400 font-mono">${annualSavingsDollars.toLocaleString()}</p>
                   <p className="text-xs text-slate-400">Estimated Cost & Audit Leakage Saved / Year</p>
                 </div>
               </div>
 
               {/* Metric 3 */}
               <div className="flex items-center gap-4">
-                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-600/80 text-white shadow-lg">
+                <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-amber-600/30 border border-amber-500/30 text-amber-300 shadow-lg">
                   <TrendingUp className="h-6 w-6" />
                 </div>
                 <div>
-                  <p className="text-2xl font-extrabold text-amber-300 font-mono">{reportingAcceleration}x Faster</p>
+                  <p className="text-2xl font-black text-amber-300 font-mono">{reportingAcceleration}x Faster</p>
                   <p className="text-xs text-slate-400">Logframe & Donor Report Acceleration</p>
                 </div>
               </div>
@@ -139,7 +139,7 @@ export default function RoiCalculator() {
             <div className="mt-8 pt-4 border-t border-indigo-900/60 text-center">
               <a
                 href="/register"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-white px-6 py-3 text-sm font-bold text-slate-900 transition hover:bg-slate-100 active:scale-95 shadow-lg"
+                className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-600 to-cyan-500 px-6 py-3.5 text-sm font-extrabold text-white transition hover:shadow-lg hover:shadow-indigo-500/30 active:scale-95 shadow-md"
               >
                 <span>Start Saving Hours Today — Free Trial</span>
                 <ArrowRight className="h-4 w-4" />

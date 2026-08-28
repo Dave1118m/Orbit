@@ -213,6 +213,119 @@ textarea {
   background-color: rgba(59, 130, 246, 0.05) !important;
 }
 
+/* Dot Matrix & Ambient Glow Effects */
+.bg-dot-pattern-light {
+  background-image: radial-gradient(rgba(99, 102, 241, 0.18) 1.25px, transparent 1.25px);
+  background-size: 24px 24px;
+}
+
+.bg-dot-pattern-dark {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.15) 1.25px, transparent 1.25px);
+  background-size: 24px 24px;
+}
+
+.bg-dot-pattern-cyan {
+  background-image: radial-gradient(rgba(6, 182, 212, 0.2) 1.25px, transparent 1.25px);
+  background-size: 24px 24px;
+}
+
+.bg-dot-pattern-dense {
+  background-image: radial-gradient(rgba(99, 102, 241, 0.15) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.mask-radial-faded {
+  mask-image: radial-gradient(ellipse 80% 65% at 50% 35%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 65% at 50% 35%, black 40%, transparent 100%);
+}
+
+.mask-radial-center {
+  mask-image: radial-gradient(circle at center, black 45%, transparent 95%);
+  -webkit-mask-image: radial-gradient(circle at center, black 45%, transparent 95%);
+}
+
+.mask-linear-b {
+  mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, black 60%, transparent 100%);
+}
+
+.mask-linear-y {
+  mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0%, black 20%, black 80%, transparent 100%);
+}
+
+@keyframes pulse-slow-glow {
+  0%, 100% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.6;
+  }
+  50% {
+    transform: scale(1.12) translate(12px, -8px);
+    opacity: 0.85;
+  }
+}
+
+.animate-glow-drift {
+  animation: pulse-slow-glow 10s ease-in-out infinite;
+}
+
+/* Linear & Plane Ultra-Premium Design Tokens */
+.bg-obsidian {
+  background-color: #08090a;
+}
+
+.bg-obsidian-subtle {
+  background-color: #0d1117;
+}
+
+.glass-obsidian {
+  background: rgba(13, 17, 23, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-obsidian-card {
+  background: rgba(15, 23, 42, 0.6);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 20px 40px -15px rgba(0, 0, 0, 0.6);
+}
+
+.glass-obsidian-card:hover {
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 0 0 1px rgba(99, 102, 241, 0.2), 0 24px 48px -12px rgba(99, 102, 241, 0.15);
+}
+
+.linear-badge {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.15);
+}
+
+.linear-glow-beam {
+  background: radial-gradient(ellipse 60% 40% at 50% 0%, rgba(99, 102, 241, 0.25) 0%, rgba(6, 182, 212, 0.12) 40%, transparent 80%);
+}
+
+.linear-border-shimmer {
+  position: relative;
+}
+.linear-border-shimmer::before {
+  content: '';
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.1), rgba(99, 102, 241, 0.6), rgba(6, 182, 212, 0.6), rgba(255, 255, 255, 0.1));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
 /* Custom sleek scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

@@ -3,8 +3,11 @@ import { Link } from 'react-router-dom';
 import { useUser } from '../contexts/UserContext';
 import KanbanLandingDemo from '../components/landing/KanbanLandingDemo';
 import SystemFeaturesSection from '../components/landing/SystemFeaturesSection';
+import RoleHierarchyMatrix from '../components/landing/RoleHierarchyMatrix';
 import InteractiveReportsDemo from '../components/landing/InteractiveReportsDemo';
 import RoiCalculator from '../components/landing/RoiCalculator';
+import FaqSection from '../components/landing/FaqSection';
+import DotBackground from '../components/landing/DotBackground';
 import { 
   Sparkles, 
   ArrowRight, 
@@ -29,35 +32,73 @@ import {
   Send,
   MessageSquare,
   Clock,
-  BarChart3
+  BarChart3,
+  Share2
 } from 'lucide-react';
 
-const FAQS = [
+// ── SOCIAL MEDIA & COMMUNITY CHANNELS CONFIGURATION ──
+// Update your handles and direct URLs below:
+export const SOCIAL_CHANNELS = [
   {
-    q: 'How does OrbitDesk enforce system permissions and role access?',
-    a: 'OrbitDesk uses strict Role-Based Access Control (RBAC). Organization Owners receive full administrative privileges. Admins manage settings, Coordinators oversee Workspaces, Managers control Projects, Finance Officers approve Expenses, and Members execute tasks.'
+    id: 'telegram',
+    name: 'Telegram',
+    handle: '@orbitdesk',
+    url: 'https://t.me/orbitdesk', // <--- Configure Telegram URL here
+    desc: 'Live Community & Support Chat',
+    brandColor: 'text-sky-400',
+    borderHover: 'hover:border-sky-400/50 hover:bg-sky-500/10',
+    icon: (props) => (
+      <svg className={props.className || "h-5 w-5"} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm4.64 6.8c-.15 1.58-.8 5.42-1.13 7.19-.14.75-.42 1-.68 1.03-.58.05-1.02-.38-1.58-.75-.88-.58-1.38-.94-2.23-1.5-.99-.65-.35-1.01.22-1.59.15-.15 2.71-2.48 2.76-2.69a.2.2 0 00-.05-.18c-.06-.05-.14-.03-.21-.02-.09.02-1.49.95-4.22 2.79-.4.27-.76.41-1.08.4-.36-.01-1.04-.2-1.55-.37-.63-.2-1.12-.31-1.08-.66.02-.18.27-.36.74-.55 2.92-1.27 4.86-2.11 5.83-2.51 2.78-1.16 3.35-1.36 3.73-1.36.08 0 .27.02.39.12.1.08.13.19.14.27-.01.06.01.24 0 .38z"/>
+      </svg>
+    )
   },
   {
-    q: 'How do Logframes (MEL) and Indicator targets work in OrbitDesk?',
-    a: 'OrbitDesk features a standardized Goal ➔ Outcome ➔ Output ➔ Activity results framework. Officers attach verification evidence, set target metrics, and track progress in real time.'
+    id: 'tiktok',
+    name: 'TikTok',
+    handle: '@orbitdesk',
+    url: 'https://tiktok.com/@orbitdesk', // <--- Configure TikTok URL here
+    desc: 'Feature Demos & Quick Highlights',
+    brandColor: 'text-pink-400',
+    borderHover: 'hover:border-pink-400/50 hover:bg-pink-500/10',
+    icon: (props) => (
+      <svg className={props.className || "h-5 w-5"} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-5.2 1.74 2.89 2.89 0 012.31-4.64c.29 0 .57.04.84.11V9.37a6.33 6.33 0 00-.84-.06 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.34-6.34V8.75a8.16 8.16 0 004.77 1.52V6.82a4.84 4.84 0 01-1-.13z"/>
+      </svg>
+    )
   },
   {
-    q: 'What is the $500 expense threshold audit rule?',
-    a: 'Expenses equal to or exceeding $500 automatically require an attached invoice or receipt before approval, preventing audit compliance flags.'
+    id: 'youtube',
+    name: 'YouTube',
+    handle: '@OrbitDeskOfficial',
+    url: 'https://youtube.com/@OrbitDeskOfficial', // <--- Configure YouTube URL here
+    desc: 'NGO Tutorials & Masterclasses',
+    brandColor: 'text-rose-500',
+    borderHover: 'hover:border-rose-500/50 hover:bg-rose-500/10',
+    icon: (props) => (
+      <svg className={props.className || "h-5 w-5"} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/>
+      </svg>
+    )
   },
   {
-    q: 'How does the Public Volunteer recruitment portal work?',
-    a: 'OrbitDesk provides a public link for volunteer applications. Coordinators screen background checks (Passed, Pending, Failed) and assign approved volunteers directly to project tasks.'
-  },
-  {
-    q: 'What currency conversions are supported in financial ledgers?',
-    a: 'OrbitDesk includes a dual-currency engine operating natively in USD ($) and ETB (Br) across budget lines, expenses, and donor reports.'
+    id: 'linkedin',
+    name: 'LinkedIn',
+    handle: 'OrbitDesk Enterprise',
+    url: 'https://linkedin.com/company/orbitdesk', // <--- Configure LinkedIn URL here
+    desc: 'Consortium & Enterprise Partnerships',
+    brandColor: 'text-blue-400',
+    borderHover: 'hover:border-blue-400/50 hover:bg-blue-500/10',
+    icon: (props) => (
+      <svg className={props.className || "h-5 w-5"} viewBox="0 0 24 24" fill="currentColor">
+        <path d="M19 0h-14c-2.761 0-5 2.239-5 5v14c0 2.761 2.239 5 5 5h14c2.762 0 5-2.239 5-5v-14c0-2.761-2.238-5-5-5zm-11 19h-3v-11h3v11zm-1.5-12.268c-.966 0-1.75-.79-1.75-1.764s.784-1.764 1.75-1.764 1.75.79 1.75 1.764-.783 1.764-1.75 1.764zm13.5 12.268h-3v-5.604c0-3.368-4-3.113-4 0v5.604h-3v-11h3v1.765c1.396-2.586 7-2.777 7 2.476v6.759z"/>
+      </svg>
+    )
   }
 ];
 
 export default function Landing() {
   const { user } = useUser();
-  const [openFaqIndex, setOpenFaqIndex] = useState(0);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Live System Telemetry State
@@ -130,119 +171,115 @@ export default function Landing() {
   const totalTeams = telemetry.totalTeams || 6;
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans selection:bg-indigo-500 selection:text-white">
-      {/* ── NAVBAR ── */}
-      <nav className="sticky top-0 z-50 border-b border-slate-200 bg-white/95 backdrop-blur-md shadow-xs">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-          {/* Logo */}
-          <Link to="/" className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 text-white font-black text-xl shadow-md shadow-indigo-500/20">
+    <div className="min-h-screen bg-[#08090a] text-slate-100 font-sans selection:bg-indigo-500 selection:text-white">
+      {/* ── TOP NAVBAR ── */}
+      <nav className="sticky top-0 z-50 border-b border-white/[0.08] bg-[#08090a]/85 backdrop-blur-xl transition-all">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8 h-16 sm:h-20">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-400 text-white font-black shadow-lg shadow-indigo-500/25">
               O
             </div>
-            <div className="flex flex-col">
-              <span className="font-black text-xl text-slate-900 tracking-tight">OrbitDesk</span>
-              <span className="text-[11px] font-extrabold bg-gradient-to-r from-violet-600 to-cyan-600 bg-clip-text text-transparent uppercase tracking-wider">Enterprise & NGO OS</span>
-            </div>
-          </Link>
-
-          {/* Desktop Nav Links */}
-          <div className="hidden items-center gap-8 md:flex text-sm font-bold text-slate-700">
-            <a href="#kanban-section" className="hover:text-indigo-600 transition">Live Kanban</a>
-            <a href="#metrics" className="hover:text-indigo-600 transition">System Telemetry</a>
-            <a href="#governance" className="hover:text-indigo-600 transition">RBAC Governance</a>
-            <a href="#reports" className="hover:text-indigo-600 transition">Analytics</a>
-            <a href="#faq" className="hover:text-indigo-600 transition">FAQ</a>
-            <a href="#contact" className="hover:text-indigo-600 transition">Contact</a>
+            <span className="text-xl sm:text-2xl font-black tracking-tight text-white">Orbit<span className="text-cyan-400">Desk</span></span>
           </div>
 
-          {/* Action Buttons */}
-          <div className="hidden items-center gap-3 md:flex">
-            <Link
-              to="/apply-volunteer"
-              className="flex items-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-xs font-extrabold text-rose-700 hover:bg-rose-100 transition shadow-xs"
-            >
-              <Heart className="h-4 w-4 text-rose-500" />
-              <span>Volunteers</span>
-            </Link>
+          <div className="hidden md:flex items-center gap-8 text-xs sm:text-sm font-bold text-slate-300">
+            <a href="#kanban-section" className="hover:text-white transition-colors">Kanban</a>
+            <a href="#metrics" className="hover:text-white transition-colors">Telemetry</a>
+            <a href="#governance" className="hover:text-white transition-colors">RBAC Matrix</a>
+            <a href="#reports" className="hover:text-white transition-colors">Analytics</a>
+            <a href="#roi" className="hover:text-white transition-colors">ROI Calculator</a>
+            <a href="#faq" className="hover:text-white transition-colors">FAQ</a>
+            <a href="#contact" className="hover:text-white transition-colors">Contact</a>
+          </div>
 
+          <div className="hidden md:flex items-center gap-3">
             {user ? (
               <Link
-                to="/dashboard"
-                className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-600 px-5 py-2.5 text-xs font-extrabold text-white shadow-md hover:opacity-95 transition"
+                to="/projects"
+                className="rounded-xl bg-gradient-to-r from-indigo-500 via-violet-600 to-cyan-500 px-5 py-2.5 text-xs sm:text-sm font-extrabold text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
               >
-                <span>Dashboard</span>
-                <ArrowRight className="h-4 w-4" />
+                Go to Dashboard
               </Link>
             ) : (
               <>
                 <Link
                   to="/login"
-                  className="rounded-xl px-4 py-2.5 text-xs font-extrabold text-slate-700 hover:bg-slate-100 transition"
+                  className="rounded-xl border border-white/[0.1] bg-white/[0.04] px-4 py-2 text-xs sm:text-sm font-bold text-slate-200 hover:text-white hover:bg-white/[0.08] transition"
                 >
                   Sign In
                 </Link>
                 <Link
                   to="/register"
-                  className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 via-violet-600 to-cyan-600 px-5 py-2.5 text-xs font-extrabold text-white shadow-md hover:opacity-95 transition"
+                  className="rounded-xl bg-gradient-to-r from-indigo-500 via-violet-600 to-cyan-500 px-5 py-2 text-xs sm:text-sm font-extrabold text-white shadow-lg shadow-indigo-500/25 hover:shadow-indigo-500/40 hover:scale-[1.02] active:scale-[0.98] transition-all"
                 >
-                  <span>Get Started</span>
-                  <ArrowRight className="h-4 w-4" />
+                  Get Started Free
                 </Link>
               </>
             )}
           </div>
 
-          {/* Mobile Toggle */}
-          <button
-            onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="rounded-xl p-2 text-slate-700 hover:bg-slate-100 md:hidden"
-          >
-            {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-          </button>
+          <div className="md:hidden">
+            <button
+              onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+              className="p-2 text-slate-400 hover:text-white"
+            >
+              {mobileMenuOpen ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+            </button>
+          </div>
         </div>
 
         {/* Mobile Dropdown */}
         {mobileMenuOpen && (
-          <div className="border-b border-slate-200 bg-white px-4 py-4 md:hidden space-y-3 text-sm font-bold text-slate-800">
-            <a href="#kanban-section" onClick={() => setMobileMenuOpen(false)} className="block py-1">Live Drag & Drop Kanban</a>
-            <a href="#metrics" onClick={() => setMobileMenuOpen(false)} className="block py-1">System Metrics</a>
-            <a href="#governance" onClick={() => setMobileMenuOpen(false)} className="block py-1">Governance & RBAC</a>
-            <a href="#reports" onClick={() => setMobileMenuOpen(false)} className="block py-1">Analytics & Reports</a>
-            <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="block py-1">Contact Team</a>
-            <Link to="/apply-volunteer" onClick={() => setMobileMenuOpen(false)} className="block py-1 text-rose-600">Public Volunteer Portal</Link>
-            <div className="pt-2 border-t border-slate-100 flex gap-2">
-              <Link to="/login" className="flex-1 text-center py-2.5 rounded-xl bg-slate-100 text-xs font-extrabold">Sign In</Link>
-              <Link to="/register" className="flex-1 text-center py-2.5 rounded-xl bg-indigo-600 text-white text-xs font-extrabold">Get Started</Link>
+          <div className="md:hidden border-b border-white/[0.08] bg-[#08090a] px-4 pt-2 pb-6 space-y-3">
+            <a href="#kanban-section" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">Kanban Board</a>
+            <a href="#metrics" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">System Telemetry</a>
+            <a href="#governance" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">RBAC Matrix</a>
+            <a href="#reports" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">Analytics & MEL</a>
+            <a href="#roi" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">ROI Calculator</a>
+            <a href="#faq" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">FAQ</a>
+            <a href="#contact" onClick={() => setMobileMenuOpen(false)} className="block py-2 text-sm font-bold text-slate-300">Contact Us</a>
+            <div className="pt-2 flex flex-col gap-2">
+              <Link to="/login" className="text-center rounded-xl border border-white/[0.1] bg-white/[0.04] py-2.5 text-sm font-bold text-white">Sign In</Link>
+              <Link to="/register" className="text-center rounded-xl bg-indigo-600 py-2.5 text-sm font-bold text-white">Get Started Free</Link>
             </div>
           </div>
         )}
       </nav>
 
-      {/* ── HERO SECTION ── */}
-      <section className="bg-white py-16 md:py-24 border-b border-slate-200 relative overflow-hidden">
-        <div className="absolute -top-12 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-gradient-to-r from-violet-200/50 via-indigo-200/50 to-cyan-200/50 blur-3xl rounded-full pointer-events-none"></div>
-
-        <div className="mx-auto max-w-5xl px-4 text-center space-y-6 relative z-10">
-          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-gradient-to-r from-indigo-50 to-cyan-50 px-4 py-1.5 text-xs sm:text-sm font-extrabold text-indigo-700 shadow-xs">
-            <Sparkles className="h-4 w-4 text-indigo-600" />
-            <span>ENTERPRISE PROJECT & NGO GOVERNANCE PLATFORM</span>
+      {/* ── HERO SECTION (Linear / Plane Obsidian & Light Cones) ── */}
+      <DotBackground
+        variant="hero"
+        density="normal"
+        mask="radial"
+        showGlow={true}
+        interactive={true}
+        className="py-24 md:py-32 bg-[#08090a] border-b border-white/[0.08] relative"
+      >
+        <div className="mx-auto max-w-5xl px-4 text-center space-y-8 relative z-10">
+          {/* Shimmering Badge */}
+          <div className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs sm:text-sm font-extrabold text-indigo-300 backdrop-blur-md shadow-[0_0_20px_rgba(99,102,241,0.2)]">
+            <Sparkles className="h-4 w-4 text-indigo-400 animate-pulse" />
+            <span className="tracking-wide uppercase">ENTERPRISE PROJECT & NGO GOVERNANCE PLATFORM</span>
           </div>
 
-          <h1 className="text-4xl font-black text-slate-900 sm:text-6xl md:text-7xl tracking-tight leading-tight">
+          {/* Holographic Headline */}
+          <h1 className="text-5xl font-black text-white sm:text-7xl md:text-8xl tracking-tight leading-[1.08]">
             Centralized Workspaces, <br className="hidden sm:inline" />
-            <span className="bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-white via-indigo-200 to-cyan-400 bg-clip-text text-transparent drop-shadow-sm">
               Logframes & Financial Audits
             </span>
           </h1>
 
-          <p className="mx-auto max-w-3xl text-base sm:text-lg text-slate-600 font-semibold leading-relaxed">
-            Manage multi-tenant workspaces, drag-and-drop Kanban task pipelines, <span className="text-emerald-700 font-extrabold">$500 receipt audit rules</span>, MEL indicator target trees, and public volunteer recruitment.
+          {/* Subtitle */}
+          <p className="mx-auto max-w-3xl text-base sm:text-xl text-slate-300 font-normal leading-relaxed">
+            Manage multi-tenant workspaces, drag-and-drop Kanban task pipelines, <span className="text-emerald-400 font-extrabold">$500 receipt audit rules</span>, MEL indicator target trees, and public volunteer recruitment.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-4 pt-4">
+          {/* Action CTAs */}
+          <div className="flex flex-wrap items-center justify-center gap-4 pt-2">
             <Link
               to="/register"
-              className="flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 px-8 py-4 text-sm font-extrabold text-white shadow-xl shadow-indigo-500/25 hover:opacity-95 transition active:scale-95"
+              className="flex items-center gap-2.5 rounded-2xl bg-gradient-to-r from-indigo-500 via-violet-600 to-cyan-500 px-8 py-4 text-sm font-extrabold text-white shadow-xl shadow-indigo-500/30 hover:shadow-indigo-500/50 hover:scale-[1.02] active:scale-[0.98] transition-all"
             >
               <span>Get Started Now</span>
               <ArrowRight className="h-5 w-5" />
@@ -250,211 +287,301 @@ export default function Landing() {
 
             <Link
               to="/apply-volunteer"
-              className="flex items-center gap-2 rounded-2xl border border-rose-200 bg-rose-50/80 px-7 py-4 text-sm font-extrabold text-rose-800 hover:bg-rose-100 transition shadow-xs"
+              className="flex items-center gap-2 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-7 py-4 text-sm font-extrabold text-rose-300 hover:bg-rose-500/20 hover:border-rose-500/60 hover:scale-[1.02] active:scale-[0.98] transition-all shadow-xs backdrop-blur-md"
             >
-              <Heart className="h-5 w-5 text-rose-600" />
+              <Heart className="h-5 w-5 text-rose-400" />
               <span>Public Volunteer Portal</span>
             </Link>
           </div>
+
+          {/* Sleek Feature Tags Pill Banner */}
+          <div className="pt-6">
+            <div className="inline-flex flex-wrap items-center justify-center gap-3 sm:gap-8 rounded-2xl border border-white/[0.08] bg-slate-900/60 px-6 py-3.5 shadow-2xl backdrop-blur-xl text-xs font-bold text-slate-300">
+              <span className="flex items-center gap-2 text-indigo-400">
+                <span className="h-2 w-2 rounded-full bg-indigo-400 animate-ping"></span>
+                <span>Live Drag & Drop Kanban</span>
+              </span>
+              <span className="hidden sm:inline text-slate-700">•</span>
+              <span className="flex items-center gap-2 text-cyan-400">
+                <span className="h-2 w-2 rounded-full bg-cyan-400"></span>
+                <span>Dual USD / ETB Engine</span>
+              </span>
+              <span className="hidden sm:inline text-slate-700">•</span>
+              <span className="flex items-center gap-2 text-emerald-400">
+                <span className="h-2 w-2 rounded-full bg-emerald-400"></span>
+                <span>$500 Receipt Audit Gate</span>
+              </span>
+              <span className="hidden sm:inline text-slate-700">•</span>
+              <span className="flex items-center gap-2 text-violet-400">
+                <span className="h-2 w-2 rounded-full bg-violet-400"></span>
+                <span>MEL Results Tree</span>
+              </span>
+            </div>
+          </div>
         </div>
-      </section>
+      </DotBackground>
 
       {/* ── DRAG AND DROP KANBAN DEMO SECTION ── */}
-      <section id="kanban-section" className="py-20 bg-slate-900 text-white border-b border-slate-800">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center max-w-3xl mx-auto mb-10">
-            <span className="rounded-full bg-cyan-500/20 px-4 py-1.5 text-xs font-black uppercase tracking-wider text-cyan-300 border border-cyan-500/30">
+      <DotBackground
+        variant="dark"
+        density="normal"
+        mask="radial"
+        showGlow={true}
+        interactive={true}
+        className="py-24 bg-[#08090a] text-white border-b border-white/[0.08]"
+      >
+        <div id="kanban-section" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-3xl mx-auto mb-12">
+            <span className="rounded-full bg-cyan-500/10 px-4 py-1.5 text-xs font-black uppercase tracking-wider text-cyan-300 border border-cyan-500/20 backdrop-blur-md">
               Interactive Task Management
             </span>
-            <h2 className="mt-3 text-3xl font-black text-white md:text-5xl tracking-tight">
+            <h2 className="mt-4 text-3xl font-black text-white md:text-5xl tracking-tight">
               Drag & Drop Live Kanban Pipeline
             </h2>
-            <p className="mt-2 text-base text-slate-300 font-medium">
+            <p className="mt-3 text-base text-slate-400 font-medium">
               Try dragging tasks between columns right here in your browser!
             </p>
           </div>
 
           <KanbanLandingDemo />
         </div>
-      </section>
+      </DotBackground>
 
-      {/* ── LIVE SYSTEM METRICS ── */}
-      <section id="metrics" className="py-16 bg-slate-100 border-b border-slate-200">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-6">
-            <span className="text-xs font-black uppercase tracking-wider text-slate-600 flex items-center gap-2">
-              <Activity className="h-4 w-4 text-indigo-600" /> Live System Telemetry
+      {/* ── LIVE SYSTEM METRICS (Linear-Style Bento Grid) ── */}
+      <DotBackground
+        variant="dark"
+        density="spacious"
+        mask="radial"
+        showGlow={true}
+        interactive={false}
+        className="py-24 bg-[#0d1117] border-b border-white/[0.08]"
+      >
+        <div id="metrics" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mb-8">
+            <span className="text-xs font-black uppercase tracking-wider text-slate-400 flex items-center gap-2">
+              <Activity className="h-4 w-4 text-indigo-400" /> Live System Telemetry
             </span>
-            <span className="text-xs font-mono font-bold text-slate-600 bg-white px-3.5 py-1.5 rounded-xl border border-slate-300">
+            <span className="text-xs font-mono font-bold text-slate-300 bg-white/[0.05] px-4 py-1.5 rounded-xl border border-white/[0.1] shadow-xs backdrop-blur-md flex items-center gap-2">
+              <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse"></span>
               Live Database Telemetry • Real-time Sync
             </span>
           </div>
 
           <div className="grid grid-cols-2 gap-5 sm:grid-cols-4">
-            <div className="rounded-3xl border border-cyan-200 bg-gradient-to-b from-cyan-50 to-white p-6 shadow-sm">
-              <div className="flex items-center justify-between text-cyan-700 mb-2">
+            <div className="glass-obsidian-card p-6 sm:p-7 rounded-3xl transition-all duration-300 hover:border-cyan-500/40">
+              <div className="flex items-center justify-between text-cyan-400 mb-3">
                 <Briefcase className="h-6 w-6" />
-                <span className="text-xs font-extrabold uppercase bg-cyan-100 text-cyan-800 px-2.5 py-0.5 rounded-full">Projects</span>
+                <span className="text-[11px] font-extrabold uppercase bg-cyan-500/10 text-cyan-300 border border-cyan-500/20 px-2.5 py-0.5 rounded-full">Projects</span>
               </div>
-              <p className="text-4xl font-black text-slate-900 font-mono">{totalProjects}</p>
-              <p className="text-xs font-bold text-slate-600 mt-1">{activeProjects} Active Projects</p>
+              <p className="text-4xl sm:text-5xl font-black text-white font-mono">{totalProjects}</p>
+              <p className="text-xs font-bold text-slate-400 mt-2">{activeProjects} Active Projects</p>
             </div>
 
-            <div className="rounded-3xl border border-emerald-200 bg-gradient-to-b from-emerald-50 to-white p-6 shadow-sm">
-              <div className="flex items-center justify-between text-emerald-700 mb-2">
+            <div className="glass-obsidian-card p-6 sm:p-7 rounded-3xl transition-all duration-300 hover:border-emerald-500/40">
+              <div className="flex items-center justify-between text-emerald-400 mb-3">
                 <CheckCircle2 className="h-6 w-6" />
-                <span className="text-xs font-extrabold uppercase bg-emerald-100 text-emerald-800 px-2.5 py-0.5 rounded-full">Tasks</span>
+                <span className="text-[11px] font-extrabold uppercase bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-2.5 py-0.5 rounded-full">Tasks</span>
               </div>
-              <p className="text-4xl font-black text-slate-900 font-mono">{totalTasks}</p>
-              <p className="text-xs font-bold text-slate-600 mt-1">{completedTasks} Completed Deliverables</p>
+              <p className="text-4xl sm:text-5xl font-black text-white font-mono">{totalTasks}</p>
+              <p className="text-xs font-bold text-slate-400 mt-2">{completedTasks} Completed Deliverables</p>
             </div>
 
-            <div className="rounded-3xl border border-indigo-200 bg-gradient-to-b from-indigo-50 to-white p-6 shadow-sm">
-              <div className="flex items-center justify-between text-indigo-700 mb-2">
+            <div className="glass-obsidian-card p-6 sm:p-7 rounded-3xl transition-all duration-300 hover:border-indigo-500/40">
+              <div className="flex items-center justify-between text-indigo-400 mb-3">
                 <Users className="h-6 w-6" />
-                <span className="text-xs font-extrabold uppercase bg-indigo-100 text-indigo-800 px-2.5 py-0.5 rounded-full">Teams</span>
+                <span className="text-[11px] font-extrabold uppercase bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 px-2.5 py-0.5 rounded-full">Teams</span>
               </div>
-              <p className="text-4xl font-black text-slate-900 font-mono">{totalTeams}</p>
-              <p className="text-xs font-bold text-slate-600 mt-1">Assigned Teams</p>
+              <p className="text-4xl sm:text-5xl font-black text-white font-mono">{totalTeams}</p>
+              <p className="text-xs font-bold text-slate-400 mt-2">Assigned Teams</p>
             </div>
 
-            <div className="rounded-3xl border border-amber-200 bg-gradient-to-b from-amber-50 to-white p-6 shadow-sm">
-              <div className="flex items-center justify-between text-amber-700 mb-2">
+            <div className="glass-obsidian-card p-6 sm:p-7 rounded-3xl transition-all duration-300 hover:border-amber-500/40">
+              <div className="flex items-center justify-between text-amber-400 mb-3">
                 <DollarSign className="h-6 w-6" />
-                <span className="text-xs font-extrabold uppercase bg-amber-100 text-amber-800 px-2.5 py-0.5 rounded-full">Currencies</span>
+                <span className="text-[11px] font-extrabold uppercase bg-amber-500/10 text-amber-300 border border-amber-500/20 px-2.5 py-0.5 rounded-full">Currencies</span>
               </div>
-              <p className="text-3xl font-black text-slate-900 font-mono">USD / ETB</p>
-              <p className="text-xs font-bold text-slate-600 mt-1">Dual-Currency Engine</p>
+              <p className="text-3xl sm:text-4xl font-black text-white font-mono">USD / ETB</p>
+              <p className="text-xs font-bold text-slate-400 mt-2">Dual-Currency Engine</p>
             </div>
           </div>
         </div>
-      </section>
+      </DotBackground>
 
-      {/* ── GOVERNANCE & RBAC MATRIX ── */}
-      <section id="governance" className="py-20 bg-white border-b border-slate-200">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <SystemFeaturesSection />
+      {/* ── GOVERNANCE & RBAC MATRIX (Figma Exact Role Hierarchy & Matrix) ── */}
+      <DotBackground
+        variant="dark"
+        density="normal"
+        mask="center"
+        showGlow={true}
+        interactive={false}
+        className="py-24 bg-[#08090a] border-b border-white/[0.08]"
+      >
+        <div id="governance" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <RoleHierarchyMatrix />
         </div>
-      </section>
+      </DotBackground>
 
-      {/* ── INTERACTIVE REPORTS & ANALYTICS SHOWCASE ── */}
-      <section id="reports" className="py-20 bg-slate-950 border-b border-slate-800">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      {/* ── INTERACTIVE REPORTS & ANALYTICS SHOWCASE (Figma Exact) ── */}
+      <DotBackground
+        variant="dark"
+        density="dense"
+        mask="radial"
+        showGlow={true}
+        interactive={true}
+        className="py-24 bg-[#0d1117] border-b border-white/[0.08]"
+      >
+        <div id="reports" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <div className="text-center max-w-3xl mx-auto mb-10">
+            <span className="rounded-full bg-cyan-500/10 px-4 py-1.5 text-xs font-black uppercase tracking-wider text-cyan-300 border border-cyan-500/20 backdrop-blur-md">
+              Real-Time Intelligence & Analytics
+            </span>
+            <h2 className="mt-4 text-3xl font-black text-white md:text-5xl tracking-tight">
+              Institutional Reports & MEL Tracking
+            </h2>
+            <p className="mt-3 text-sm sm:text-base text-slate-400 font-medium">
+              Real-time donor dashboards, GAAP audit balance sheets, and automated logframe tracking.
+            </p>
+          </div>
           <InteractiveReportsDemo />
         </div>
-      </section>
+      </DotBackground>
 
       {/* ── ROI CALCULATOR ── */}
-      <section id="roi" className="py-20 bg-slate-50 border-b border-slate-200">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+      <DotBackground
+        variant="dark"
+        density="spacious"
+        mask="radial"
+        showGlow={true}
+        interactive={false}
+        className="py-24 bg-[#08090a] border-b border-white/[0.08]"
+      >
+        <div id="roi" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <RoiCalculator />
         </div>
-      </section>
+      </DotBackground>
 
-      {/* ── FAQ ACCORDION ── */}
-      <section id="faq" className="py-20 bg-white">
-        <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8">
-          <div className="text-center mb-10">
-            <span className="rounded-full bg-indigo-100 px-4 py-1.5 text-xs font-extrabold uppercase tracking-wider text-indigo-800 border border-indigo-200">
-              Knowledge Base
-            </span>
-            <h2 className="mt-3 text-3xl font-black text-slate-900 sm:text-4xl">Frequently Asked Questions</h2>
-          </div>
-
-          <div className="space-y-3">
-            {FAQS.map((faq, idx) => {
-              const isOpen = openFaqIndex === idx;
-              return (
-                <div key={idx} className="rounded-2xl border border-slate-200 bg-slate-50 overflow-hidden shadow-xs">
-                  <button
-                    onClick={() => setOpenFaqIndex(isOpen ? -1 : idx)}
-                    className="flex w-full items-center justify-between p-5 text-left text-sm font-extrabold text-slate-900 hover:text-indigo-600 transition"
-                  >
-                    <span>{faq.q}</span>
-                    {isOpen ? <ChevronUp className="h-5 w-5 text-indigo-600" /> : <ChevronDown className="h-5 w-5 text-slate-400" />}
-                  </button>
-
-                  {isOpen && (
-                    <div className="px-5 pb-5 pt-1 text-xs sm:text-sm text-slate-600 font-medium border-t border-slate-200 leading-relaxed bg-white">
-                      {faq.a}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
+      {/* ── FREQUENTLY ASKED QUESTIONS SECTION (Figma Exact Master-Detail) ── */}
+      <DotBackground
+        variant="dark"
+        density="spacious"
+        mask="radial"
+        showGlow={false}
+        interactive={false}
+        className="py-24 bg-[#0d1117] border-b border-white/[0.08]"
+      >
+        <div id="faq" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <FaqSection />
         </div>
-      </section>
+      </DotBackground>
 
-      {/* ── CONTACT US SECTION ── */}
-      <section id="contact" className="py-20 bg-slate-900 text-white relative overflow-hidden border-t border-slate-800">
-        <div className="absolute -top-24 -left-24 h-96 w-96 rounded-full bg-violet-600/20 blur-3xl pointer-events-none"></div>
-        <div className="absolute -bottom-24 -right-24 h-96 w-96 rounded-full bg-cyan-600/20 blur-3xl pointer-events-none"></div>
-
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10">
+      {/* ── CONTACT US & COMMUNITY CHANNELS SECTION ── */}
+      <DotBackground
+        variant="dark"
+        density="normal"
+        mask="linear-y"
+        showGlow={true}
+        interactive={true}
+        className="py-24 bg-[#08090a] text-white relative overflow-hidden border-t border-white/[0.08]"
+      >
+        <div id="contact" className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 relative z-10">
           <div className="text-center max-w-3xl mx-auto mb-14">
             <span className="rounded-full bg-indigo-500/10 px-4 py-1.5 text-xs font-extrabold uppercase tracking-wider text-indigo-400 border border-indigo-500/20 inline-flex items-center gap-1.5">
-              <MessageSquare className="h-3.5 w-3.5" /> Get In Touch
+              <MessageSquare className="h-3.5 w-3.5" /> Get In Touch & Connect
             </span>
-            <h2 className="mt-4 text-3xl font-black text-white sm:text-4xl tracking-tight">
+            <h2 className="mt-4 text-3xl font-black text-white sm:text-5xl tracking-tight">
               Ready to Accelerate Your Projects & Donor Impact?
             </h2>
             <p className="mt-3 text-slate-400 text-sm sm:text-base">
-              Have questions about custom NGO setups, donor compliance, or enterprise onboarding? Speak directly with our solutions engineering team.
+              Have questions about custom NGO setups, donor compliance, or enterprise onboarding? Speak directly with our team or join our community channels.
             </p>
           </div>
 
-          <div className="grid gap-10 lg:grid-cols-12 items-start">
-            {/* Left Info Column */}
+          <div className="grid gap-8 lg:grid-cols-12 items-start">
+            {/* Left Column: Direct Contact & Social Media Channels */}
             <div className="lg:col-span-5 space-y-6">
-              <div className="rounded-3xl border border-slate-800 bg-slate-800/50 p-6 backdrop-blur-xl shadow-xl space-y-6">
+              {/* Direct Info Card */}
+              <div className="glass-obsidian-card p-6 rounded-3xl space-y-5">
                 <div className="flex items-start gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-400">
-                    <Mail className="h-6 w-6" />
+                  <div className="h-11 w-11 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shrink-0 text-indigo-400">
+                    <Mail className="h-5 w-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Direct Email</h4>
-                    <p className="text-sm font-bold text-white mt-1">support@orbitdesk.org</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Response SLA: &lt; 2 Hours</p>
+                    <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Direct Email</h4>
+                    <p className="text-sm font-bold text-white mt-0.5">support@orbitdesk.org</p>
+                    <p className="text-[11px] text-slate-400">Response SLA: &lt; 2 Hours</p>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0 text-cyan-400">
-                    <Clock className="h-6 w-6" />
+                  <div className="h-11 w-11 rounded-2xl bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0 text-cyan-400">
+                    <Clock className="h-5 w-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Operating Hours</h4>
-                    <p className="text-sm font-bold text-white mt-1">Monday – Friday (8:00 AM – 6:00 PM UTC)</p>
-                    <p className="text-xs text-slate-400 mt-0.5">24/7 System Health Monitoring</p>
+                    <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Operating Hours</h4>
+                    <p className="text-sm font-bold text-white mt-0.5">Monday – Friday (8:00 AM – 6:00 PM UTC)</p>
+                    <p className="text-[11px] text-slate-400">24/7 Server Health Monitoring</p>
                   </div>
                 </div>
 
                 <div className="flex items-start gap-4">
-                  <div className="h-12 w-12 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-400">
-                    <ShieldCheck className="h-6 w-6" />
+                  <div className="h-11 w-11 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0 text-emerald-400">
+                    <ShieldCheck className="h-5 w-5" />
                   </div>
                   <div>
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-400">Security & Compliance</h4>
-                    <p className="text-sm font-bold text-white mt-1">Audit Logs, Receipts & RBAC Protected</p>
-                    <p className="text-xs text-slate-400 mt-0.5">Strict end-to-end data encryption</p>
+                    <h4 className="text-[11px] font-extrabold uppercase tracking-wider text-slate-400">Security & Compliance</h4>
+                    <p className="text-sm font-bold text-white mt-0.5">Audit Logs & $500 Gate Protected</p>
+                    <p className="text-[11px] text-slate-400">Strict end-to-end data encryption</p>
                   </div>
                 </div>
               </div>
 
-              {/* Stat Card Accent */}
-              <div className="rounded-2xl border border-indigo-500/20 bg-gradient-to-r from-violet-900/40 via-indigo-900/40 to-cyan-900/40 p-5 flex items-center justify-between">
-                <div>
-                  <p className="text-2xl font-black text-white">100%</p>
-                  <p className="text-xs font-bold text-indigo-300">Auditable Logframes & Expenses</p>
+              {/* ── DEDICATED SOCIAL & COMMUNITY CARD ── */}
+              <div className="glass-obsidian-card p-6 rounded-3xl space-y-4">
+                <div className="flex items-center justify-between border-b border-white/[0.08] pb-3">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="h-4 w-4 text-cyan-400" />
+                    <h4 className="text-xs font-black uppercase tracking-wider text-white">Join Our Community & Channels</h4>
+                  </div>
+                  <span className="text-[10px] font-bold text-cyan-300 bg-cyan-500/10 border border-cyan-500/20 px-2 py-0.5 rounded-full">
+                    Official Links
+                  </span>
                 </div>
-                <div className="h-10 w-10 rounded-xl bg-indigo-500/20 flex items-center justify-center text-indigo-300 font-extrabold">✓</div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  {SOCIAL_CHANNELS.map((social) => {
+                    const Icon = social.icon;
+                    return (
+                      <a
+                        key={social.id}
+                        href={social.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className={`group flex items-center justify-between p-3 rounded-2xl border border-white/[0.08] bg-white/[0.02] transition-all duration-200 ${social.borderHover}`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className={`h-8 w-8 rounded-xl bg-white/[0.06] flex items-center justify-center shrink-0 ${social.brandColor} group-hover:scale-110 transition-transform`}>
+                            <Icon className="h-4 w-4" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-bold text-white group-hover:text-indigo-200 transition-colors truncate">
+                              {social.name}
+                            </p>
+                            <p className="text-[10px] text-slate-400 truncate">
+                              {social.handle}
+                            </p>
+                          </div>
+                        </div>
+                        <ExternalLink className="h-3.5 w-3.5 text-slate-500 group-hover:text-white shrink-0 ml-1 transition-transform group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+                      </a>
+                    );
+                  })}
+                </div>
               </div>
             </div>
 
             {/* Right Contact Form Column */}
             <div className="lg:col-span-7">
-              <div className="rounded-3xl border border-slate-800 bg-slate-800/70 p-6 sm:p-8 backdrop-blur-xl shadow-2xl">
+              <div className="glass-obsidian-card p-6 sm:p-8 rounded-3xl">
                 {contactSubmitted ? (
                   <div className="py-12 text-center space-y-4">
                     <div className="mx-auto h-16 w-16 rounded-full bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
@@ -466,7 +593,7 @@ export default function Landing() {
                     </p>
                     <button
                       onClick={() => setContactSubmitted(false)}
-                      className="mt-4 rounded-xl bg-slate-700 px-6 py-2.5 text-xs font-extrabold text-white hover:bg-slate-600 transition"
+                      className="mt-4 rounded-xl bg-white/[0.08] px-6 py-2.5 text-xs font-extrabold text-white hover:bg-white/[0.15] transition"
                     >
                       Send Another Message
                     </button>
@@ -482,7 +609,7 @@ export default function Landing() {
                           placeholder="e.g. Sarah Jenkins"
                           value={contactForm.name}
                           onChange={(e) => setContactForm({ ...contactForm, name: e.target.value })}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                          className="w-full rounded-xl border border-white/[0.1] bg-[#08090a]/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
                         />
                       </div>
                       <div>
@@ -493,7 +620,7 @@ export default function Landing() {
                           placeholder="sarah@organization.org"
                           value={contactForm.email}
                           onChange={(e) => setContactForm({ ...contactForm, email: e.target.value })}
-                          className="w-full rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                          className="w-full rounded-xl border border-white/[0.1] bg-[#08090a]/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
                         />
                       </div>
                     </div>
@@ -503,7 +630,7 @@ export default function Landing() {
                       <select
                         value={contactForm.subject}
                         onChange={(e) => setContactForm({ ...contactForm, subject: e.target.value })}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
+                        className="w-full rounded-xl border border-white/[0.1] bg-[#08090a]/80 px-4 py-3 text-sm text-white focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition"
                       >
                         <option value="Demo Request">Request Live Platform Demo</option>
                         <option value="Custom NGO Setup">Custom NGO / Organization Setup</option>
@@ -519,7 +646,7 @@ export default function Landing() {
                         placeholder="Tell us about your organization size, projects, or specific requirements..."
                         value={contactForm.message}
                         onChange={(e) => setContactForm({ ...contactForm, message: e.target.value })}
-                        className="w-full rounded-xl border border-slate-700 bg-slate-900/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition resize-none"
+                        className="w-full rounded-xl border border-white/[0.1] bg-[#08090a]/80 px-4 py-3 text-sm text-white placeholder-slate-500 focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500 transition resize-none"
                       ></textarea>
                     </div>
 
@@ -532,7 +659,7 @@ export default function Landing() {
                     <button
                       type="submit"
                       disabled={contactSending}
-                      className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 px-6 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-indigo-600/25 hover:opacity-95 active:scale-[0.99] transition disabled:opacity-50"
+                      className="w-full flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-500 via-violet-600 to-cyan-500 px-6 py-3.5 text-sm font-extrabold text-white shadow-lg shadow-indigo-600/25 hover:shadow-indigo-600/40 hover:opacity-95 active:scale-[0.99] transition disabled:opacity-50"
                     >
                       {contactSending ? (
                         <span>Sending Request...</span>
@@ -549,19 +676,39 @@ export default function Landing() {
             </div>
           </div>
         </div>
-      </section>
+      </DotBackground>
 
-      {/* ── FOOTER ── */}
-      <footer className="border-t border-slate-800 bg-slate-900 py-12 text-slate-400 text-xs sm:text-sm">
+      {/* ── FOOTER (Linear Obsidian Dark & Social Channel Strip) ── */}
+      <footer className="border-t border-white/[0.08] bg-[#060708] py-12 text-slate-400 text-xs sm:text-sm">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-6 pb-8 border-b border-slate-800">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-6 pb-8 border-b border-white/[0.08]">
             <div className="flex items-center gap-3">
-              <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 flex items-center justify-center font-black text-white text-sm">O</div>
+              <div className="h-9 w-9 rounded-xl bg-gradient-to-tr from-violet-600 via-indigo-600 to-cyan-500 flex items-center justify-center font-black text-white text-sm shadow-md">O</div>
               <span className="font-black text-white text-lg tracking-tight">OrbitDesk</span>
             </div>
+
+            {/* Social Icons Row in Footer */}
+            <div className="flex items-center gap-3">
+              {SOCIAL_CHANNELS.map((social) => {
+                const Icon = social.icon;
+                return (
+                  <a
+                    key={social.id}
+                    href={social.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="h-9 w-9 rounded-xl border border-white/[0.08] bg-white/[0.03] flex items-center justify-center text-slate-400 hover:text-white hover:border-white/[0.2] hover:bg-white/[0.08] transition-all"
+                    title={social.name}
+                  >
+                    <Icon className="h-4 w-4" />
+                  </a>
+                );
+              })}
+            </div>
+
             <div className="flex items-center gap-4">
-              <Link to="/login" className="font-extrabold text-slate-300 hover:text-white">Sign In</Link>
-              <Link to="/register" className="rounded-xl bg-gradient-to-r from-violet-600 to-indigo-600 px-5 py-2.5 font-extrabold text-white hover:opacity-95 transition shadow-md">Get Started</Link>
+              <Link to="/login" className="font-extrabold text-slate-300 hover:text-white transition-colors">Sign In</Link>
+              <Link to="/register" className="rounded-xl bg-gradient-to-r from-indigo-500 to-violet-600 px-5 py-2.5 font-extrabold text-white hover:opacity-95 transition-all shadow-md shadow-indigo-500/20">Get Started</Link>
             </div>
           </div>
 
