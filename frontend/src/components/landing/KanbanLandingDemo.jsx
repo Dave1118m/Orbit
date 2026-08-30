@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   CheckCircle2, 
   Clock, 
@@ -17,92 +17,28 @@ const INITIAL_COLUMNS = [
     title: 'To Do',
     color: 'border-white/[0.08] text-slate-300',
     dot: 'bg-slate-400',
-    tasks: [
-      {
-        id: 't-1',
-        title: 'Conduct Water Well Quality Assessment',
-        project: 'Clean Water Initiative',
-        priority: 'High',
-        priorityColor: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
-        assignee: 'Amara K.',
-        deadline: 'In 2 days',
-        comments: 4
-      },
-      {
-        id: 't-2',
-        title: 'Finalize Q3 Grant Report for Donor Review',
-        project: 'Education Fund',
-        priority: 'Urgent',
-        priorityColor: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
-        assignee: 'David M.',
-        deadline: 'Tomorrow',
-        comments: 9
-      }
-    ]
+    tasks: []
   },
   {
     id: 'in_progress',
     title: 'In Progress',
     color: 'border-blue-500/20 text-blue-300',
     dot: 'bg-cyan-400',
-    tasks: [
-      {
-        id: 't-3',
-        title: 'Deploy Solar Panels to Community Clinic',
-        project: 'Solar Resilience',
-        priority: 'High',
-        priorityColor: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
-        assignee: 'Elena R.',
-        deadline: 'Today',
-        comments: 12
-      },
-      {
-        id: 't-4',
-        title: 'Onboard 25 Youth Volunteers for Literacy Campaign',
-        project: 'Global Youth',
-        priority: 'Medium',
-        priorityColor: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
-        assignee: 'Sarah B.',
-        deadline: 'In 4 days',
-        comments: 3
-      }
-    ]
+    tasks: []
   },
   {
     id: 'in_review',
     title: 'In Review',
     color: 'border-purple-500/20 text-purple-300',
     dot: 'bg-violet-400',
-    tasks: [
-      {
-        id: 't-5',
-        title: 'Audit Medical Supply Expenses & Receipts ($4,500)',
-        project: 'Health Access',
-        priority: 'Urgent',
-        priorityColor: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
-        assignee: 'Finance Team',
-        deadline: 'Under Review',
-        comments: 7
-      }
-    ]
+    tasks: []
   },
   {
     id: 'done',
     title: 'Completed',
     color: 'border-emerald-500/20 text-emerald-300',
     dot: 'bg-emerald-400',
-    tasks: [
-      {
-        id: 't-6',
-        title: 'Publish Annual Impact Statement (2025)',
-        project: 'Organization HQ',
-        priority: 'Low',
-        priorityColor: 'bg-white/[0.05] text-slate-300 border-white/[0.08]',
-        assignee: 'Rachel T.',
-        deadline: 'Completed',
-        comments: 15
-      }
-    ]
+    tasks: []
   }
 ];
 
@@ -112,6 +48,66 @@ export default function KanbanLandingDemo() {
   const [dragOverColId, setDragOverColId] = useState(null);
   const [toastMessage, setToastMessage] = useState(null);
   const [newTaskText, setNewTaskText] = useState('');
+
+  const API_BASE = import.meta.env.VITE_API_URL;
+
+  useEffect(() => {
+    async function fetchLiveKanban() {
+      try {
+        const res = await fetch(`${API_BASE}/analytics/public-kanban`);
+        if (res.ok) {
+          const liveTasks = await res.json();
+          if (liveTasks && liveTasks.length > 0) {
+            const priorityColors = {
+              Urgent: 'bg-rose-500/10 text-rose-300 border-rose-500/20',
+              High: 'bg-amber-500/10 text-amber-300 border-amber-500/20',
+              Medium: 'bg-cyan-500/10 text-cyan-300 border-cyan-500/20',
+              Low: 'bg-white/[0.05] text-slate-300 border-white/[0.08]'
+            };
+
+            const todoList = [];
+            const inProgressList = [];
+            const inReviewList = [];
+            const doneList = [];
+
+            liveTasks.forEach(task => {
+              const formattedTask = {
+                id: task.id,
+                title: task.title,
+                project: task.project || 'Active Workspace',
+                priority: task.priority || 'Medium',
+                priorityColor: priorityColors[task.priority] || priorityColors.Medium,
+                assignee: task.category || 'Operations',
+                deadline: task.deadline || 'Active',
+                comments: 0
+              };
+
+              const st = (task.status || '').toLowerCase();
+              if (st === 'done' || st === 'completed') {
+                doneList.push(formattedTask);
+              } else if (st === 'inreview' || st === 'in_review') {
+                inReviewList.push(formattedTask);
+              } else if (st === 'inprogress' || st === 'in_progress') {
+                inProgressList.push(formattedTask);
+              } else {
+                todoList.push(formattedTask);
+              }
+            });
+
+            setColumns([
+              { id: 'todo', title: 'To Do', color: 'border-white/[0.08] text-slate-300', dot: 'bg-slate-400', tasks: todoList },
+              { id: 'in_progress', title: 'In Progress', color: 'border-blue-500/20 text-blue-300', dot: 'bg-cyan-400', tasks: inProgressList },
+              { id: 'in_review', title: 'In Review', color: 'border-purple-500/20 text-purple-300', dot: 'bg-violet-400', tasks: inReviewList },
+              { id: 'done', title: 'Completed', color: 'border-emerald-500/20 text-emerald-300', dot: 'bg-emerald-400', tasks: doneList }
+            ]);
+          }
+        }
+      } catch (err) {
+        console.log('Public kanban fetch notice:', err);
+      }
+    }
+    fetchLiveKanban();
+  }, [API_BASE]);
 
   const showToast = (msg) => {
     setToastMessage(msg);
@@ -206,14 +202,14 @@ export default function KanbanLandingDemo() {
       <div className="mb-6 flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-5">
         <div>
           <div className="flex items-center gap-2.5">
-            <span className="flex h-3 w-3 rounded-full bg-emerald-400 animate-pulse"></span>
-            <h3 className="text-xl sm:text-2xl font-black text-white">Interactive Kanban Workspace</h3>
+            <span className="flex h-3 w-3 rounded-full bg-emerald-400"></span>
+            <h3 className="text-xl sm:text-2xl font-black text-white">Kanban Task Workspace</h3>
             <span className="rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-xs font-bold text-indigo-300 border border-indigo-500/20">
-              Live Demo
+              Active Pipeline
             </span>
           </div>
           <p className="mt-1.5 text-sm text-slate-400">
-            Drag and drop task cards between columns below to experience Orbit's smooth real-time pipeline.
+            Organize project deliverables, manage task dependencies, and maintain team accountability.
           </p>
         </div>
 

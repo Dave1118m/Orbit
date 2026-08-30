@@ -559,7 +559,7 @@ export default function RoleHierarchyMatrix() {
                 </span>
               </div>
               <p className="mt-1 text-xs sm:text-sm text-slate-400">
-                Interactive preview of OrbitDesk's permission matrix governing system endpoints.
+                Granular role-based access control governing institutional resources and security endpoints.
               </p>
             </div>
 
@@ -581,7 +581,7 @@ export default function RoleHierarchyMatrix() {
                 type="button"
                 onClick={handleResetDemoDefaults}
                 className="flex items-center gap-1.5 rounded-xl border border-white/[0.1] bg-white/[0.04] px-3.5 py-2 text-xs font-bold text-slate-300 hover:text-white hover:bg-white/[0.08] transition"
-                title="Reset to default seed permissions"
+                title="Reset to default permissions"
               >
                 <RotateCcw className="h-3.5 w-3.5" />
                 <span>Reset</span>

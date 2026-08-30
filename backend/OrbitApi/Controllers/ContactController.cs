@@ -88,7 +88,7 @@ public class ContactController : ControllerBase
         // Asynchronously attempt to send email notifications via SendGrid
         try
         {
-            var adminEmail = _config["SendGrid:FromEmail"] ?? _config["AdminEmail"] ?? "support@orbitdesk.org";
+            var adminEmail = _config["SendGrid:FromEmail"] ?? _config["AdminEmail"] ?? "mihrete99@gmail.com";
 
             // 1. Admin Alert Email
             var adminSubject = $"[Orbit Inquiry #{inquiry.Id}] {inquiry.Subject} from {inquiry.Name}";
