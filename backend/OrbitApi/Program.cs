@@ -193,6 +193,8 @@ builder.Services.AddHostedService<OrbitApi.Services.ScheduledReportWorkerService
 builder.Services.AddHostedService<OrbitApi.Services.RecurringTaskWorkerService>();
 
 builder.Services.AddScoped<OrbitApi.Services.IPermissionService, OrbitApi.Services.PermissionService>();
+builder.Services.AddScoped<OrbitApi.Services.IAgentToolsService, OrbitApi.Services.AgentToolsService>();
+builder.Services.AddScoped<OrbitApi.Services.IAiAgentService, OrbitApi.Services.AiAgentService>();
 
 builder.Services.AddScoped<IAuthorizationHandler, PermissionAuthorizationHandler>();
 
@@ -285,8 +287,15 @@ using (var scope = app.Services.CreateScope())
     var allRoleNames = Enum.GetValues<RoleName>();
     var missingRoles = allRoleNames
         .Where(r => !existingRoleNamesSet.Contains(r.ToString()))
-        .Select(r => new Role { Name = r, Description = $"{r} role" });
+        .Select(r => new Role { Name = r, Description = $"{r} role", IsSystemRole = true });
     db.Roles.AddRange(missingRoles);
+
+    // Ensure all built-in roles without CustomTitle have IsSystemRole = true
+    var builtInRoles = db.Roles.Where(r => string.IsNullOrEmpty(r.CustomTitle) && !r.IsSystemRole).ToList();
+    foreach (var br in builtInRoles)
+    {
+        br.IsSystemRole = true;
+    }
 
     db.SaveChanges();
 

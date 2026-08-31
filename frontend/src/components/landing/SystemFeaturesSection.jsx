@@ -10,46 +10,83 @@ import {
   ArrowRight, 
   Award,
   BarChart,
-  FileCheck
+  FileCheck,
+  ShieldCheck,
+  Cpu
 } from 'lucide-react';
 
 const FEATURES = [
   {
     id: 'hierarchy',
     icon: Building2,
-    title: 'Workspace Scope & Role Hierarchy',
-    subtitle: 'Strict multi-tier security built for non-profits and complex enterprise projects',
+    title: 'Workspace Scope & Dynamic Roles',
+    subtitle: '7 Predefined System Roles plus custom organization-scoped roles with 37-point permission control',
     color: 'from-blue-500 to-indigo-600',
     details: [
-      { role: 'Owner', desc: 'Full system-wide administrative control, ownership transfer, and global billing.' },
-      { role: 'Admin', desc: 'Organization management, member invitations, compliance & partner oversight.' },
-      { role: 'Coordinator', desc: 'Full control across all projects within assigned Workspaces.' },
-      { role: 'Manager', desc: 'Full project ownership, task assignment, and budget approval authority.' },
-      { role: 'Finance Officer', desc: 'Expense sign-off, bank account ledger management, and financial audit reports.' },
-      { role: 'Member & Viewer', desc: 'Task execution, issue logging, and read-only transparency for stakeholders.' }
+      { role: 'Dynamic Custom Roles', desc: 'Create specialized roles (e.g. Field Operations, Logistics Officer) on demand.' },
+      { role: '37-Point ABAC Matrix', desc: 'Granular checkbox matrix for real-time permission granting and revoking.' },
+      { role: 'Owner & Admin Governance', desc: 'Organization management, member invitations, compliance & partner oversight.' },
+      { role: 'Manager & Finance Control', desc: 'Project ownership, task scheduling, expense sign-off, and ledger audits.' }
     ],
     demoWidget: (
       <div className="glass-obsidian-card rounded-2xl p-5 shadow-2xl border border-white/[0.08]">
         <div className="mb-4 flex items-center justify-between border-b border-white/[0.08] pb-3">
           <span className="font-bold text-white text-sm">Role Authorization Matrix</span>
-          <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-400 border border-emerald-500/20">System Enforced</span>
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-400 border border-emerald-500/20">ABAC Enforced</span>
         </div>
         <div className="space-y-2.5 text-xs">
           <div className="flex items-center justify-between rounded-xl bg-indigo-500/10 p-2.5 border border-indigo-500/20">
-            <span className="font-bold text-indigo-200">Organization Owner</span>
-            <span className="rounded-lg bg-indigo-600 px-2 py-0.5 font-semibold text-white">Full Access (All Scopes)</span>
+            <div className="flex items-center gap-2">
+              <span className="font-bold text-indigo-200">Field Operations Lead</span>
+              <span className="rounded-full bg-indigo-500/30 px-2 py-0.5 text-[10px] font-bold text-indigo-300">Custom</span>
+            </div>
+            <span className="rounded-lg bg-indigo-600 px-2 py-0.5 font-semibold text-white">14 Permissions</span>
           </div>
           <div className="flex items-center justify-between rounded-xl bg-white/[0.03] p-2.5 border border-white/[0.06]">
-            <span className="font-medium text-slate-200">Administrator</span>
-            <span className="text-slate-400">Org & Workspace Management</span>
+            <span className="font-medium text-slate-200">Organization Owner</span>
+            <span className="text-slate-400">Full Access (37/37)</span>
           </div>
           <div className="flex items-center justify-between rounded-xl bg-white/[0.03] p-2.5 border border-white/[0.06]">
             <span className="font-medium text-slate-200">Project Manager</span>
-            <span className="text-slate-400">Project Ownership & Approvals</span>
+            <span className="text-slate-400">Project Ownership (18/37)</span>
           </div>
           <div className="flex items-center justify-between rounded-xl bg-white/[0.03] p-2.5 border border-white/[0.06]">
             <span className="font-medium text-slate-200">Finance Officer</span>
-            <span className="text-slate-400">Expense Approvals & Ledger</span>
+            <span className="text-slate-400">Expense Audits (10/37)</span>
+          </div>
+        </div>
+      </div>
+    )
+  },
+  {
+    id: 'delegate',
+    icon: Cpu,
+    title: 'Autonomous Role Delegates',
+    subtitle: 'Multi-persona stand-in automation that monitors operations and executes actions when leaders are unavailable',
+    color: 'from-violet-500 to-purple-600',
+    details: [
+      { role: 'Multi-Persona Stand-Ins', desc: 'Instant switching between Admin, Manager, Finance, Coordinator, and Custom Role delegates.' },
+      { role: 'Automated Tool Execution', desc: 'Directly creates project tasks, searches records, audits ledgers, and dispatches invites.' },
+      { role: 'Dual-Mode Switch', desc: 'Seamlessly toggle between Human Control Mode and Autonomous Stand-In Mode.' },
+      { role: 'Enterprise Audit Trail', desc: 'Every delegated action is cryptographically tracked in immutable Audit Logs.' }
+    ],
+    demoWidget: (
+      <div className="glass-obsidian-card rounded-2xl p-5 shadow-2xl border border-white/[0.08]">
+        <div className="mb-3 flex items-center justify-between border-b border-white/[0.08] pb-2">
+          <span className="font-bold text-white text-sm">Orbit Role Delegate</span>
+          <span className="rounded-full bg-emerald-500/10 px-2.5 py-0.5 text-xs font-bold text-emerald-400 border border-emerald-500/20">Delegate Active</span>
+        </div>
+        <div className="space-y-2 text-xs">
+          <div className="rounded-xl bg-indigo-500/10 p-2.5 border border-indigo-500/20">
+            <div className="flex items-center justify-between text-indigo-300 font-bold mb-1">
+              <span>⚡ Project Manager Stand-In</span>
+              <span className="text-[10px] text-slate-400">Live Execution</span>
+            </div>
+            <p className="text-slate-300 text-[11px]">Task "Emergency Medical Supply Dispatch" created for Project #1 (water & solar).</p>
+          </div>
+          <div className="flex items-center justify-between rounded-xl bg-white/[0.03] p-2.5 border border-white/[0.06]">
+            <span className="text-slate-300">Financial Ledger Audit</span>
+            <span className="text-emerald-400 font-bold">100% Balanced</span>
           </div>
         </div>
       </div>
@@ -180,7 +217,7 @@ export default function SystemFeaturesSection() {
           Everything You Need to Run High-Impact Operations
         </h2>
         <p className="mt-3 text-base text-slate-400 font-medium">
-          From role-scoped permissions to multi-currency financial audits and volunteer portals.
+          From dynamic role permissions to autonomous operations delegates and multi-currency audits.
         </p>
       </div>
 

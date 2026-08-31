@@ -5,6 +5,7 @@ import Modal from './Modal';
 import GlobalSearchDropdown from './GlobalSearchDropdown';
 import RoleSwitcherBar from './RoleSwitcherBar';
 import LanguageSwitcher from './LanguageSwitcher';
+import AiCopilotDrawer from './AiCopilotDrawer';
 import { AutoText } from '../contexts/TranslationContext';
 import { createOrGetConnection, onEvent, offEvent } from '../lib/signalrClient';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
@@ -496,6 +497,9 @@ export default function DashboardLayout({ children }) {
           </div>
         </form>
       </Modal>
+
+      {/* Autonomous AI Role Delegate Copilot Drawer */}
+      <AiCopilotDrawer />
 
     </div>
   );

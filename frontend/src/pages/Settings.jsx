@@ -33,8 +33,6 @@ export default function Settings() {
   // ── Activity Feed state ──
   const [activityFeed, setActivityFeed] = useState([]);
 
-
-
   const [inviteData, setInviteData] = useState({
     email: '',
     preAssignedRoleName: 'Member'
@@ -55,7 +53,12 @@ export default function Settings() {
   const [abacRoles, setAbacRoles] = useState([]);
   const [abacPermissions, setAbacPermissions] = useState([]);
   const [permissionAuditLogs, setPermissionAuditLogs] = useState([]);
-  
+  const [isCreateRoleModalOpen, setIsCreateRoleModalOpen] = useState(false);
+  const [customRoleTitle, setCustomRoleTitle] = useState('');
+  const [customRoleDescription, setCustomRoleDescription] = useState('');
+  const [customRoleScope, setCustomRoleScope] = useState('Workspace');
+  const [creatingCustomRole, setCreatingCustomRole] = useState(false);
+
   const [orgPartners, setOrgPartners] = useState([]);
   const [partnerOrgIdInput, setPartnerOrgIdInput] = useState('');
   const [partnerNotesInput, setPartnerNotesInput] = useState('');
@@ -338,6 +341,64 @@ export default function Settings() {
     setIsWorkspaceEditOpen(true);
   };
 
+  const handleCreateCustomRole = async (e) => {
+    e.preventDefault();
+    if (!customRoleTitle.trim()) {
+      showStatus('error', 'Role title is required.');
+      return;
+    }
+    setCreatingCustomRole(true);
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/permissions/roles`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          title: customRoleTitle.trim(),
+          description: customRoleDescription.trim() || null,
+          defaultScope: customRoleScope === 'Organization' ? 0 : (customRoleScope === 'Workspace' ? 1 : 2),
+          organizationId: selectedOrgId
+        })
+      });
+      if (res.ok) {
+        showStatus('success', `Custom role "${customRoleTitle.trim()}" created successfully!`);
+        setCustomRoleTitle('');
+        setCustomRoleDescription('');
+        setIsCreateRoleModalOpen(false);
+        fetchAbacData();
+      } else {
+        const errText = await parseApiResponse(res);
+        showStatus('error', errText || 'Failed to create custom role.');
+      }
+    } catch (err) {
+      showStatus('error', 'Network error creating custom role.');
+    } finally {
+      setCreatingCustomRole(false);
+    }
+  };
+
+  const handleDeleteCustomRole = async (roleId, roleTitle) => {
+    if (!window.confirm(`Are you sure you want to delete the custom role "${roleTitle}"? This cannot be undone.`)) {
+      return;
+    }
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/permissions/roles/${roleId}`, {
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        showStatus('success', `Custom role "${roleTitle}" deleted.`);
+        fetchAbacData();
+      } else {
+        const errText = await parseApiResponse(res);
+        showStatus('error', errText || 'Failed to delete role.');
+      }
+    } catch (err) {
+      showStatus('error', 'Network error deleting custom role.');
+    }
+  };
+
   const fetchAbacData = async () => {
     try {
       const token = localStorage.getItem('token');
@@ -373,7 +434,7 @@ export default function Settings() {
 
   const getPhotoSrc = (url) => {
     if (!url) return null;
-    if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('data:')) {
+    if (url.startsWith('http://') || url.startsWith('data:') || url.startsWith('https://')) {
       return url;
     }
     return `${import.meta.env.VITE_API_URL.replace('/api/v1', '')}${url}`;
@@ -1305,16 +1366,22 @@ export default function Settings() {
           {activeTab === 'permissions' && (
             <div className="mt-6 max-w-5xl">
               <div className="flex flex-col gap-6">
-                <div className="rounded-2xl bg-teal-50 border border-teal-100 p-4 text-teal-900">
+                <div className="rounded-2xl bg-teal-50 border border-teal-100 p-4 text-teal-900 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div className="flex gap-3">
                     <span className="text-xl">🔐</span>
                     <div>
-                      <p className="font-bold text-sm text-teal-900">Attribute-Based Access Control (ABAC)</p>
+                      <p className="font-bold text-sm text-teal-900">Attribute-Based Access Control & Custom Roles</p>
                       <p className="text-xs text-teal-800/90 mt-1 leading-relaxed">
-                        Granularly assign dynamic permissions to organizational roles. These permissions govern API access and UI visibility dynamically across the entire platform.
+                        Granularly assign dynamic permissions to organizational roles or add specialized custom roles with scoped permissions.
                       </p>
                     </div>
                   </div>
+                  <button
+                    onClick={() => setIsCreateRoleModalOpen(true)}
+                    className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-sm transition"
+                  >
+                    <span>➕ Create Custom Role</span>
+                  </button>
                 </div>
 
                 <div className="bg-white rounded-3xl border border-slate-200 overflow-hidden shadow-sm">
@@ -1322,7 +1389,7 @@ export default function Settings() {
                     <table className="w-full text-left text-sm">
                       <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-semibold">
                         <tr>
-                          <th className="py-4 px-6">Role</th>
+                          <th className="py-4 px-6 min-w-[200px]">Role</th>
                           {abacPermissions.map((perm) => (
                             <th key={perm.id} className="py-4 px-4 text-center">
                               <span className="inline-block bg-slate-100 px-2 py-1 rounded-lg text-xs font-mono">{perm.name}</span>
@@ -1333,7 +1400,37 @@ export default function Settings() {
                       <tbody className="divide-y divide-slate-100">
                         {abacRoles.map((role) => (
                           <tr key={role.id} className="hover:bg-slate-50/50 transition">
-                            <td className="py-4 px-6 font-medium text-slate-900">{role.name}</td>
+                            <td className="py-4 px-6 font-medium text-slate-900">
+                              <div className="flex items-center justify-between gap-2">
+                                <div>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-semibold text-slate-900">{role.displayName || role.name}</span>
+                                    {!role.isSystemRole && (
+                                      <span className="text-[10px] bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded-full border border-purple-200">
+                                        Custom
+                                      </span>
+                                    )}
+                                    {role.isSystemRole && (
+                                      <span className="text-[10px] bg-slate-100 text-slate-500 font-medium px-2 py-0.5 rounded-full">
+                                        System
+                                      </span>
+                                    )}
+                                  </div>
+                                  {role.description && (
+                                    <p className="text-[11px] text-slate-400 truncate max-w-[180px] mt-0.5">{role.description}</p>
+                                  )}
+                                </div>
+                                {!role.isSystemRole && (
+                                  <button
+                                    onClick={() => handleDeleteCustomRole(role.id, role.displayName || role.name)}
+                                    className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                                    title="Delete custom role"
+                                  >
+                                    🗑️
+                                  </button>
+                                )}
+                              </div>
+                            </td>
                             {abacPermissions.map((perm) => {
                               const isOwnerRole = role.name === 'Owner';
                               const hasPerm = isOwnerRole || role.permissions?.some(p => p.id === perm.id);
@@ -1385,6 +1482,61 @@ export default function Settings() {
                     </table>
                   </div>
                 </div>
+
+                {/* Custom Role Creation Modal */}
+                <Modal isOpen={isCreateRoleModalOpen} onClose={() => setIsCreateRoleModalOpen(false)} title="Create Dynamic Custom Role">
+                  <form onSubmit={handleCreateCustomRole} className="flex flex-col gap-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">Role Title *</label>
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g., Procurement Specialist, Field Officer"
+                        value={customRoleTitle}
+                        onChange={(e) => setCustomRoleTitle(e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">Default Scope</label>
+                      <select
+                        value={customRoleScope}
+                        onChange={(e) => setCustomRoleScope(e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs bg-white focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
+                      >
+                        <option value="Organization">Organization Scope (Full Organization Level)</option>
+                        <option value="Workspace">Workspace Scope (Assigned Workspaces Only)</option>
+                        <option value="Project">Project Scope (Assigned Projects Only)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-slate-700">Description</label>
+                      <textarea
+                        rows={3}
+                        placeholder="Describe duties and operational boundaries for this custom role..."
+                        value={customRoleDescription}
+                        onChange={(e) => setCustomRoleDescription(e.target.value)}
+                        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20 resize-none"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2">
+                      <button
+                        type="button"
+                        onClick={() => setIsCreateRoleModalOpen(false)}
+                        className="rounded-xl px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 transition"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        disabled={creatingCustomRole}
+                        className="rounded-xl bg-teal-600 px-5 py-2 text-xs font-semibold text-white hover:bg-teal-700 transition shadow-sm disabled:opacity-50"
+                      >
+                        {creatingCustomRole ? 'Creating Role...' : 'Create Role'}
+                      </button>
+                    </div>
+                  </form>
+                </Modal>
 
                 {/* PERMISSION AUDIT LOG SECTION */}
                 <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm mt-4">

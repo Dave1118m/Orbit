@@ -8,9 +8,17 @@ public class Role
     [Key]
     public int Id { get; set; }
     [Required]
-    public RoleName Name { get; set; }
+    public RoleName Name { get; set; } = RoleName.Member;
+    public string? CustomTitle { get; set; }
     public string? Description { get; set; }
+    public int? OrganizationId { get; set; }
+    public bool IsSystemRole { get; set; } = true;
+    public ScopeType DefaultScope { get; set; } = ScopeType.Workspace;
 
+    [NotMapped]
+    public string DisplayName => !string.IsNullOrWhiteSpace(CustomTitle) ? CustomTitle : Name.ToString();
+
+    public Organization? Organization { get; set; }
     public ICollection<RoleAssignment> RoleAssignments { get; set; } = new List<RoleAssignment>();
     public ICollection<RolePermission> RolePermissions { get; set; } = new List<RolePermission>();
 }
