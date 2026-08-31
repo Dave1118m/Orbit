@@ -11,6 +11,7 @@ public class AiChatMessageDto
 public class AiChatRequestDto
 {
     public int OrganizationId { get; set; }
+    public string Mode { get; set; } = "chat"; // "chat" (General Conversational AI) or "delegate" (Autonomous Role Stand-In)
     public string RolePersona { get; set; } = "Admin"; // Admin, Manager, FinanceOfficer, Coordinator, or Custom Title
     public int? CustomRoleId { get; set; }
     public string Prompt { get; set; } = string.Empty;

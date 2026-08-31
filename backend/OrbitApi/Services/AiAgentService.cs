@@ -96,8 +96,11 @@ public class AiAgentService : IAiAgentService
         var org = await _db.Organizations.FirstOrDefaultAsync(o => o.Id == request.OrganizationId && !o.IsDeleted);
         var orgName = org?.Name ?? "Orbit Workspace";
 
+        var isGeneralChat = string.Equals(request.Mode, "chat", StringComparison.OrdinalIgnoreCase);
         var executedActions = new List<ToolCallResult>();
-        var systemInstruction = BuildSystemPrompt(request.RolePersona, orgName, request.CustomRoleId);
+        var systemInstruction = isGeneralChat
+            ? BuildGeneralChatSystemPrompt(orgName)
+            : BuildRoleDelegateSystemPrompt(request.RolePersona, orgName, request.CustomRoleId);
 
         var apiKey = _config["Gemini:ApiKey"] 
                   ?? _config["GEMINI_API_KEY"] 
@@ -105,21 +108,29 @@ public class AiAgentService : IAiAgentService
                   ?? Environment.GetEnvironmentVariable("GEMINI_API_KEY") 
                   ?? Environment.GetEnvironmentVariable("Gemini__ApiKey");
                   
-        var model = _config["Gemini:Model"] ?? "gemini-1.5-pro";
+        var model = _config["Gemini:Model"] ?? "gemini-1.5-flash";
 
-        if (!string.IsNullOrEmpty(apiKey) && apiKey.Length > 10)
+        if (!string.IsNullOrEmpty(apiKey) && apiKey.Length > 15)
         {
             try
             {
-                var geminiResponse = await CallGeminiProAsync(apiKey, model, systemInstruction, request, currentUserId, currentRole, executedActions);
+                var geminiResponse = await CallGeminiProAsync(
+                    apiKey.Trim(),
+                    model,
+                    systemInstruction,
+                    request,
+                    currentUserId,
+                    currentRole,
+                    isGeneralChat ? null : executedActions);
+
                 if (!string.IsNullOrEmpty(geminiResponse))
                 {
                     return new AiChatResponseDto
                     {
                         ResponseText = geminiResponse,
-                        RolePersona = request.RolePersona,
+                        RolePersona = isGeneralChat ? "AI Assistant" : request.RolePersona,
                         ExecutedActions = executedActions,
-                        ModelUsed = $"Gemini Pro ({model})",
+                        ModelUsed = $"Gemini AI ({model})",
                         Timestamp = DateTime.UtcNow
                     };
                 }
@@ -131,59 +142,50 @@ public class AiAgentService : IAiAgentService
         }
 
         // Fallback or Intelligent Native Planner Execution
-        var fallbackResponse = await ExecuteSemanticPlannerAsync(request, orgName, currentUserId, currentRole, executedActions);
+        var fallbackResponse = isGeneralChat
+            ? ExecuteGeneralChatFallback(request.Prompt, orgName)
+            : await ExecuteSemanticPlannerAsync(request, orgName, currentUserId, currentRole, executedActions);
+
         return new AiChatResponseDto
         {
             ResponseText = fallbackResponse,
-            RolePersona = request.RolePersona,
+            RolePersona = isGeneralChat ? "AI Assistant" : request.RolePersona,
             ExecutedActions = executedActions,
-            ModelUsed = "Orbit Role Delegate Engine",
+            ModelUsed = isGeneralChat ? "Orbit Conversational Assistant" : "Orbit Role Delegate Engine",
             Timestamp = DateTime.UtcNow
         };
     }
 
-    private string BuildSystemPrompt(string rolePersona, string orgName, int? customRoleId)
+    private string BuildGeneralChatSystemPrompt(string orgName)
     {
-        var systemKnowledge = @"
-=== ORBIT ENTERPRISE PLATFORM ARCHITECTURE & CAPABILITIES ===
-You are the embedded, highly knowledgeable Orbit Autonomous Operations Assistant & Role Delegate for the organization.
-You understand the complete architecture of Orbit and can thoroughly explain how every section of the platform works, as well as execute actions when delegated.
+        return $@"You are the official, highly intelligent AI Assistant for Orbit, serving members of '{orgName}'.
+You behave like an advanced conversational intelligence (similar to OpenAI ChatGPT and Google Gemini).
+You are articulate, professional, supportive, and knowledgeable across business strategy, non-profit operations, project management, technical problem solving, and general knowledge.
 
-Key Orbit Modules & How They Work:
-1. WORKSPACES & ORGANIZATIONS:
-   - Organizations are multi-tenant root containers (e.g. NGOs, non-profits, enterprises).
-   - Workspaces group related projects, teams, and budget allocations with isolated boundaries.
-2. PROJECTS & TASKS:
-   - Projects track multi-phase initiatives with status (Planning, Active, OnHold, Completed, Cancelled).
-   - Tasks feature Kanban workflows (ToDo, InProgress, InReview, Blocked, Done) with priorities (Low, Medium, High, Urgent), deadlines, checklist subtasks, and dependency tracking.
-3. LOGICAL FRAMEWORK & MEL (Monitoring, Evaluation & Learning):
-   - Structured 4-tier results hierarchy: Goals (Impact) -> Outcomes -> Outputs -> Activities.
-   - Tracks baseline vs target metrics, data sources, frequency, and donor reporting exports.
-4. FINANCIALS, BUDGETS & EXPENSES:
-   - Multi-tier budget enforcement (Org, Workspace, Project, Category levels).
-   - $500 threshold rule triggers mandatory receipt attachment review.
-   - Dual-currency engine (USD & ETB) with automated exchange conversions.
-   - Approval workflows: Submitter -> Finance Officer review -> Manager sign-off -> Bank account ledger disbursement.
-5. ROLES & 37-POINT PERMISSION MATRIX (ABAC):
-   - 7 System Roles: Owner (L0 Global Root), Admin (L1 Org Governance), Coordinator (L2 Workspace Scope), Manager (L3 Project Ownership), Finance Officer (L4 Ledger & Approvals), Member (L5 Task Execution), Viewer (L6 Read-Only).
-   - Dynamic Custom Roles: Admins can create specialized roles with fine-grained permission assignments.
-6. RISK & ISSUE REGISTER:
-   - 5x5 Likelihood vs Impact scoring matrix with automated severity categorizations (Low, Medium, High, Critical) and risk-to-issue escalation.
-7. VOLUNTEER MANAGEMENT:
-   - Volunteer applicant intake, background check verification, logged hours tracking, and skill matching to tasks.
-8. AUTONOMOUS ROLE DELEGATES:
-   - Multi-persona stand-in delegates that monitor operations, analyze metrics, and execute database actions when team members are busy or offline.
+You also possess complete knowledge of Orbit:
+- Workspaces & Projects management (Kanban status boards, deadlines, priorities)
+- Multi-tier Budgets & $500 threshold receipt verification rules
+- Logical Framework & MEL (Monitoring, Evaluation and Learning) results hierarchy (Goals, Outcomes, Outputs, Activities)
+- Attribute-Based Access Control (ABAC) with 7 predefined system roles and dynamic custom roles
+- Risk & Issue registers with 5x5 scoring matrix
+- Volunteer mobilization and hour tracking
+- Multi-persona Autonomous Role Delegates for busy team leaders
 
-When users ask for an overview, guidance, or how a specific part of Orbit works, provide rich, crystal-clear, structured Markdown explanations.
-When users command actions (such as creating tasks, checking budgets, querying projects, or approving expenses), execute the relevant tool functions.";
+When responding to users:
+- Provide rich, structured, thoughtful, and articulate Markdown formatting.
+- Be direct, insightful, and adaptable to any topic or question the user asks.
+- If they ask general questions (e.g. drafting proposals, explaining concepts, brainstorming), assist thoroughly.";
+    }
 
+    private string BuildRoleDelegateSystemPrompt(string rolePersona, string orgName, int? customRoleId)
+    {
         return rolePersona.ToLowerInvariant() switch
         {
-            "admin" => $"You are Orbit's Administrator Delegate for {orgName}. You oversee governance, member invitations, access security, workspace management, and system architecture. {systemKnowledge}",
-            "manager" => $"You are Orbit's Project & Operations Manager Delegate for {orgName}. You oversee project milestones, task distribution, team deadlines, and risk logs. {systemKnowledge}",
-            "financeofficer" or "finance" => $"You are Orbit's Finance Officer Delegate for {orgName}. You manage budgets, track expenditures against funding limits, review pending expense claims, and ensure strict compliance. {systemKnowledge}",
-            "coordinator" => $"You are Orbit's Program & Field Coordinator Delegate for {orgName}. You organize volunteers, field activities, task assignments, and logistical workflows. {systemKnowledge}",
-            _ => $"You are Orbit's Dedicated Role Delegate for '{rolePersona}' in {orgName}. You assist with tasks and platform workflows. {systemKnowledge}"
+            "admin" => $"You are Orbit's Administrator Stand-In Delegate for {orgName}. You manage organization governance, team invitations, access security, workspace oversight, and high-level operations. When the Admin is busy, you act decisively and execute tools on their behalf within authorized boundaries. Always provide professional, structured executive responses.",
+            "manager" => $"You are Orbit's Project & Operations Manager Stand-In Delegate for {orgName}. You oversee project milestones, task creation, deadlines, and risk registers. When the Manager is busy, you monitor progress, assign tasks, and execute workflow tools directly.",
+            "financeofficer" or "finance" => $"You are Orbit's Finance Officer Stand-In Delegate for {orgName}. You oversee budgets, verify expenditures against limits, review pending expense claims, and ensure compliance. When the Finance Officer is away, you audit ledger balances and can approve/reject expenses.",
+            "coordinator" => $"You are Orbit's Program & Field Coordinator Stand-In Delegate for {orgName}. You organize volunteers, field tasks, and operational logistics. When the Coordinator is busy, you dispatch volunteer work items and check milestones.",
+            _ => $"You are Orbit's Dedicated Role Stand-In for '{rolePersona}' in {orgName}. You execute tasks within the scoped permissions granted to {rolePersona}."
         };
     }
 
@@ -194,106 +196,160 @@ When users command actions (such as creating tasks, checking budgets, querying p
         AiChatRequestDto request,
         int currentUserId,
         RoleName currentRole,
-        List<ToolCallResult> executedActions)
+        List<ToolCallResult>? executedActions)
     {
         var client = _httpClientFactory.CreateClient();
-        var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={apiKey}";
+        client.Timeout = TimeSpan.FromSeconds(25);
 
-        var contents = new List<object>();
+        // Try primary model and fallback model if needed
+        var candidateModels = new[] { model, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro" }.Distinct();
 
-        if (request.History != null)
+        foreach (var m in candidateModels)
         {
-            foreach (var msg in request.History.TakeLast(6))
+            try
             {
+                var url = $"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={apiKey}";
+
+                var contents = new List<object>();
+
+                if (request.History != null)
+                {
+                    foreach (var msg in request.History.TakeLast(6))
+                    {
+                        contents.Add(new
+                        {
+                            role = msg.Role == "assistant" || msg.Role == "model" ? "model" : "user",
+                            parts = new[] { new { text = msg.Content } }
+                        });
+                    }
+                }
+
                 contents.Add(new
                 {
-                    role = msg.Role == "assistant" ? "model" : "user",
-                    parts = new[] { new { text = msg.Content } }
+                    role = "user",
+                    parts = new[] { new { text = request.Prompt } }
                 });
-            }
-        }
 
-        contents.Add(new
-        {
-            role = "user",
-            parts = new[] { new { text = request.Prompt } }
-        });
+                object requestBody;
 
-        var toolsDeclarations = _toolsService.GetAvailableToolDeclarations(currentRole);
-
-        var requestBody = new
-        {
-            system_instruction = new
-            {
-                parts = new[] { new { text = systemInstruction } }
-            },
-            contents,
-            tools = new[]
-            {
-                new { function_declarations = toolsDeclarations }
-            }
-        };
-
-        var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
-        var response = await client.PostAsync(url, jsonContent);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errBody = await response.Content.ReadAsStringAsync();
-            _logger.LogWarning("Gemini API returned {StatusCode}: {Body}", response.StatusCode, errBody);
-            return null;
-        }
-
-        var resJson = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(resJson);
-        var root = doc.RootElement;
-
-        if (!root.TryGetProperty("candidates", out var candidates) || candidates.GetArrayLength() == 0)
-        {
-            return null;
-        }
-
-        var firstCandidate = candidates[0];
-        if (!firstCandidate.TryGetProperty("content", out var content) || !content.TryGetProperty("parts", out var parts))
-        {
-            return null;
-        }
-
-        string? finalResponseText = null;
-
-        foreach (var part in parts.EnumerateArray())
-        {
-            if (part.TryGetProperty("text", out var textProp))
-            {
-                finalResponseText = textProp.GetString();
-            }
-
-            if (part.TryGetProperty("functionCall", out var fnCall))
-            {
-                var functionName = fnCall.GetProperty("name").GetString();
-                var args = fnCall.GetProperty("args");
-
-                if (!string.IsNullOrEmpty(functionName))
+                if (executedActions != null)
                 {
-                    var actionResult = await _toolsService.ExecuteToolAsync(functionName, args, request.OrganizationId, currentUserId, currentRole);
-                    executedActions.Add(actionResult);
+                    // Role Delegate mode with database tools
+                    var toolsDeclarations = _toolsService.GetAvailableToolDeclarations(currentRole);
+                    requestBody = new
+                    {
+                        system_instruction = new { parts = new[] { new { text = systemInstruction } } },
+                        contents,
+                        tools = new[] { new { function_declarations = toolsDeclarations } }
+                    };
+                }
+                else
+                {
+                    // Pure conversational AI assistant mode (OpenAI/Gemini style)
+                    requestBody = new
+                    {
+                        system_instruction = new { parts = new[] { new { text = systemInstruction } } },
+                        contents
+                    };
+                }
+
+                var jsonContent = new StringContent(JsonSerializer.Serialize(requestBody), Encoding.UTF8, "application/json");
+                var response = await client.PostAsync(url, jsonContent);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    var errBody = await response.Content.ReadAsStringAsync();
+                    _logger.LogWarning("Gemini model {Model} returned {StatusCode}: {Body}", m, response.StatusCode, errBody);
+                    continue;
+                }
+
+                var resJson = await response.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(resJson);
+                var root = doc.RootElement;
+
+                if (!root.TryGetProperty("candidates", out var candidates) || candidates.GetArrayLength() == 0)
+                {
+                    continue;
+                }
+
+                var firstCandidate = candidates[0];
+                if (!firstCandidate.TryGetProperty("content", out var content) || !content.TryGetProperty("parts", out var parts))
+                {
+                    continue;
+                }
+
+                string? finalResponseText = null;
+
+                foreach (var part in parts.EnumerateArray())
+                {
+                    if (part.TryGetProperty("text", out var textProp))
+                    {
+                        finalResponseText = textProp.GetString();
+                    }
+
+                    if (executedActions != null && part.TryGetProperty("functionCall", out var fnCall))
+                    {
+                        var functionName = fnCall.GetProperty("name").GetString();
+                        var args = fnCall.GetProperty("args");
+
+                        if (!string.IsNullOrEmpty(functionName))
+                        {
+                            var actionResult = await _toolsService.ExecuteToolAsync(functionName, args, request.OrganizationId, currentUserId, currentRole);
+                            executedActions.Add(actionResult);
+                        }
+                    }
+                }
+
+                if (executedActions != null && executedActions.Any() && string.IsNullOrEmpty(finalResponseText))
+                {
+                    var summarySb = new StringBuilder();
+                    summarySb.AppendLine($"### ⚡ Action Executed by **{request.RolePersona} Stand-In**");
+                    foreach (var act in executedActions)
+                    {
+                        summarySb.AppendLine($"- {act.Message}");
+                    }
+                    return summarySb.ToString();
+                }
+
+                if (!string.IsNullOrEmpty(finalResponseText))
+                {
+                    return finalResponseText;
                 }
             }
-        }
-
-        // If tools were executed but model returned no explicit summary text, run follow up
-        if (executedActions.Any() && string.IsNullOrEmpty(finalResponseText))
-        {
-            var summarySb = new StringBuilder();
-            summarySb.AppendLine($"### ⚡ Action Executed by **{request.RolePersona} Stand-In**");
-            foreach (var act in executedActions)
+            catch (Exception ex)
             {
-                summarySb.AppendLine($"- {act.Message}");
+                _logger.LogWarning(ex, "Failed attempt with Gemini model {Model}", m);
             }
-            return summarySb.ToString();
         }
 
-        return finalResponseText;
+        return null;
+    }
+
+    private string ExecuteGeneralChatFallback(string prompt, string orgName)
+    {
+        var promptLower = prompt.ToLowerInvariant();
+
+        if (promptLower.Contains("hello") || promptLower.Contains("hi") || promptLower.Contains("hey"))
+        {
+            return $"Hello! I am your **Orbit AI Assistant** for **{orgName}**. How can I help you today? You can ask me anything about managing projects, budgets, logframes, team workflows, or general strategy.";
+        }
+
+        if (promptLower.Contains("who are you") || promptLower.Contains("what can you do"))
+        {
+            return $"I am your dedicated **Conversational AI Assistant** integrated into Orbit. I can help you brainstorm solutions, analyze project progress, explain system workflows, draft communications, and answer any questions you have about operations or business strategy.";
+        }
+
+        if (promptLower.Contains("logframe") || promptLower.Contains("mel"))
+        {
+            return $"### 📊 Logical Framework (Logframe) in Orbit\n\nA Logframe is a systematic results matrix used by international development organizations and donors:\n\n1. **Impact (Goal):** Long-term vision (e.g. Reduce waterborne disease by 40%).\n2. **Outcomes:** Intermediate changes (e.g. 15,000 households accessing clean water).\n3. **Outputs:** Direct products/services (e.g. 50 community wells constructed).\n4. **Activities:** The operational tasks executed by your field team.\n\nIn Orbit, outputs and activities link directly to your Kanban tasks and budget line items.";
+        }
+
+        if (promptLower.Contains("finance") || promptLower.Contains("budget") || promptLower.Contains("threshold"))
+        {
+            return $"### 💰 Financial Governance & $500 Threshold Rule\n\nOrbit enforces a strict financial control pipeline:\n- **Budgets** are set at Organization, Workspace, and Project tiers.\n- **$500 Rule:** Any expense exceeding $500 automatically requires receipt proof before approval.\n- **Two-Step Approval:** Finance Officer review followed by Project Manager sign-off before payment disbursement.";
+        }
+
+        return $"Thank you for your message! Regarding **\"{prompt}\"**:\n\nOrbit provides comprehensive tools for project tracking, multi-tier budget auditing, team coordination, and automated role delegation. If you would like to execute database actions directly (such as creating tasks or auditing financials), you can also switch to the **Autonomous Role Delegate** tab.";
     }
 
     private async Task<string> ExecuteSemanticPlannerAsync(
@@ -304,42 +360,6 @@ When users command actions (such as creating tasks, checking budgets, querying p
         List<ToolCallResult> executedActions)
     {
         var promptLower = request.Prompt.ToLowerInvariant();
-
-        // System overview or how parts of the system work
-        if (promptLower.Contains("how") && (promptLower.Contains("work") || promptLower.Contains("system") || promptLower.Contains("part") || promptLower.Contains("orbit"))
-            || promptLower.Contains("overview") || promptLower.Contains("explain") || promptLower.Contains("architecture") || promptLower.Contains("help"))
-        {
-            if (promptLower.Contains("finance") || promptLower.Contains("budget") || promptLower.Contains("expense"))
-            {
-                var finResult = await _toolsService.ExecuteToolAsync("get_financial_summary", default, request.OrganizationId, currentUserId, currentRole);
-                executedActions.Add(finResult);
-                return $"### 💰 Orbit Financials & Budget Architecture\n\nOrbit provides a strict, multi-tiered financial control engine designed for institutional transparency:\n\n1. **Multi-Level Budgets:** Set and enforce ceilings at Organization, Workspace, Project, and Task levels.\n2. **$500 Receipt Threshold:** Any expense exceeding $500 automatically flags a mandatory receipt verification requirement.\n3. **Approval Chain:** Submitted by team members -> Reviewed & approved by Finance Officer -> Signed off by Project Manager.\n4. **Dual-Currency Ledger:** Live multi-currency conversions in USD and ETB with transaction audit logs.\n\n*Current Organization Financial Summary:* Total Expenses: ${finResult.Data}";
-            }
-
-            if (promptLower.Contains("logframe") || promptLower.Contains("mel") || promptLower.Contains("indicator"))
-            {
-                return $"### 📊 Orbit Logical Framework & MEL Engine\n\nOrbit includes an institutional Results Framework for project managers, M&E officers, and donors:\n\n1. **Goals (Impact Level):** High-level multi-year socio-economic objectives.\n2. **Outcomes & Indicators:** Measurable transformation metrics comparing baseline vs actual target values.\n3. **Outputs & Activities:** Tangible deliverables linked directly to project tasks and verification sources.\n4. **Donor Reports:** Instant 1-click export of logframe matrices for institutional compliance.";
-            }
-
-            if (promptLower.Contains("role") || promptLower.Contains("permission") || promptLower.Contains("abac"))
-            {
-                return $"### 🛡️ Orbit Dynamic Roles & 37-Point ABAC Matrix\n\nOrbit uses Attribute-Based Access Control (ABAC) configured in Settings (Tab 5):\n\n1. **Predefined System Roles:**\n   - **👑 Owner (L0):** Root tenant authority and billing.\n   - **🛡️ Admin (L1):** Organization governance and compliance.\n   - **🤝 Coordinator (L2):** Workspace-level project coordination.\n   - **📊 Manager (L3):** Project ownership, task scheduling & approvals.\n   - **💰 Finance Officer (L4):** Expense audits & ledger sign-offs.\n   - **👥 Member & Viewer (L5/L6):** Task execution and read-only transparency.\n2. **Dynamic Custom Roles:** Create on-demand roles (e.g. Field Operations, Logistics) and toggle any of the 37 permissions in real-time.\n3. **Autonomous Role Delegates:** Switch to any role persona and toggle 'Auto-Delegate Mode' so Orbit manages operations when leaders are away.";
-            }
-
-            // General Full Platform Walkthrough
-            var ovResult = await _toolsService.ExecuteToolAsync("get_organization_overview", default, request.OrganizationId, currentUserId, currentRole);
-            executedActions.Add(ovResult);
-            return $"### 🚀 Orbit Platform Comprehensive Guide — **{orgName}**\n\nWelcome to Orbit! Here is how every module in the platform works:\n\n"
-                 + "1. **🏢 Workspaces & Organizations:** Segment your multi-project operations into isolated workspaces with dedicated teams and budget ceilings.\n"
-                 + "2. **📋 Projects & Kanban Tasks:** Full project lifecycle tracking with interactive Kanban boards (ToDo, InProgress, InReview, Blocked, Done), subtasks, and deadlines.\n"
-                 + "3. **📊 Logical Framework & MEL:** Institutional results framework tracking Goals, Outcomes, Outputs, and baseline/target indicators.\n"
-                 + "4. **💰 Multi-Tier Budgets & Receipts:** Strict financial governance with $500 receipt alerts, expense approval pipelines, and dual-currency ledgers (USD & ETB).\n"
-                 + "5. **🛡️ 37-Point Permission Matrix & Dynamic Roles:** 7 System roles + on-demand custom roles with instant permission toggles.\n"
-                 + "6. **⚠️ Risk & Issue Register:** 5x5 Likelihood vs Impact scoring matrix with heatmap severity categorization.\n"
-                 + "7. **👥 Volunteer Portal & Hours:** Public volunteer applications, background check verification, and hour logging.\n"
-                 + "8. **⚡ Autonomous Role Delegates:** Multi-persona operational stand-ins that manage tasks and monitor metrics when you are busy.\n\n"
-                 + $"*Live Organization Status:* Connected with real database records.";
-        }
 
         // Action: Create Task
         if (promptLower.Contains("create task") || promptLower.Contains("add task") || promptLower.Contains("new task"))
@@ -393,6 +413,6 @@ When users command actions (such as creating tasks, checking budgets, querying p
         var overviewResult = await _toolsService.ExecuteToolAsync("get_organization_overview", default, request.OrganizationId, currentUserId, currentRole);
         executedActions.Add(overviewResult);
 
-        return $"### 📋 Executive Operations Briefing for **{orgName}**\nAs the **{request.RolePersona} Delegate**, here is the live operational summary:\n\n```json\n{JsonSerializer.Serialize(overviewResult.Data, new JsonSerializerOptions { WriteIndented = true })}\n```\n\n*You can command me to create tasks, inspect budgets, query projects, or ask how any part of Orbit works.*";
+        return $"### 📋 Executive Operations Briefing for **{orgName}**\nAs the **{request.RolePersona} Delegate**, here is the live operational summary:\n\n```json\n{JsonSerializer.Serialize(overviewResult.Data, new JsonSerializerOptions { WriteIndented = true })}\n```\n\n*You can command me to create tasks, inspect budgets, query projects, or approve expenses.*";
     }
 }

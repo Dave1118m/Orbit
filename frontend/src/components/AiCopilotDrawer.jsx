@@ -3,18 +3,34 @@ import { showErrorToast, showSuccessToast } from '../utils/toastHelper';
 
 export default function AiCopilotDrawer() {
   const [isOpen, setIsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState('chat'); // 'chat' (General AI Assistant) or 'delegate' (Role Stand-In for Busy Users)
+  
+  // Personas & Delegate state
   const [personas, setPersonas] = useState([]);
   const [selectedPersona, setSelectedPersona] = useState('Admin');
   const [isAgentMode, setIsAgentMode] = useState(false);
-  const [messages, setMessages] = useState([
+  
+  // Chat state for General Assistant
+  const [chatMessages, setChatMessages] = useState([
     {
       id: 1,
       role: 'assistant',
-      text: '👋 Welcome! I am your **Autonomous Role Delegate**. Switch to any role (Admin, Manager, Finance Officer, Coordinator, or Custom Roles) to monitor workflows, inspect real-time metrics, or delegate actions when you are away.',
+      text: '👋 Hello! I am your **AI Assistant**. You can ask me anything about your projects, strategy, report drafting, or how any part of the Orbit system works.',
+      timestamp: new Date()
+    }
+  ]);
+
+  // Chat state for Role Delegate
+  const [delegateMessages, setDelegateMessages] = useState([
+    {
+      id: 1,
+      role: 'assistant',
+      text: '⚡ Welcome to the **Autonomous Role Delegate**. Select a role (Admin, Manager, Finance Officer, Coordinator, or Custom Role) and I will execute tasks, audit ledgers, or monitor deliverables while you are away.',
       actions: [],
       timestamp: new Date()
     }
   ]);
+
   const [inputPrompt, setInputPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [organizations, setOrganizations] = useState([]);
@@ -23,7 +39,7 @@ export default function AiCopilotDrawer() {
 
   // Load organizations and personas
   useEffect(() => {
-    async function initCopilot() {
+    async function init() {
       const token = localStorage.getItem('token');
       if (!token) return;
       try {
@@ -39,10 +55,10 @@ export default function AiCopilotDrawer() {
           }
         }
       } catch (e) {
-        console.error('Failed to initialize Role Delegate', e);
+        console.error('Failed to initialize AI Copilot', e);
       }
     }
-    initCopilot();
+    init();
   }, []);
 
   const fetchPersonas = async (orgId) => {
@@ -65,7 +81,7 @@ export default function AiCopilotDrawer() {
     if (messagesEndRef.current) {
       messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [messages, isLoading]);
+  }, [chatMessages, delegateMessages, isLoading, activeTab]);
 
   const handleToggleAgentMode = async () => {
     const nextState = !isAgentMode;
@@ -104,13 +120,18 @@ export default function AiCopilotDrawer() {
       timestamp: new Date()
     };
 
-    setMessages((prev) => [...prev, userMessage]);
+    if (activeTab === 'chat') {
+      setChatMessages((prev) => [...prev, userMessage]);
+    } else {
+      setDelegateMessages((prev) => [...prev, userMessage]);
+    }
+
     setInputPrompt('');
     setIsLoading(true);
 
     try {
       const token = localStorage.getItem('token');
-      const historyPayload = messages.map((m) => ({
+      const currentHistory = (activeTab === 'chat' ? chatMessages : delegateMessages).map((m) => ({
         role: m.role,
         content: m.text
       }));
@@ -123,9 +144,10 @@ export default function AiCopilotDrawer() {
         },
         body: JSON.stringify({
           organizationId: selectedOrgId,
+          mode: activeTab, // 'chat' or 'delegate'
           rolePersona: selectedPersona,
           prompt: text,
-          history: historyPayload
+          history: currentHistory
         })
       });
 
@@ -136,25 +158,38 @@ export default function AiCopilotDrawer() {
           role: 'assistant',
           text: data.responseText,
           actions: data.executedActions || [],
+          modelUsed: data.modelUsed,
           persona: data.rolePersona,
           timestamp: new Date()
         };
-        setMessages((prev) => [...prev, assistantMessage]);
+
+        if (activeTab === 'chat') {
+          setChatMessages((prev) => [...prev, assistantMessage]);
+        } else {
+          setDelegateMessages((prev) => [...prev, assistantMessage]);
+        }
       } else {
         const errText = await res.text();
-        showErrorToast(`Delegate Service: ${errText || 'Request failed'}`);
+        showErrorToast(`AI Service Error: ${errText || 'Request failed'}`);
       }
     } catch (e) {
-      showErrorToast(`Network error communicating with Delegate: ${e.message}`);
+      showErrorToast(`Network error communicating with AI: ${e.message}`);
     } finally {
       setIsLoading(false);
     }
   };
 
-  const quickPrompts = {
+  const generalPrompts = [
+    '💡 How does Orbit work?',
+    '📊 Explain Logframe & MEL indicators',
+    '💰 Explain Budget & $500 threshold rule',
+    '🛡️ Explain the 37-Point Permission Matrix'
+  ];
+
+  const delegatePrompts = {
     Admin: [
       '📊 Executive Organization Overview',
-      '👥 Invite new team collaborator',
+      '👥 Invite team member',
       '🚀 List active projects portfolio',
       '🔐 Audit active workspace sessions'
     ],
@@ -177,23 +212,23 @@ export default function AiCopilotDrawer() {
     ]
   };
 
-  const activeQuickPrompts = quickPrompts[selectedPersona] || [
-    '📊 Summary Briefing',
-    '🚀 List active projects',
-    '⚡ Create operational task'
-  ];
+  const activeQuickPrompts = activeTab === 'chat'
+    ? generalPrompts
+    : (delegatePrompts[selectedPersona] || ['📊 Summary Briefing', '🚀 List active projects', '⚡ Create operational task']);
+
+  const activeMessages = activeTab === 'chat' ? chatMessages : delegateMessages;
 
   return (
     <>
-      {/* Floating Role Delegate Launcher Button */}
+      {/* Floating Launcher Button */}
       <div className="fixed bottom-6 right-6 z-40">
         <button
-          id="orbit-role-delegate-launcher"
+          id="orbit-ai-launcher"
           onClick={() => setIsOpen(!isOpen)}
           className="group relative flex items-center gap-3 rounded-full bg-gradient-to-r from-slate-900 via-indigo-900 to-slate-950 p-1.5 pr-5 text-white shadow-2xl transition-all duration-300 hover:scale-105 hover:shadow-indigo-500/25 active:scale-95 border border-indigo-500/30"
         >
           <div className="relative flex h-11 w-11 items-center justify-center rounded-full bg-indigo-600 text-lg shadow-inner">
-            <span>⚡</span>
+            <span>{isAgentMode ? '🤖' : '✨'}</span>
             {isAgentMode && (
               <span className="absolute -top-1 -right-1 flex h-4 w-4">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
@@ -203,9 +238,11 @@ export default function AiCopilotDrawer() {
           </div>
           <div className="text-left">
             <p className="text-[10px] font-bold uppercase tracking-wider text-indigo-300">
-              {isAgentMode ? '⚡ Auto-Delegate Active' : 'Orbit Role Delegate'}
+              {isAgentMode ? '🤖 Auto-Delegate Active' : 'Orbit Assistant'}
             </p>
-            <p className="text-xs font-extrabold text-white">{selectedPersona} Stand-In</p>
+            <p className="text-xs font-extrabold text-white">
+              {activeTab === 'chat' ? 'AI Chat Assistant' : `${selectedPersona} Delegate`}
+            </p>
           </div>
         </button>
       </div>
@@ -215,21 +252,17 @@ export default function AiCopilotDrawer() {
         <div className="fixed inset-0 z-50 overflow-hidden bg-slate-950/50 backdrop-blur-xs transition-opacity animate-fade-in">
           <div className="absolute inset-y-0 right-0 flex max-w-full pl-10">
             <div className="w-screen max-w-md sm:max-w-lg bg-white shadow-2xl flex flex-col border-l border-slate-200">
+              
               {/* Drawer Header */}
               <div className="bg-gradient-to-r from-slate-950 via-indigo-950 to-slate-900 p-5 text-white border-b border-indigo-800/40">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 text-xl shadow-lg ring-2 ring-white/10">
-                      ⚡
+                    <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-indigo-600 text-xl shadow-lg ring-2 ring-white/10">
+                      {activeTab === 'chat' ? '✨' : '🤖'}
                     </div>
                     <div>
-                      <div className="flex items-center gap-2">
-                        <h2 className="text-base font-extrabold tracking-tight text-white">Orbit Role Delegate</h2>
-                        <span className="rounded-full bg-indigo-500/20 px-2 py-0.5 text-[10px] font-bold text-indigo-300 border border-indigo-400/20">
-                          Autonomous Stand-In
-                        </span>
-                      </div>
-                      <p className="text-xs text-indigo-200/80">Multi-Persona Operations & Workflow Automation</p>
+                      <h2 className="text-base font-extrabold tracking-tight text-white">Orbit Intelligence Hub</h2>
+                      <p className="text-xs text-indigo-200/80">AI Assistant & Autonomous Role Delegates</p>
                     </div>
                   </div>
                   <button
@@ -240,59 +273,89 @@ export default function AiCopilotDrawer() {
                   </button>
                 </div>
 
-                {/* Persona Switcher & Mode Toggle Bar */}
-                <div className="mt-4 pt-3 border-t border-white/10 flex flex-col gap-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Delegate Persona:</label>
-                    <select
-                      value={selectedPersona}
-                      onChange={(e) => setSelectedPersona(e.target.value)}
-                      className="rounded-xl border border-indigo-500/40 bg-slate-800/90 px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                    >
-                      {personas.map((p) => (
-                        <option key={p.displayTitle} value={p.roleName === 'Member' && p.isCustomRole ? p.displayTitle : p.roleName}>
-                          {p.icon} {p.displayTitle}
-                        </option>
-                      ))}
-                      {personas.length === 0 && (
-                        <>
-                          <option value="Admin">🛡️ Administrator Delegate</option>
-                          <option value="Manager">📊 Project Manager Delegate</option>
-                          <option value="FinanceOfficer">💰 Finance Officer Delegate</option>
-                          <option value="Coordinator">🤝 Program Coordinator Delegate</option>
-                        </>
-                      )}
-                    </select>
-                  </div>
-
-                  {/* Mode Toggle Switch */}
-                  <div className="flex items-center justify-between bg-white/5 p-2.5 rounded-2xl border border-white/10">
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${isAgentMode ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></span>
-                      <span className="text-xs font-medium text-slate-200">
-                        {isAgentMode ? '⚡ Autonomous Delegate Active' : '👤 Direct Control Mode'}
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleToggleAgentMode}
-                      className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                        isAgentMode ? 'bg-emerald-500' : 'bg-slate-700'
-                      }`}
-                    >
-                      <span
-                        className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
-                          isAgentMode ? 'translate-x-5' : 'translate-x-0'
-                        }`}
-                      />
-                    </button>
-                  </div>
+                {/* Main Mode Navigation Tabs (SEPARATE CHAT vs DELEGATE) */}
+                <div className="mt-4 grid grid-cols-2 gap-2 bg-black/30 p-1 rounded-2xl border border-white/10">
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('chat')}
+                    className={`flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+                      activeTab === 'chat'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>💬</span>
+                    <span>AI Chat Assistant</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('delegate')}
+                    className={`flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
+                      activeTab === 'delegate'
+                        ? 'bg-indigo-600 text-white shadow-md'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    <span>🤖</span>
+                    <span>Role Delegate (Busy)</span>
+                  </button>
                 </div>
+
+                {/* Sub-Header for Autonomous Delegate Tab */}
+                {activeTab === 'delegate' && (
+                  <div className="mt-3 pt-3 border-t border-white/10 flex flex-col gap-2.5 animate-fade-in">
+                    <div className="flex items-center justify-between gap-2">
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Stand-In Role:</label>
+                      <select
+                        value={selectedPersona}
+                        onChange={(e) => setSelectedPersona(e.target.value)}
+                        className="rounded-xl border border-indigo-500/40 bg-slate-800/90 px-3 py-1.5 text-xs font-semibold text-white focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                      >
+                        {personas.map((p) => (
+                          <option key={p.displayTitle} value={p.roleName === 'Member' && p.isCustomRole ? p.displayTitle : p.roleName}>
+                            {p.icon} {p.displayTitle}
+                          </option>
+                        ))}
+                        {personas.length === 0 && (
+                          <>
+                            <option value="Admin">🛡️ Administrator Delegate</option>
+                            <option value="Manager">📊 Project Manager Delegate</option>
+                            <option value="FinanceOfficer">💰 Finance Officer Delegate</option>
+                            <option value="Coordinator">🤝 Program Coordinator Delegate</option>
+                          </>
+                        )}
+                      </select>
+                    </div>
+
+                    {/* Mode Toggle Switch */}
+                    <div className="flex items-center justify-between bg-white/5 p-2 rounded-xl border border-white/10">
+                      <div className="flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${isAgentMode ? 'bg-emerald-400 animate-pulse' : 'bg-slate-400'}`}></span>
+                        <span className="text-xs font-medium text-slate-200">
+                          {isAgentMode ? '🤖 Auto-Delegate Mode Active' : '👤 Direct Control Mode'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleToggleAgentMode}
+                        className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          isAgentMode ? 'bg-emerald-500' : 'bg-slate-700'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                            isAgentMode ? 'translate-x-5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {/* Chat Message List */}
+              {/* Message Feed */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
-                {messages.map((msg) => (
+                {activeMessages.map((msg) => (
                   <div
                     key={msg.id}
                     className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
@@ -300,22 +363,23 @@ export default function AiCopilotDrawer() {
                     <div
                       className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-relaxed shadow-xs ${
                         msg.role === 'user'
-                          ? 'bg-gradient-to-r from-indigo-600 to-indigo-700 text-white rounded-br-none'
+                          ? 'bg-indigo-600 text-white rounded-br-none'
                           : 'bg-white text-slate-800 border border-slate-200/80 rounded-bl-none'
                       }`}
                     >
-                      {msg.persona && msg.role === 'assistant' && (
+                      {msg.role === 'assistant' && (
                         <div className="flex items-center gap-1.5 pb-1 mb-1 border-b border-slate-100 text-[10px] font-bold text-indigo-600">
-                          <span>⚡ {msg.persona} Stand-In</span>
+                          <span>{activeTab === 'chat' ? '✨ AI Assistant' : `🤖 ${msg.persona || selectedPersona} Delegate`}</span>
+                          {msg.modelUsed && <span className="text-slate-400 font-normal">({msg.modelUsed})</span>}
                         </div>
                       )}
                       <div className="whitespace-pre-wrap font-sans">{msg.text}</div>
 
-                      {/* Executed Action Cards */}
+                      {/* Executed Action Badges (Delegate Mode) */}
                       {msg.actions && msg.actions.length > 0 && (
                         <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1.5">
                           <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600 flex items-center gap-1">
-                            <span>✓</span> Action Executed:
+                            <span>✓</span> Real Action Executed:
                           </p>
                           {msg.actions.map((act, i) => (
                             <div key={i} className="bg-emerald-50 text-emerald-900 border border-emerald-200 p-2 rounded-xl text-[11px]">
@@ -334,13 +398,15 @@ export default function AiCopilotDrawer() {
                 {isLoading && (
                   <div className="flex items-center gap-2 text-xs text-slate-500 bg-white p-3 rounded-2xl border border-slate-200 max-w-[70%]">
                     <span className="h-2 w-2 rounded-full bg-indigo-600 animate-ping"></span>
-                    <span className="font-semibold text-indigo-600">{selectedPersona} Stand-In</span> is processing records & dispatching actions...
+                    <span className="font-semibold text-indigo-600">
+                      {activeTab === 'chat' ? 'AI Assistant' : `${selectedPersona} Delegate`}
+                    </span> is generating response...
                   </div>
                 )}
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Quick Suggestion Pills */}
+              {/* Quick Prompt Chips */}
               <div className="bg-white px-4 py-2 border-t border-slate-100 flex gap-2 overflow-x-auto">
                 {activeQuickPrompts.map((prompt, idx) => (
                   <button
@@ -353,7 +419,7 @@ export default function AiCopilotDrawer() {
                 ))}
               </div>
 
-              {/* Input Box */}
+              {/* Input Form */}
               <div className="p-4 bg-white border-t border-slate-200">
                 <form
                   onSubmit={(e) => {
@@ -366,7 +432,11 @@ export default function AiCopilotDrawer() {
                     type="text"
                     value={inputPrompt}
                     onChange={(e) => setInputPrompt(e.target.value)}
-                    placeholder={`Ask ${selectedPersona} delegate or command an action...`}
+                    placeholder={
+                      activeTab === 'chat'
+                        ? 'Ask me anything about Orbit, strategy, or tasks...'
+                        : `Command ${selectedPersona} delegate or request an action...`
+                    }
                     className="flex-1 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-2.5 text-xs text-slate-900 focus:bg-white focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 transition"
                   />
                   <button
@@ -378,6 +448,7 @@ export default function AiCopilotDrawer() {
                   </button>
                 </form>
               </div>
+
             </div>
           </div>
         </div>
