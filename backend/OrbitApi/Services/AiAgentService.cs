@@ -110,7 +110,7 @@ public class AiAgentService : IAiAgentService
                   
         var model = _config["Gemini:Model"] ?? "gemini-1.5-flash";
 
-        if (!string.IsNullOrEmpty(apiKey) && apiKey.Length > 15)
+        if (!string.IsNullOrEmpty(apiKey) && apiKey.Trim().Length > 15)
         {
             try
             {
@@ -129,7 +129,7 @@ public class AiAgentService : IAiAgentService
                     {
                         ResponseText = geminiResponse,
                         RolePersona = isGeneralChat ? "AI Assistant" : request.RolePersona,
-                        ExecutedActions = executedActions,
+                        ExecutedActions = isGeneralChat ? new List<ToolCallResult>() : executedActions,
                         ModelUsed = $"Gemini AI ({model})",
                         Timestamp = DateTime.UtcNow
                     };
@@ -137,44 +137,56 @@ public class AiAgentService : IAiAgentService
             }
             catch (Exception ex)
             {
-                _logger.LogWarning(ex, "Gemini API call failed, falling back to embedded semantic planner.");
+                _logger.LogWarning(ex, "Gemini API call failed, falling back to embedded conversational intelligence.");
             }
         }
 
-        // Fallback or Intelligent Native Planner Execution
-        var fallbackResponse = isGeneralChat
-            ? ExecuteGeneralChatFallback(request.Prompt, orgName)
-            : await ExecuteSemanticPlannerAsync(request, orgName, currentUserId, currentRole, executedActions);
-
-        return new AiChatResponseDto
+        // Fallback Execution
+        if (isGeneralChat)
         {
-            ResponseText = fallbackResponse,
-            RolePersona = isGeneralChat ? "AI Assistant" : request.RolePersona,
-            ExecutedActions = executedActions,
-            ModelUsed = isGeneralChat ? "Orbit Conversational Assistant" : "Orbit Role Delegate Engine",
-            Timestamp = DateTime.UtcNow
-        };
+            var generalResponse = ExecuteGeneralChatFallback(request.Prompt, orgName);
+            return new AiChatResponseDto
+            {
+                ResponseText = generalResponse,
+                RolePersona = "AI Assistant",
+                ExecutedActions = new List<ToolCallResult>(), // Zero database actions in general chat!
+                ModelUsed = "Orbit Conversational Assistant",
+                Timestamp = DateTime.UtcNow
+            };
+        }
+        else
+        {
+            var delegateResponse = await ExecuteSemanticPlannerAsync(request, orgName, currentUserId, currentRole, executedActions);
+            return new AiChatResponseDto
+            {
+                ResponseText = delegateResponse,
+                RolePersona = request.RolePersona,
+                ExecutedActions = executedActions,
+                ModelUsed = "Orbit Role Delegate Engine",
+                Timestamp = DateTime.UtcNow
+            };
+        }
     }
 
     private string BuildGeneralChatSystemPrompt(string orgName)
     {
-        return $@"You are the official, highly intelligent AI Assistant for Orbit, serving members of '{orgName}'.
+        return $@"You are the intelligent, articulate, and supportive AI Assistant embedded in the Orbit workspace for '{orgName}'.
 You behave like an advanced conversational intelligence (similar to OpenAI ChatGPT and Google Gemini).
-You are articulate, professional, supportive, and knowledgeable across business strategy, non-profit operations, project management, technical problem solving, and general knowledge.
+You are helpful, friendly, articulate, and insightful across all subjects.
 
-You also possess complete knowledge of Orbit:
-- Workspaces & Projects management (Kanban status boards, deadlines, priorities)
-- Multi-tier Budgets & $500 threshold receipt verification rules
-- Logical Framework & MEL (Monitoring, Evaluation and Learning) results hierarchy (Goals, Outcomes, Outputs, Activities)
-- Attribute-Based Access Control (ABAC) with 7 predefined system roles and dynamic custom roles
-- Risk & Issue registers with 5x5 scoring matrix
-- Volunteer mobilization and hour tracking
-- Multi-persona Autonomous Role Delegates for busy team leaders
+Orbit Platform Knowledge:
+- Workspaces & Projects: Isolated workspaces, Kanban task boards (ToDo, InProgress, InReview, Blocked, Done), priorities, deadlines, checklist subtasks.
+- Logical Framework & MEL: 4-tier results matrix (Goals, Outcomes, Outputs, Activities) tracking indicators, baselines, and donor reports.
+- Budgets & Financials: Multi-tier ceilings, $500 threshold receipt rule, approval chains (Finance Officer -> Project Manager), dual-currency (USD & ETB).
+- Access Control: 7 Predefined system roles (Owner, Admin, Coordinator, Manager, FinanceOfficer, Member, Viewer) + dynamic custom roles with 37 permissions.
+- Risk & Issue Register: 5x5 Likelihood vs Impact scoring matrix.
+- Volunteer Portal: Background checks, hour logs, skill matching.
+- Autonomous Role Delegates: Multi-persona stand-in delegates that execute database actions for busy leaders.
 
-When responding to users:
-- Provide rich, structured, thoughtful, and articulate Markdown formatting.
-- Be direct, insightful, and adaptable to any topic or question the user asks.
-- If they ask general questions (e.g. drafting proposals, explaining concepts, brainstorming), assist thoroughly.";
+Tone & Formatting Guidelines:
+- If the user greets you (e.g. 'How are you', 'Hello', 'Hi'), respond warmly and naturally like an intelligent assistant.
+- Use clear, professional, structured Markdown formatting.
+- Answer any question directly, whether about Orbit workflows, business strategy, proposal writing, email drafting, or problem solving.";
     }
 
     private string BuildRoleDelegateSystemPrompt(string rolePersona, string orgName, int? customRoleId)
@@ -201,8 +213,7 @@ When responding to users:
         var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(25);
 
-        // Try primary model and fallback model if needed
-        var candidateModels = new[] { model, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-pro" }.Distinct();
+        var candidateModels = new[] { model, "gemini-1.5-flash", "gemini-1.5-pro", "gemini-2.0-flash", "gemini-pro" }.Distinct();
 
         foreach (var m in candidateModels)
         {
@@ -234,7 +245,6 @@ When responding to users:
 
                 if (executedActions != null)
                 {
-                    // Role Delegate mode with database tools
                     var toolsDeclarations = _toolsService.GetAvailableToolDeclarations(currentRole);
                     requestBody = new
                     {
@@ -245,7 +255,6 @@ When responding to users:
                 }
                 else
                 {
-                    // Pure conversational AI assistant mode (OpenAI/Gemini style)
                     requestBody = new
                     {
                         system_instruction = new { parts = new[] { new { text = systemInstruction } } },
@@ -327,29 +336,45 @@ When responding to users:
 
     private string ExecuteGeneralChatFallback(string prompt, string orgName)
     {
-        var promptLower = prompt.ToLowerInvariant();
+        var p = prompt.Trim().ToLowerInvariant();
 
-        if (promptLower.Contains("hello") || promptLower.Contains("hi") || promptLower.Contains("hey"))
+        // 1. Greetings & conversational check-in
+        if (p == "how are you" || p == "how are you?" || p == "how are you doing" || p.Contains("how are you"))
         {
-            return $"Hello! I am your **Orbit AI Assistant** for **{orgName}**. How can I help you today? You can ask me anything about managing projects, budgets, logframes, team workflows, or general strategy.";
+            return $"I'm doing great, thank you for asking! 😊 I'm fully ready to assist you and your team at **{orgName}**.\n\nHow can I help you today? Whether you need to draft project plans, analyze budgets, understand Orbit workflows, or brainstorm strategy, feel free to ask!";
         }
 
-        if (promptLower.Contains("who are you") || promptLower.Contains("what can you do"))
+        if (p == "hello" || p == "hi" || p == "hey" || p.StartsWith("hello") || p.StartsWith("hi ") || p.StartsWith("hey "))
         {
-            return $"I am your dedicated **Conversational AI Assistant** integrated into Orbit. I can help you brainstorm solutions, analyze project progress, explain system workflows, draft communications, and answer any questions you have about operations or business strategy.";
+            return $"Hello! 👋 Welcome to **Orbit AI Assistant** for **{orgName}**.\n\nI am here to assist you with operations, project planning, report drafting, or answering any questions about the platform. What are you working on today?";
         }
 
-        if (promptLower.Contains("logframe") || promptLower.Contains("mel"))
+        if (p.Contains("who are you") || p.Contains("what can you do") || p.Contains("what are your capabilities"))
         {
-            return $"### 📊 Logical Framework (Logframe) in Orbit\n\nA Logframe is a systematic results matrix used by international development organizations and donors:\n\n1. **Impact (Goal):** Long-term vision (e.g. Reduce waterborne disease by 40%).\n2. **Outcomes:** Intermediate changes (e.g. 15,000 households accessing clean water).\n3. **Outputs:** Direct products/services (e.g. 50 community wells constructed).\n4. **Activities:** The operational tasks executed by your field team.\n\nIn Orbit, outputs and activities link directly to your Kanban tasks and budget line items.";
+            return $"I am your **Orbit AI Assistant** — a conversational intelligence partner embedded directly into your workspace.\n\n**Here is what I can help you with:**\n- 💡 **Strategy & Guidance:** Brainstorm ideas, draft project plans, write emails, and summarize reports.\n- 📋 **System Walkthroughs:** Explain how Workspaces, Kanban Tasks, Logframe & MEL, Budgets, and Permissions work.\n- 🤖 **Role Delegation:** If you are busy or away, you can switch to the **Role Delegate (Busy)** tab to let Orbit autonomously manage tasks, review expenses, and audit project metrics on your behalf!";
         }
 
-        if (promptLower.Contains("finance") || promptLower.Contains("budget") || promptLower.Contains("threshold"))
+        // 2. System Walkthrough Queries
+        if (p.Contains("logframe") || p.Contains("mel") || p.Contains("indicator"))
         {
-            return $"### 💰 Financial Governance & $500 Threshold Rule\n\nOrbit enforces a strict financial control pipeline:\n- **Budgets** are set at Organization, Workspace, and Project tiers.\n- **$500 Rule:** Any expense exceeding $500 automatically requires receipt proof before approval.\n- **Two-Step Approval:** Finance Officer review followed by Project Manager sign-off before payment disbursement.";
+            return $"### 📊 Logical Framework (Logframe) & MEL Engine in Orbit\n\nA Logframe is a structured results matrix used by international development organizations, NGOs, and donors:\n\n1. **Impact (Goal):** Long-term transformational objective (e.g., *Reduce community waterborne illness by 40%*).\n2. **Outcomes & Indicators:** Intermediate measurable milestones comparing baseline vs actual target achievements.\n3. **Outputs & Activities:** Direct deliverables produced by your field teams, linked directly to operational Kanban tasks.\n4. **Donor Reports:** 1-click export of logframe tables for compliance and donor reviews.";
         }
 
-        return $"Thank you for your message! Regarding **\"{prompt}\"**:\n\nOrbit provides comprehensive tools for project tracking, multi-tier budget auditing, team coordination, and automated role delegation. If you would like to execute database actions directly (such as creating tasks or auditing financials), you can also switch to the **Autonomous Role Delegate** tab.";
+        if (p.Contains("finance") || p.Contains("budget") || p.Contains("expense") || p.Contains("threshold"))
+        {
+            return $"### 💰 Financial Governance & $500 Threshold in Orbit\n\nOrbit provides multi-level financial transparency:\n\n- **Multi-Level Budgets:** Set and enforce spending limits at Organization, Workspace, Project, and Task tiers.\n- **$500 Rule:** Any single expense exceeding $500 triggers a mandatory receipt attachment requirement.\n- **Approval Workflow:** Submitter -> Reviewed by Finance Officer -> Signed off by Project Manager.\n- **Dual-Currency Ledger:** Live tracking and conversions in USD and ETB.";
+        }
+
+        if (p.Contains("role") || p.Contains("permission") || p.Contains("abac"))
+        {
+            return $"### 🛡️ Roles & 37-Point Permission Matrix in Orbit\n\nOrbit uses Attribute-Based Access Control (ABAC):\n\n- **7 System Roles:** Owner (L0 Root), Admin (L1 Org Governance), Coordinator (L2 Workspace), Manager (L3 Project), Finance Officer (L4 Ledger & Approvals), Member (L5 Tasks), Viewer (L6 Read-Only).\n- **Dynamic Custom Roles:** Create on-demand custom roles (e.g. *Field Logistics Lead*) and assign specific permissions from the 37-point matrix in Settings (Tab 5).";
+        }
+
+        // 3. General Helpful Conversational Answer
+        return $"Thank you for your question! Here is my insight regarding **\"{prompt}\"**:\n\n"
+             + "Orbit is designed to streamline non-profit and enterprise operations from high-level strategic governance down to day-to-day task execution.\n\n"
+             + "If you need specific guidance on a workflow, drafting assistance, or troubleshooting, let me know what you would like to accomplish!\n\n"
+             + "*Tip:* If you want the system to execute real database actions (such as creating a task or approving an expense), switch to the **Role Delegate (Busy)** tab above.";
     }
 
     private async Task<string> ExecuteSemanticPlannerAsync(
