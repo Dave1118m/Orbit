@@ -138,7 +138,9 @@ export default function Teams() {
 
   const fetchUsers = async () => {
     try {
-      const res = await fetch(`${API_BASE}/users`, { headers: getHeaders() });
+      const orgId = localStorage.getItem('selectedOrganizationId') || user?.organizationId || user?.primaryOrganizationId;
+      const query = orgId ? `?orgId=${orgId}` : '';
+      const res = await fetch(`${API_BASE}/users${query}`, { headers: getHeaders() });
       if (res.ok) setUsers(await res.json());
     } catch (err) { console.error(err); }
   };

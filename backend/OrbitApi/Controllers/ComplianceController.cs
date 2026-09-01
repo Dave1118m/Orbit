@@ -33,10 +33,35 @@ namespace OrbitApi.Controllers
 
         private int? GetActiveOrganizationId()
         {
-            if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId))
+            if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
             {
-                return orgId;
+                var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+                if (validOrg != null) return validOrg.Id;
             }
+
+            if (Request.Query.TryGetValue("orgId", out var queryOrgStr) && int.TryParse(queryOrgStr, out var queryOrgId) && queryOrgId > 0)
+            {
+                var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == queryOrgId && !o.IsDeleted);
+                if (validOrg != null) return validOrg.Id;
+            }
+
+            var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+            if (int.TryParse(userIdClaim, out var userId))
+            {
+                var userOrgId = _db.OrganizationMembers
+                    .Where(om => om.UserId == userId && om.Status == OrgMemberStatus.Active)
+                    .Select(om => om.OrganizationId)
+                    .FirstOrDefault();
+                if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+
+                var ownedOrgId = _db.Organizations
+                    .Where(o => o.OwnerId == userId && !o.IsDeleted)
+                    .Select(o => o.Id)
+                    .FirstOrDefault();
+                if (ownedOrgId > 0) return ownedOrgId;
+            }
+
             return null;
         }
 
@@ -44,20 +69,19 @@ namespace OrbitApi.Controllers
         /// GET /api/v1/compliance/reports — Fetch all reporting schedules
         /// </summary>
         [HttpGet("reports")]
-        public async Task<ActionResult<IEnumerable<GrantReportScheduleDto>>> GetReportingSchedules()
+        public async Task<ActionResult<IEnumerable<GrantReportScheduleDto>>> GetReportingSchedules([FromQuery] int? orgId)
         {
-            var orgId = GetActiveOrganizationId();
+            var targetOrgId = orgId ?? GetActiveOrganizationId();
+            if (!targetOrgId.HasValue || targetOrgId.Value <= 0)
+            {
+                return Ok(new List<GrantReportScheduleDto>());
+            }
 
             var query = _db.GrantReportSchedules
                 .Include(r => r.Project).ThenInclude(p => p!.Workspace)
                 .Include(r => r.Donor)
-                .AsQueryable();
-
-            if (orgId.HasValue)
-            {
-                query = query.Where(r => (r.Project != null && r.Project.Workspace != null && r.Project.Workspace.OrganizationId == orgId.Value) ||
-                                         (r.Donor != null && r.Donor.OrganizationId == orgId.Value));
-            }
+                .Where(r => (r.Project != null && r.Project.Workspace != null && r.Project.Workspace.OrganizationId == targetOrgId.Value) ||
+                            (r.Donor != null && r.Donor.OrganizationId == targetOrgId.Value));
 
             var schedules = await query.OrderBy(r => r.DeadlineDate).ToListAsync();
 

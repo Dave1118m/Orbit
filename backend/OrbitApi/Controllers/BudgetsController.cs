@@ -39,7 +39,14 @@ namespace OrbitApi.Controllers
                 if (validOrg != null) return validOrg.Id;
             }
 
-            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (Request.Query.TryGetValue("orgId", out var queryOrgStr) && int.TryParse(queryOrgStr, out var queryOrgId) && queryOrgId > 0)
+            {
+                var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == queryOrgId && !o.IsDeleted);
+                if (validOrg != null) return validOrg.Id;
+            }
+
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
             if (int.TryParse(userIdClaim, out var userId))
             {
                 var userOrgId = _db.OrganizationMembers
@@ -47,10 +54,15 @@ namespace OrbitApi.Controllers
                     .Select(om => om.OrganizationId)
                     .FirstOrDefault();
                 if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+
+                var ownedOrgId = _db.Organizations
+                    .Where(o => o.OwnerId == userId && !o.IsDeleted)
+                    .Select(o => o.Id)
+                    .FirstOrDefault();
+                if (ownedOrgId > 0) return ownedOrgId;
             }
 
-            var firstOrg = _db.Organizations.FirstOrDefault(o => !o.IsDeleted);
-            return firstOrg?.Id ?? 0;
+            return null;
         }
 
         private int? GetCurrentUserId()

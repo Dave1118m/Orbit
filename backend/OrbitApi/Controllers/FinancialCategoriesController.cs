@@ -28,20 +28,44 @@ public class FinancialCategoriesController : ControllerBase
 
     private int? GetActiveOrganizationId()
     {
-        if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId))
+        if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
         {
-            return orgId;
+            var validOrg = _context.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+            if (validOrg != null) return validOrg.Id;
         }
-        var firstOrg = _context.Organizations.FirstOrDefault(o => !o.IsDeleted);
-        return firstOrg?.Id ?? 0;
+
+        if (Request.Query.TryGetValue("orgId", out var queryOrgStr) && int.TryParse(queryOrgStr, out var queryOrgId) && queryOrgId > 0)
+        {
+            var validOrg = _context.Organizations.FirstOrDefault(o => o.Id == queryOrgId && !o.IsDeleted);
+            if (validOrg != null) return validOrg.Id;
+        }
+
+        var userIdClaim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+        if (int.TryParse(userIdClaim, out var userId))
+        {
+            var userOrgId = _context.OrganizationMembers
+                .Where(om => om.UserId == userId && om.Status == OrgMemberStatus.Active)
+                .Select(om => om.OrganizationId)
+                .FirstOrDefault();
+            if (userOrgId > 0 && _context.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+
+            var ownedOrgId = _context.Organizations
+                .Where(o => o.OwnerId == userId && !o.IsDeleted)
+                .Select(o => o.Id)
+                .FirstOrDefault();
+            if (ownedOrgId > 0) return ownedOrgId;
+        }
+
+        return null;
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] bool includeInactive = false)
+    public async Task<IActionResult> GetAll([FromQuery] int? orgId, [FromQuery] bool includeInactive = false)
     {
-        var orgId = GetActiveOrganizationId();
-        if (!orgId.HasValue) return Ok(new List<FinancialCategoryDto>());
-        return await GetByOrganization(orgId.Value, includeInactive);
+        var targetOrgId = orgId ?? GetActiveOrganizationId();
+        if (!targetOrgId.HasValue || targetOrgId.Value <= 0) return Ok(new List<FinancialCategoryDto>());
+        return await GetByOrganization(targetOrgId.Value, includeInactive);
     }
 
     [HttpGet("flat")]

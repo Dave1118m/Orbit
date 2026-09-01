@@ -107,13 +107,90 @@ namespace OrbitApi.Controllers
         }
 
         /// <summary>
-        /// Lists all registered users along with their role assignments.
+        /// Lists users scoped to the active organization or workspace (Multi-tenancy isolated).
         /// </summary>
-        /// <returns>Collection of user DTOs.</returns>
+        /// <param name="orgId">Optional organization ID filter.</param>
+        /// <param name="workspaceId">Optional workspace ID filter.</param>
+        /// <returns>Collection of user DTOs belonging to the organization.</returns>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<UserDto>>> List()
+        public async Task<ActionResult<IEnumerable<UserDto>>> List([FromQuery] int? orgId, [FromQuery] int? workspaceId)
         {
-            var users = await _db.Users.ToListAsync();
+            var currentUserId = GetCurrentUserId();
+            if (!currentUserId.HasValue) return Unauthorized();
+
+            int? targetOrgId = orgId;
+            if (!targetOrgId.HasValue && Request.Headers.TryGetValue("X-Organization-Id", out var orgHeader) && int.TryParse(orgHeader, out var parsedOrgId) && parsedOrgId > 0)
+            {
+                targetOrgId = parsedOrgId;
+            }
+
+            if (!targetOrgId.HasValue && workspaceId.HasValue)
+            {
+                targetOrgId = await _db.Workspaces
+                    .Where(w => w.Id == workspaceId.Value)
+                    .Select(w => (int?)w.OrganizationId)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (!targetOrgId.HasValue)
+            {
+                targetOrgId = await _db.OrganizationMembers
+                    .Where(m => m.UserId == currentUserId.Value && m.Status == OrgMemberStatus.Active)
+                    .Select(m => (int?)m.OrganizationId)
+                    .FirstOrDefaultAsync();
+
+                if (!targetOrgId.HasValue)
+                {
+                    targetOrgId = await _db.Organizations
+                        .Where(o => o.OwnerId == currentUserId.Value && !o.IsDeleted)
+                        .Select(o => (int?)o.Id)
+                        .FirstOrDefaultAsync();
+                }
+            }
+
+            IQueryable<User> query;
+
+            if (targetOrgId.HasValue && targetOrgId.Value > 0)
+            {
+                var effectiveOrg = targetOrgId.Value;
+                var memberUserIds = await _db.OrganizationMembers
+                    .Where(m => m.OrganizationId == effectiveOrg && m.Status == OrgMemberStatus.Active)
+                    .Select(m => m.UserId)
+                    .ToListAsync();
+
+                var ownerUserId = await _db.Organizations
+                    .Where(o => o.Id == effectiveOrg && !o.IsDeleted)
+                    .Select(o => o.OwnerId)
+                    .ToListAsync();
+
+                var scopedRoleUserIds = await _db.RoleAssignments
+                    .Where(ra => ra.ScopeType == ScopeType.Organization && ra.ScopeId == effectiveOrg)
+                    .Select(ra => ra.UserId)
+                    .ToListAsync();
+
+                var workspaceIds = await _db.Workspaces
+                    .Where(w => w.OrganizationId == effectiveOrg && !w.IsArchived)
+                    .Select(w => w.Id)
+                    .ToListAsync();
+
+                var workspaceRoleUserIds = await _db.RoleAssignments
+                    .Where(ra => ra.ScopeType == ScopeType.Workspace && workspaceIds.Contains(ra.ScopeId))
+                    .Select(ra => ra.UserId)
+                    .ToListAsync();
+
+                var allowedUserIds = new HashSet<int>(memberUserIds);
+                foreach (var o in ownerUserId) if (o.HasValue) allowedUserIds.Add(o.Value);
+                foreach (var s in scopedRoleUserIds) allowedUserIds.Add(s);
+                foreach (var w in workspaceRoleUserIds) allowedUserIds.Add(w);
+
+                query = _db.Users.Where(u => allowedUserIds.Contains(u.Id));
+            }
+            else
+            {
+                query = _db.Users.Where(u => u.Id == currentUserId.Value);
+            }
+
+            var users = await query.Distinct().ToListAsync();
             var dtos = new List<UserDto>();
             foreach (var u in users)
             {
