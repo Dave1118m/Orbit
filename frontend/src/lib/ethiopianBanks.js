@@ -92,3 +92,222 @@ export function getShortBankName(name) {
 
   return name;
 }
+
+/**
+ * Returns the account number validation specification for a selected bank.
+ * @param {string} bankName 
+ * @returns {object} Validation rule specification
+ */
+export function getBankValidationRule(bankName) {
+  if (!bankName) {
+    return {
+      expectedDigits: [8, 9, 10, 11, 12, 13, 14, 15, 16],
+      prefix: null,
+      placeholder: 'Enter bank account number',
+      helpText: 'Enter valid account number',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Account number must contain only digits.';
+        if (acc.length < 6 || acc.length > 20) return 'Account number must be between 6 and 20 digits.';
+        return null;
+      }
+    };
+  }
+
+  const lower = bankName.toLowerCase();
+
+  // 1. Commercial Bank of Ethiopia (CBE)
+  if (lower.includes('commercial bank of ethiopia') || lower.includes('cbe')) {
+    return {
+      expectedDigits: [13],
+      prefix: '1000',
+      placeholder: '1000123456789 (13 digits)',
+      helpText: '13 digits starting with 1000 (e.g. 1000xxxxxxxxx)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'CBE account number must contain only digits.';
+        if (acc.length !== 13) return `CBE account number must be exactly 13 digits (currently ${acc.length}).`;
+        if (!acc.startsWith('1000')) return "CBE account number must start with '1000' (format: 1000xxxxxxxxx).";
+        return null;
+      }
+    };
+  }
+
+  // 2. Awash Bank
+  if (lower.includes('awash')) {
+    return {
+      expectedDigits: [14],
+      prefix: '01',
+      placeholder: '01304123456789 (14 digits)',
+      helpText: '14 digits starting with 01 (e.g. 01304xxxxxxxxx)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Awash Bank account number must contain only digits.';
+        if (acc.length !== 14) return `Awash Bank account number must be exactly 14 digits (currently ${acc.length}).`;
+        if (!acc.startsWith('01')) return "Awash Bank account number must start with '01'.";
+        return null;
+      }
+    };
+  }
+
+  // 3. Bank of Abyssinia
+  if (lower.includes('abyssinia')) {
+    return {
+      expectedDigits: [8, 16],
+      prefix: null,
+      placeholder: '12345678 (8-digit passbook) or 16-digit virtual',
+      helpText: '8 digits (passbook / branch) or 16 digits (digital virtual account)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Bank of Abyssinia account number must contain only digits.';
+        if (acc.length !== 8 && acc.length !== 16) return `Bank of Abyssinia account number must be 8 or 16 digits (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // 4. Dashen Bank
+  if (lower.includes('dashen')) {
+    return {
+      expectedDigits: [14, 10],
+      prefix: null,
+      placeholder: '01001234567890 (14 digits) or 10 digits',
+      helpText: '14 digits (standard modern) or 10 digits (legacy branch)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Dashen Bank account number must contain only digits.';
+        if (acc.length !== 14 && acc.length !== 10) return `Dashen Bank account number must be 14 or 10 digits (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // 5. Cooperative Bank of Oromia (Coopbank)
+  if (lower.includes('cooperative bank') || lower.includes('coopbank')) {
+    return {
+      expectedDigits: [13],
+      prefix: '10',
+      placeholder: '1000012345678 (13 digits)',
+      helpText: '13 digits starting with 10 (e.g. 1000012345678)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Coopbank account number must contain only digits.';
+        if (acc.length !== 13) return `Coopbank account number must be exactly 13 digits (currently ${acc.length}).`;
+        if (!acc.startsWith('10')) return "Coopbank account number must start with '10'.";
+        return null;
+      }
+    };
+  }
+
+  // 6. Hibret Bank (United Bank)
+  if (lower.includes('hibret') || lower.includes('united bank')) {
+    return {
+      expectedDigits: [14, 16],
+      prefix: null,
+      placeholder: '10123456789012 (14 digits)',
+      helpText: '14 digits (or 16 digits for corporate accounts)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Hibret Bank account number must contain only digits.';
+        if (acc.length !== 14 && acc.length !== 16) return `Hibret Bank account number must be 14 or 16 digits (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // 7. Nib International Bank
+  if (lower.includes('nib')) {
+    return {
+      expectedDigits: [13, 14],
+      prefix: null,
+      placeholder: '7001234567890 (13 digits)',
+      helpText: '13 digits (or 14 digits depending on branch)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Nib Bank account number must contain only digits.';
+        if (acc.length !== 13 && acc.length !== 14) return `Nib Bank account number must be 13 or 14 digits (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // 8. Wegagen Bank
+  if (lower.includes('wegagen')) {
+    return {
+      expectedDigits: [14, 12, 10],
+      prefix: null,
+      placeholder: '01234567890123 (14 digits)',
+      helpText: '14 digits (standard modern) or 10-12 digits (legacy)',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Wegagen Bank account number must contain only digits.';
+        if (![14, 12, 10].includes(acc.length)) return `Wegagen Bank account number must be 14 digits or 10-12 digits (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // 9. Zemen Bank
+  if (lower.includes('zemen')) {
+    return {
+      expectedDigits: [16],
+      prefix: '1000',
+      placeholder: '1000001234567890 (16 digits)',
+      helpText: '16 digits starting with 1000',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^\d+$/.test(acc)) return 'Zemen Bank account number must contain only digits.';
+        if (acc.length !== 16) return `Zemen Bank account number must be exactly 16 digits (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // 10. Telebirr / CBE Birr
+  if (lower.includes('telebirr') || lower.includes('cbe birr')) {
+    return {
+      expectedDigits: [10],
+      prefix: '09/07',
+      placeholder: '0911234567 (10 digits)',
+      helpText: '10 digits starting with 09 or 07',
+      validate: (acc) => {
+        if (!acc) return 'Phone/Wallet number is required.';
+        if (!/^\d+$/.test(acc)) return 'Mobile wallet number must contain only digits.';
+        if (acc.length !== 10) return `Mobile wallet number must be 10 digits (currently ${acc.length}).`;
+        if (!acc.startsWith('09') && !acc.startsWith('07')) return 'Must start with 09 or 07 (e.g. 0911xxxxxx).';
+        return null;
+      }
+    };
+  }
+
+  // 11. International / Foreign Bank
+  if (lower.includes('other') || lower.includes('international')) {
+    return {
+      expectedDigits: [6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34],
+      prefix: null,
+      placeholder: 'IBAN or Account Number (e.g. GB29NWBK60161331926819)',
+      helpText: 'Between 6 and 34 alphanumeric characters',
+      validate: (acc) => {
+        if (!acc) return 'Account number is required.';
+        if (!/^[A-Za-z0-9]+$/.test(acc)) return 'Account number must contain only letters and digits.';
+        if (acc.length < 6 || acc.length > 34) return `Must be between 6 and 34 characters (currently ${acc.length}).`;
+        return null;
+      }
+    };
+  }
+
+  // Standard Commercial Bank fallback (Amhara, OIB, Buna, Berhan, Abay, Lion, Siinqee, etc.)
+  return {
+    expectedDigits: [12, 13, 14],
+    prefix: null,
+    placeholder: '13 or 14-digit account number',
+    helpText: 'Standard 13 or 14 digits',
+    validate: (acc) => {
+      if (!acc) return 'Account number is required.';
+      if (!/^\d+$/.test(acc)) return 'Account number must contain only digits.';
+      if (acc.length < 8 || acc.length > 16) return `Account number must be between 8 and 16 digits (currently ${acc.length}).`;
+      return null;
+    }
+  };
+}
+

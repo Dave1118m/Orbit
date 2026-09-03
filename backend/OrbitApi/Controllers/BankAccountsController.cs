@@ -68,11 +68,116 @@ namespace OrbitApi.Controllers
         private string ValidateEthiopianBankAccount(string bankName, string accountNumber)
         {
             if (string.IsNullOrWhiteSpace(accountNumber)) return "Account number is required.";
-            if (!accountNumber.All(char.IsDigit)) return "Account number must contain only digits.";
 
-            if (accountNumber.Length < 6 || accountNumber.Length > 20)
+            var cleaned = accountNumber.Trim();
+            var lowerBank = (bankName ?? string.Empty).ToLowerInvariant();
+
+            // International or generic banks can contain letters/digits (e.g. IBAN)
+            if (lowerBank.Contains("other") || lowerBank.Contains("international"))
             {
-                return "Bank account numbers must be between 6 and 20 digits.";
+                if (cleaned.Length < 6 || cleaned.Length > 34)
+                    return "International bank account number or IBAN must be between 6 and 34 characters.";
+                return null;
+            }
+
+            // All domestic Ethiopian bank accounts must be strictly digits
+            if (!cleaned.All(char.IsDigit))
+            {
+                return "Ethiopian bank account number must contain only digits.";
+            }
+
+            // 1. Commercial Bank of Ethiopia (CBE)
+            if (lowerBank.Contains("commercial bank of ethiopia") || lowerBank.Contains("cbe"))
+            {
+                if (cleaned.Length != 13)
+                    return $"Commercial Bank of Ethiopia (CBE) account number must be exactly 13 digits (received {cleaned.Length} digits).";
+                if (!cleaned.StartsWith("1000"))
+                    return "Commercial Bank of Ethiopia (CBE) account number must start with '1000' (format: 1000xxxxxxxxx).";
+                return null;
+            }
+
+            // 2. Awash Bank
+            if (lowerBank.Contains("awash"))
+            {
+                if (cleaned.Length != 14)
+                    return $"Awash Bank account number must be exactly 14 digits (received {cleaned.Length} digits).";
+                if (!cleaned.StartsWith("01"))
+                    return "Awash Bank account number typically starts with '01' (format: 01xxxxxxxxxxxx).";
+                return null;
+            }
+
+            // 3. Bank of Abyssinia
+            if (lowerBank.Contains("abyssinia"))
+            {
+                if (cleaned.Length != 8 && cleaned.Length != 16)
+                    return $"Bank of Abyssinia account number must be 8 digits (standard branch) or 16 digits (digital account, received {cleaned.Length} digits).";
+                return null;
+            }
+
+            // 4. Dashen Bank
+            if (lowerBank.Contains("dashen"))
+            {
+                if (cleaned.Length != 14 && cleaned.Length != 10)
+                    return $"Dashen Bank account number must be 14 digits or 10 digits (received {cleaned.Length} digits).";
+                return null;
+            }
+
+            // 5. Cooperative Bank of Oromia (Coopbank)
+            if (lowerBank.Contains("cooperative bank") || lowerBank.Contains("coopbank"))
+            {
+                if (cleaned.Length != 13)
+                    return $"Cooperative Bank of Oromia account number must be exactly 13 digits (received {cleaned.Length} digits).";
+                if (!cleaned.StartsWith("10"))
+                    return "Cooperative Bank of Oromia account number must start with '10'.";
+                return null;
+            }
+
+            // 6. Hibret Bank (United Bank)
+            if (lowerBank.Contains("hibret") || lowerBank.Contains("united bank"))
+            {
+                if (cleaned.Length != 14 && cleaned.Length != 16)
+                    return $"Hibret Bank account number must be 14 or 16 digits (received {cleaned.Length} digits).";
+                return null;
+            }
+
+            // 7. Nib International Bank
+            if (lowerBank.Contains("nib"))
+            {
+                if (cleaned.Length != 13 && cleaned.Length != 14)
+                    return $"Nib International Bank account number must be 13 digits (received {cleaned.Length} digits).";
+                return null;
+            }
+
+            // 8. Wegagen Bank
+            if (lowerBank.Contains("wegagen"))
+            {
+                if (cleaned.Length != 14 && cleaned.Length != 12 && cleaned.Length != 10)
+                    return $"Wegagen Bank account number must be 14 digits or 10-12 digits (received {cleaned.Length} digits).";
+                return null;
+            }
+
+            // 9. Zemen Bank
+            if (lowerBank.Contains("zemen"))
+            {
+                if (cleaned.Length != 16)
+                    return $"Zemen Bank account number must be exactly 16 digits (received {cleaned.Length} digits).";
+                return null;
+            }
+
+            // 10. Telebirr / CBE Birr
+            if (lowerBank.Contains("telebirr") || lowerBank.Contains("cbe birr"))
+            {
+                if (cleaned.Length != 10)
+                    return $"{bankName} mobile wallet number must be exactly 10 digits (received {cleaned.Length} digits).";
+                if (!cleaned.StartsWith("09") && !cleaned.StartsWith("07"))
+                    return $"{bankName} mobile wallet number must start with 09 or 07 (format: 09xxxxxxxx).";
+                return null;
+            }
+
+            // 11. General fallback for all other registered Ethiopian banks (Amhara, Berhan, Buna, Abay, Lion, Siinqee, etc.)
+            if (cleaned.Length < 8 || cleaned.Length > 16)
+            {
+                return $"Ethiopian bank account number must be between 8 and 16 digits (received {cleaned.Length} digits).";
             }
 
             return null;

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import { AutoText } from '../../contexts/TranslationContext';
-import { ETHIOPIAN_BANKS, getShortBankName } from '../../lib/ethiopianBanks';
+import { ETHIOPIAN_BANKS, getShortBankName, getBankValidationRule } from '../../lib/ethiopianBanks';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
 const API_BASE = import.meta.env.VITE_API_URL;
@@ -49,6 +49,7 @@ export default function BankAccounts() {
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingAccountId, setEditingAccountId] = useState(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [accountNumberError, setAccountNumberError] = useState('');
   const [formData, setFormData] = useState({
     bankName: '',
     accountName: '',
@@ -124,6 +125,7 @@ export default function BankAccounts() {
   const openAddModal = () => {
     setIsEditMode(false);
     setEditingAccountId(null);
+    setAccountNumberError('');
     setFormData({ bankName: '', accountName: '', accountNumber: '', currency: 'USD', isActive: true });
     setIsModalOpen(true);
   };
@@ -131,6 +133,7 @@ export default function BankAccounts() {
   const openEditModal = (account) => {
     setIsEditMode(true);
     setEditingAccountId(account.id);
+    setAccountNumberError('');
     setFormData({
       bankName: account.bankName,
       accountName: account.accountName,
@@ -143,10 +146,26 @@ export default function BankAccounts() {
 
   const handleInputChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData(prev => ({
-      ...prev,
-      [name]: type === 'checkbox' ? checked : value
-    }));
+    const updatedValue = type === 'checkbox' ? checked : value;
+    setFormData(prev => {
+      const next = {
+        ...prev,
+        [name]: updatedValue
+      };
+
+      if (name === 'bankName' || name === 'accountNumber') {
+        const targetBank = name === 'bankName' ? updatedValue : next.bankName;
+        const targetAcc = name === 'accountNumber' ? updatedValue : next.accountNumber;
+        if (targetAcc && targetAcc.trim()) {
+          const rule = getBankValidationRule(targetBank);
+          setAccountNumberError(rule.validate(targetAcc.trim()) || '');
+        } else {
+          setAccountNumberError('');
+        }
+      }
+
+      return next;
+    });
   };
 
   const [fetchingRate, setFetchingRate] = useState(false);
@@ -199,6 +218,16 @@ export default function BankAccounts() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     e.stopPropagation();
+
+    // Client-side bank account validation
+    const rule = getBankValidationRule(formData.bankName);
+    const valErr = rule.validate(formData.accountNumber ? formData.accountNumber.trim() : '');
+    if (valErr) {
+      setAccountNumberError(valErr);
+      showErrorToast(valErr);
+      return;
+    }
+
     try {
       setIsSubmitting(true);
       const url = isEditMode
@@ -295,6 +324,8 @@ export default function BankAccounts() {
   const totalBalance = accounts.reduce((sum, a) => sum + toUSD(a.currentBalance || 0, a.currency), 0);
   const totalReceived = accounts.reduce((sum, a) => sum + toUSD(a.totalReceived || 0, a.currency), 0);
   const totalExpended = accounts.reduce((sum, a) => sum + toUSD(a.totalExpended || 0, a.currency), 0);
+
+  const currentRule = getBankValidationRule(formData.bankName);
 
   return (
     <div className="space-y-6">
@@ -539,16 +570,41 @@ export default function BankAccounts() {
               </div>
 
               <div>
-                <label className="block font-semibold text-slate-700 mb-1">Account Number *</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block font-semibold text-slate-700">Account Number *</label>
+                  {formData.bankName && formData.accountNumber && (
+                    <span className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded transition ${
+                      !accountNumberError
+                        ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                        : 'bg-amber-50 text-amber-700 border border-amber-200'
+                    }`}>
+                      {formData.accountNumber.trim().length} {currentRule.expectedDigits.length === 1 ? `/ ${currentRule.expectedDigits[0]} digits` : 'digits'}
+                    </span>
+                  )}
+                </div>
                 <input
                   type="text"
                   name="accountNumber"
                   required
                   value={formData.accountNumber}
                   onChange={handleInputChange}
-                  placeholder="100029384"
-                  className="w-full rounded-lg border border-slate-300 px-3 py-1.5 text-xs focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                  placeholder={currentRule.placeholder}
+                  className={`w-full rounded-lg border px-3 py-1.5 text-xs font-mono focus:outline-none focus:ring-1 ${
+                    accountNumberError
+                      ? 'border-rose-400 bg-rose-50/20 focus:border-rose-500 focus:ring-rose-500 text-rose-900'
+                      : 'border-slate-300 focus:border-brand-500 focus:ring-brand-500'
+                  }`}
                 />
+                {currentRule.helpText && (
+                  <p className="text-[11px] text-slate-500 mt-1 flex items-center gap-1.5">
+                    <span className="font-semibold text-slate-600">Expected Format:</span> {currentRule.helpText}
+                  </p>
+                )}
+                {accountNumberError && (
+                  <p className="text-[11px] font-medium text-rose-600 mt-1 flex items-center gap-1 animate-in fade-in">
+                    <span>⚠️</span> {accountNumberError}
+                  </p>
+                )}
               </div>
 
               <div>
