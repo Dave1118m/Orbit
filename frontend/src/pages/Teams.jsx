@@ -551,16 +551,7 @@ export default function Teams() {
             <div className="p-8 text-center text-sm text-slate-500">
               <div className="mx-auto w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl mb-2 text-slate-400">👥</div>
               <p className="font-semibold text-slate-700">No teams found in this workspace.</p>
-              <p className="text-xs text-slate-400 mt-0.5 max-w-xs mx-auto">Create a team to organize members and assign project workloads.</p>
-              {canCreateTeam && (
-                <button
-                  type="button"
-                  onClick={() => setIsCreating(true)}
-                  className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition"
-                >
-                  <span>+</span> Create New Team
-                </button>
-              )}
+              <p className="text-xs text-slate-400 mt-0.5 max-w-xs mx-auto">Use the "+ Create Team" button above to add a new team.</p>
             </div>
           ) : (
             <div className="space-y-1">
@@ -593,19 +584,6 @@ export default function Teams() {
             </div>
           )}
         </div>
-
-        {/* Create Team Button */}
-        {canCreateTeam && (
-          <div className="border-t border-slate-200 p-3 shrink-0 bg-white">
-            <button
-              type="button"
-              onClick={() => setIsCreating(true)}
-              className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 py-2.5 px-3 text-xs font-semibold text-brand-600 hover:border-brand-400 hover:bg-brand-50 transition shadow-2xs"
-            >
-              <span>+</span> Create New Team
-            </button>
-          </div>
-        )}
       </div>
 
       {/* ── Right Panel: Detail View ── */}
@@ -615,17 +593,8 @@ export default function Teams() {
         {!selectedTeam ? (
           <div className="flex h-full min-h-[350px] flex-col items-center justify-center text-center p-8">
             <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center text-3xl mb-4 text-slate-400">👥</div>
-            <h2 className="text-lg font-bold text-slate-700">Select or Create a Team</h2>
+            <h2 className="text-lg font-bold text-slate-700">Select a Team</h2>
             <p className="text-sm text-slate-500 max-w-sm mt-1">Choose a team from the list to view roster workload, assign projects, or manage members.</p>
-            {canCreateTeam && (
-              <button
-                type="button"
-                onClick={() => setIsCreating(true)}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition"
-              >
-                <span>+</span> Create New Team
-              </button>
-            )}
           </div>
         ) : (
           <>
