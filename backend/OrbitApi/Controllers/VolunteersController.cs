@@ -56,18 +56,98 @@ namespace OrbitApi.Controllers
             return Ok(orgs);
         }
 
-        private static bool IsValidEmail(string? email)
+        /// <summary>
+        /// <summary>
+        /// Retrieves live community and program metrics for public volunteer applicants (100% genuine database counts).
+        /// </summary>
+        [HttpGet("public-stats")]
+        [AllowAnonymous]
+        public async Task<IActionResult> GetPublicStats([FromQuery] int? orgId)
         {
-            if (string.IsNullOrWhiteSpace(email)) return false;
+            var volunteerCount = await _db.Volunteers.CountAsync(v => !orgId.HasValue || v.OrganizationId == orgId.Value);
+            var programCount = await _db.Projects.CountAsync(p => !p.IsDeleted && (!orgId.HasValue || (p.Workspace != null && p.Workspace.OrganizationId == orgId.Value)));
+            var memberCount = await _db.OrganizationMembers.CountAsync(m => m.Status == OrgMemberStatus.Active && (!orgId.HasValue || m.OrganizationId == orgId.Value));
+            var orgCount = await _db.Organizations.CountAsync(o => !o.IsDeleted && (!orgId.HasValue || o.Id == orgId.Value));
+
+            return Ok(new
+            {
+                volunteers = volunteerCount,
+                programs = programCount,
+                members = memberCount,
+                organizations = orgCount
+            });
+        }
+
+        private static readonly HashSet<string> CommonDomainTypos = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "gmial.com", "gmai.com", "gamil.com", "gmaill.com", "gmaul.com", "gemail.com", "gmail.co",
+            "hotmial.com", "hotmai.com", "hotmali.com", "hotmil.com",
+            "yaho.com", "yahou.com", "yahooo.com",
+            "outlok.com", "outloo.com", "outlock.com",
+            "iclloud.com", "iclod.com"
+        };
+
+        private static readonly HashSet<string> InvalidTlds = new(StringComparer.OrdinalIgnoreCase)
+        {
+            "dom", "cmo", "con", "comm", "coom", "cm", "orgn", "orgg", "nett", "eddu", "gove"
+        };
+
+        private static (bool IsValid, string? ErrorMessage) ValidateEmailAddress(string? email)
+        {
+            if (string.IsNullOrWhiteSpace(email))
+                return (false, "Email address is required.");
+
+            var clean = email.Trim();
+            if (!System.Text.RegularExpressions.Regex.IsMatch(clean, @"^[^@\s]+@[^@\s]+\.[^@\s]+$"))
+                return (false, "Invalid email address format.");
+
+            var parts = clean.Split('@');
+            if (parts.Length != 2)
+                return (false, "Invalid email address structure.");
+
+            var domain = parts[1].ToLowerInvariant();
+            if (CommonDomainTypos.Contains(domain))
+                return (false, $"Domain '{domain}' appears to be a typo. Please check your email provider (e.g. did you mean gmail.com or hotmail.com?).");
+
+            var domainParts = domain.Split('.');
+            var tld = domainParts[^1];
+
+            if (InvalidTlds.Contains(tld))
+                return (false, $"Invalid domain extension '.{tld}'. Please provide a valid domain extension such as .com, .org, or .net.");
+
+            if (tld.Length < 2)
+                return (false, "Domain extension must be at least 2 characters.");
+
             try
             {
-                var addr = new System.Net.Mail.MailAddress(email);
-                return addr.Address == email;
+                var addr = new System.Net.Mail.MailAddress(clean);
+                if (addr.Address != clean) return (false, "Invalid email address.");
             }
             catch
             {
-                return false;
+                return (false, "Invalid email address syntax.");
             }
+
+            return (true, null);
+        }
+
+        private static (bool IsValid, string? ErrorMessage) ValidatePhoneNumber(string? phone)
+        {
+            if (string.IsNullOrWhiteSpace(phone))
+                return (false, "Phone number is required.");
+
+            var clean = phone.Trim();
+            if (System.Text.RegularExpressions.Regex.IsMatch(clean, @"[a-zA-Z]"))
+                return (false, "Phone number cannot contain alphabetical characters.");
+
+            var digitsOnly = System.Text.RegularExpressions.Regex.Replace(clean, @"\D", "");
+            if (digitsOnly.Length < 7 || digitsOnly.Length > 15)
+                return (false, $"Phone number must contain between 7 and 15 digits according to international standards (currently {digitsOnly.Length} digits).");
+
+            if (!System.Text.RegularExpressions.Regex.IsMatch(clean, @"^\+?[0-9\s\-\(\)\.]{7,25}$"))
+                return (false, "Invalid phone number format.");
+
+            return (true, null);
         }
 
         /// <summary>
@@ -79,9 +159,16 @@ namespace OrbitApi.Controllers
         [AllowAnonymous]
         public async Task<ActionResult<VolunteerDto>> PublicApply([FromBody] PublicApplyVolunteerDto req)
         {
-            if (!IsValidEmail(req.Email))
+            var emailCheck = ValidateEmailAddress(req.Email);
+            if (!emailCheck.IsValid)
             {
-                return BadRequest("Invalid email address format.");
+                return BadRequest(emailCheck.ErrorMessage);
+            }
+
+            var phoneCheck = ValidatePhoneNumber(req.PhoneNumber);
+            if (!phoneCheck.IsValid)
+            {
+                return BadRequest(phoneCheck.ErrorMessage);
             }
 
             var org = await _db.Organizations.FirstOrDefaultAsync(o => o.Id == req.OrganizationId && !o.IsDeleted);
@@ -192,9 +279,10 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            if (!string.IsNullOrWhiteSpace(req.Email) && !IsValidEmail(req.Email))
+            if (!string.IsNullOrWhiteSpace(req.Email))
             {
-                return BadRequest("Invalid email address format.");
+                var (isEmailValid, emailErr) = ValidateEmailAddress(req.Email);
+                if (!isEmailValid) return BadRequest(emailErr ?? "Invalid email address format.");
             }
 
             var volunteer = new Volunteer
@@ -246,9 +334,10 @@ namespace OrbitApi.Controllers
                 return Forbid();
             }
 
-            if (!string.IsNullOrWhiteSpace(req.Email) && !IsValidEmail(req.Email))
+            if (!string.IsNullOrWhiteSpace(req.Email))
             {
-                return BadRequest("Invalid email address format.");
+                var (isEmailValid, emailErr) = ValidateEmailAddress(req.Email);
+                if (!isEmailValid) return BadRequest(emailErr ?? "Invalid email address format.");
             }
 
             if (req.Name != null) volunteer.Name = req.Name;

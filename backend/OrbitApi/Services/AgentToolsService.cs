@@ -80,8 +80,16 @@ public class AgentToolsService : IAgentToolsService
             new
             {
                 name = "list_pending_expenses",
-                description = "Retrieves a list of expenses currently pending review and approval.",
-                parameters = new { type = "object", properties = new { } }
+                description = "Retrieves a list of expenses currently pending review and approval. Supports filtering by minimum amount (e.g. over $500 threshold).",
+                parameters = new
+                {
+                    type = "object",
+                    properties = new
+                    {
+                        minAmount = new { type = "number", description = "Optional minimum amount threshold (e.g. 500 for expenses >= 500)" },
+                        maxAmount = new { type = "number", description = "Optional maximum amount filter" }
+                    }
+                }
             },
             new
             {
@@ -156,7 +164,13 @@ public class AgentToolsService : IAgentToolsService
                     return await GetFinancialSummaryAsync(organizationId);
 
                 case "list_pending_expenses":
-                    return await ListPendingExpensesAsync(organizationId);
+                    decimal? minAmount = null;
+                    if (arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("minAmount", out var minEl) && minEl.TryGetDecimal(out var mVal))
+                        minAmount = mVal;
+                    decimal? maxAmount = null;
+                    if (arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("maxAmount", out var maxEl) && maxEl.TryGetDecimal(out var mxVal))
+                        maxAmount = mxVal;
+                    return await ListPendingExpensesAsync(organizationId, minAmount, maxAmount);
 
                 case "approve_or_reject_expense":
                     return await ApproveOrRejectExpenseAsync(organizationId, currentUserId, currentRole, arguments);
@@ -407,7 +421,7 @@ public class AgentToolsService : IAgentToolsService
         };
     }
 
-    private async Task<ToolCallResult> ListPendingExpensesAsync(int orgId)
+    private async Task<ToolCallResult> ListPendingExpensesAsync(int orgId, decimal? minAmount = null, decimal? maxAmount = null)
     {
         var org = await _db.Organizations.Include(o => o.Workspaces).FirstOrDefaultAsync(o => o.Id == orgId);
         if (org == null) return new ToolCallResult { ToolName = "list_pending_expenses", Success = false, Message = "Org not found." };
@@ -415,8 +429,15 @@ public class AgentToolsService : IAgentToolsService
         var wsIds = org.Workspaces.Select(w => w.Id).ToList();
         var projectIds = await _db.Projects.Where(p => wsIds.Contains(p.WorkspaceId) && !p.IsDeleted).Select(p => p.Id).ToListAsync();
 
-        var pending = await _db.Expenses
-            .Where(e => e.ProjectId != null && projectIds.Contains(e.ProjectId.Value) && e.ApprovalStatus == ApprovalStatus.Pending)
+        var query = _db.Expenses
+            .Where(e => e.ProjectId != null && projectIds.Contains(e.ProjectId.Value) && e.ApprovalStatus == ApprovalStatus.Pending);
+
+        if (minAmount.HasValue)
+            query = query.Where(e => e.Amount >= minAmount.Value);
+        if (maxAmount.HasValue)
+            query = query.Where(e => e.Amount <= maxAmount.Value);
+
+        var pending = await query
             .Select(e => new
             {
                 e.Id,
@@ -425,15 +446,22 @@ public class AgentToolsService : IAgentToolsService
                 CategoryName = e.FinancialCategory != null ? e.FinancialCategory.Name : "General",
                 ProjectTitle = e.Project != null ? e.Project.Title : "Unassigned",
                 ExpenseDate = e.Date,
-                SubmittedByName = e.SubmittedByUser != null ? e.SubmittedByUser.Name : "User"
+                SubmittedByName = e.SubmittedByUser != null ? e.SubmittedByUser.Name : "User",
+                Link = $"/finance?tab=expenses",
+                MarkdownRef = $"[Expense #{e.Id}](/finance?tab=expenses)"
             })
             .ToListAsync();
+
+        var currency = org.Currency ?? "USD";
+        var msg = minAmount.HasValue
+            ? $"Found {pending.Count} pending expenses over {currency} {minAmount:N2}."
+            : $"Found {pending.Count} pending expenses requiring approval.";
 
         return new ToolCallResult
         {
             ToolName = "list_pending_expenses",
             Success = true,
-            Message = $"Found {pending.Count} pending expenses requiring approval.",
+            Message = msg,
             Data = pending
         };
     }

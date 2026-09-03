@@ -284,11 +284,21 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
       <aside className={`fixed inset-y-0 left-0 z-50 flex h-full w-[260px] flex-col bg-brand-sidebar text-slate-300 transition-transform duration-300 ease-in-out lg:static lg:translate-x-0 ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
         
         {/* Logo */}
-        <div className="flex h-20 items-center px-6 mb-2">
+        <div className="flex h-20 items-center justify-between px-6 mb-2">
           <Link to="/" className="flex items-center gap-3 group" title="Return to Orbit Landing Page">
             <img src="/logo.png" alt="OrbitDesk Logo" className="w-10 h-10 object-contain group-hover:scale-105 transition drop-shadow-md" />
             <span className="text-xl font-bold text-white tracking-wide group-hover:text-cyan-400 transition">OrbitDesk</span>
           </Link>
+          <button
+            type="button"
+            onClick={closeMenu}
+            className="lg:hidden p-1.5 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition"
+            aria-label="Close menu"
+          >
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
 
         {/* Organization Switcher */}

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using OrbitApi.Models;
 using OrbitApi.Services;
 using System.Security.Claims;
+using System.Text.Json;
 
 namespace OrbitApi.Controllers;
 
@@ -14,11 +15,13 @@ public class AiAgentController : ControllerBase
 {
     private readonly IAiAgentService _aiAgentService;
     private readonly OrbitDbContext _db;
+    private readonly IAgentToolsService _toolsService;
 
-    public AiAgentController(IAiAgentService aiAgentService, OrbitDbContext db)
+    public AiAgentController(IAiAgentService aiAgentService, OrbitDbContext db, IAgentToolsService toolsService)
     {
         _aiAgentService = aiAgentService;
         _db = db;
+        _toolsService = toolsService;
     }
 
     private int GetCurrentUserId()
@@ -53,6 +56,26 @@ public class AiAgentController : ControllerBase
 
         var response = await _aiAgentService.ProcessAgentChatAsync(request, userId, currentRole);
         return Ok(response);
+    }
+
+    public class ExecuteConfirmedActionRequest
+    {
+        public int OrganizationId { get; set; }
+        public string ActionType { get; set; } = string.Empty;
+        public JsonElement Parameters { get; set; }
+    }
+
+    [HttpPost("execute-action")]
+    public async Task<IActionResult> ExecuteConfirmedAction([FromBody] ExecuteConfirmedActionRequest request)
+    {
+        var userId = GetCurrentUserId();
+        var assignment = await _db.RoleAssignments
+            .Include(a => a.Role)
+            .FirstOrDefaultAsync(a => a.UserId == userId && a.ScopeId == request.OrganizationId);
+
+        var currentRole = assignment?.Role?.Name ?? RoleName.Owner;
+        var result = await _toolsService.ExecuteToolAsync(request.ActionType, request.Parameters, request.OrganizationId, userId, currentRole);
+        return Ok(result);
     }
 
     public class DelegateStatusRequest

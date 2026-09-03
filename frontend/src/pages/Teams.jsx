@@ -88,6 +88,11 @@ export default function Teams() {
   const [isMoving, setIsMoving] = useState(false);
   const [moveProjectId, setMoveProjectId] = useState('');
   
+  // ── Teams Filter & Delete State ──
+  const [teamFilter, setTeamFilter] = useState('active'); // 'active' or 'archived'
+  const [teamToDelete, setTeamToDelete] = useState(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+
   // ── Admin Reset Password State ──
   const [resetUserModal, setResetUserModal] = useState(null);
   const [adminNewPassword, setAdminNewPassword] = useState('');
@@ -148,7 +153,7 @@ export default function Teams() {
   const fetchTeams = async (wsId = null) => {
     setLoadingTeams(true);
     try {
-      const query = wsId ? `?workspaceId=${wsId}` : '';
+      const query = wsId ? `?workspaceId=${wsId}&includeArchived=true` : '?includeArchived=true';
       const res = await fetch(`${API_BASE}/teams${query}`, { headers: getHeaders() });
       if (res.ok) {
         const data = await res.json();
@@ -238,17 +243,51 @@ export default function Teams() {
     } catch (err) { console.error(err); }
   };
 
-  const handleArchiveTeam = async () => {
-    if (!window.confirm(`Archive team "${selectedTeam.name}"? Historical project assignment records will be retained for audit.`)) return;
+  const handleDeleteTeam = async () => {
+    if (!teamToDelete) return;
+    setIsDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/teams/${selectedTeam.id}`, {
+      const res = await fetch(`${API_BASE}/teams/${teamToDelete.id}`, {
         method: 'DELETE',
         headers: getHeaders()
       });
       if (res.ok || res.status === 204) {
-        fetchTeams(selectedWorkspaceId);
+        showSuccessToast(`Team "${teamToDelete.name}" deleted successfully (archived).`);
+        const deletedId = teamToDelete.id;
+        setTeamToDelete(null);
+        await fetchTeams(selectedWorkspaceId);
+        if (selectedTeam?.id === deletedId) {
+          setSelectedTeam(null);
+        }
+      } else {
+        const errText = await parseApiResponse(res);
+        showErrorToast(errText, 'Failed to delete team.');
       }
-    } catch (err) { console.error(err); }
+    } catch (err) {
+      console.error(err);
+      showErrorToast(err.message, 'Failed to delete team.');
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
+  const handleRestoreTeam = async (teamId, teamName) => {
+    try {
+      const res = await fetch(`${API_BASE}/teams/${teamId}/restore`, {
+        method: 'POST',
+        headers: getHeaders()
+      });
+      if (res.ok) {
+        showSuccessToast(`Team "${teamName}" restored successfully.`);
+        await fetchTeams(selectedWorkspaceId);
+      } else {
+        const errText = await parseApiResponse(res);
+        showErrorToast(errText, 'Failed to restore team.');
+      }
+    } catch (err) {
+      console.error(err);
+      showErrorToast(err.message, 'Failed to restore team.');
+    }
   };
 
   const handleBulkAddMembers = async () => {
@@ -404,7 +443,19 @@ export default function Teams() {
   };
 
   // ── Derived State ──
-  const filteredTeams = teams.filter(t => t.name.toLowerCase().includes(teamSearch.toLowerCase()));
+  const activeTeamsCount = useMemo(() => teams.filter(t => !t.isArchived).length, [teams]);
+  const archivedTeamsCount = useMemo(() => teams.filter(t => t.isArchived).length, [teams]);
+
+  const filteredTeams = useMemo(() => {
+    return teams.filter(t => {
+      const matchesSearch = t.name.toLowerCase().includes(teamSearch.toLowerCase()) || 
+        (t.description || '').toLowerCase().includes(teamSearch.toLowerCase());
+      if (!matchesSearch) return false;
+      if (teamFilter === 'active') return !t.isArchived;
+      if (teamFilter === 'archived') return t.isArchived;
+      return true;
+    });
+  }, [teams, teamSearch, teamFilter]);
   
   const availableUsers = useMemo(() => {
     const rosterIds = new Set(rosterData.map(r => r.userId));
@@ -416,9 +467,11 @@ export default function Teams() {
   const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500";
 
   return (
-    <div className="flex h-[calc(100vh-6rem)] gap-6 pb-4">
+    <div className="flex flex-col lg:flex-row h-auto lg:h-[calc(100vh-6rem)] gap-4 sm:gap-6 pb-4">
       {/* ── Left Panel: Master Team List ── */}
-      <div className="flex w-1/3 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden flex-shrink-0">
+      <div className={`flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden shrink-0 transition-all ${
+        selectedTeam ? 'hidden lg:flex lg:w-80 xl:w-96' : 'w-full lg:w-80 xl:w-96 min-h-[500px]'
+      }`}>
         
         {/* Workspace Context & Header */}
         <div className="border-b border-slate-200 bg-slate-50 p-4 shrink-0">
@@ -448,6 +501,32 @@ export default function Teams() {
               onChange={e => setTeamSearch(e.target.value)}
               className="w-full pl-9 pr-4 py-2 rounded-xl border border-slate-200 text-sm focus:border-brand-500 focus:outline-none bg-white"
             />
+          </div>
+
+          {/* Active / Archived View Toggle */}
+          <div className="flex gap-1.5 mt-3 p-1 bg-slate-200/60 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setTeamFilter('active')}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition text-center ${
+                teamFilter === 'active'
+                  ? 'bg-white text-slate-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Active ({activeTeamsCount})
+            </button>
+            <button
+              type="button"
+              onClick={() => setTeamFilter('archived')}
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-lg transition text-center ${
+                teamFilter === 'archived'
+                  ? 'bg-white text-rose-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Archived ({archivedTeamsCount})
+            </button>
           </div>
         </div>
 
@@ -520,43 +599,65 @@ export default function Teams() {
       </div>
 
       {/* ── Right Panel: Detail View ── */}
-      <div className="flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className={`flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden ${
+        !selectedTeam ? 'hidden lg:flex' : 'flex w-full'
+      }`}>
         {!selectedTeam ? (
-          <div className="flex h-full flex-col items-center justify-center text-center p-8">
+          <div className="flex h-full min-h-[350px] flex-col items-center justify-center text-center p-8">
             <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center text-3xl mb-4 text-slate-400">👥</div>
             <h2 className="text-lg font-bold text-slate-700">Select a Team</h2>
-            <p className="text-sm text-slate-500 max-w-sm mt-1">Choose a team from the left sidebar to view roster workload, assign projects, or manage members.</p>
+            <p className="text-sm text-slate-500 max-w-sm mt-1">Choose a team from the list to view roster workload, assign projects, or manage members.</p>
           </div>
         ) : (
           <>
             {/* Detail Header */}
-            <div className="border-b border-slate-200 bg-slate-50 px-8 py-6 shrink-0">
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
-                  <div className={`flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl text-white font-bold text-2xl shadow-sm ${avatarColor(selectedTeam.name)}`}>
+            <div className="border-b border-slate-200 bg-slate-50 px-4 sm:px-8 py-4 sm:py-6 shrink-0">
+              {/* Mobile Back Button */}
+              <button
+                type="button"
+                onClick={() => setSelectedTeam(null)}
+                className="lg:hidden mb-3 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 transition"
+              >
+                <span>← Back to Teams List</span>
+              </button>
+
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+                <div className="flex items-center gap-3 sm:gap-4">
+                  <div className={`flex h-12 w-12 sm:h-16 sm:w-16 shrink-0 items-center justify-center rounded-2xl text-white font-bold text-lg sm:text-2xl shadow-sm ${avatarColor(selectedTeam.name)}`}>
                     {initials(selectedTeam.name)}
                   </div>
                   <div>
-                    <div className="flex items-center gap-3">
-                      <h2 className="text-2xl font-bold text-slate-900"><AutoText text={selectedTeam.name} /></h2>
+                    <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+                      <h2 className="text-xl sm:text-2xl font-bold text-slate-900"><AutoText text={selectedTeam.name} /></h2>
                       <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${selectedTeam.isArchived ? 'bg-slate-200 text-slate-600' : 'bg-emerald-100 text-emerald-700'}`}>
                         <AutoText text={selectedTeam.isArchived ? 'Archived' : 'Active'} />
                       </span>
                     </div>
                     {selectedTeam.description && (
-                      <p className="text-sm text-slate-500 mt-1 max-w-xl"><AutoText text={selectedTeam.description} /></p>
+                      <p className="text-xs sm:text-sm text-slate-500 mt-1 max-w-xl line-clamp-2 sm:line-clamp-none"><AutoText text={selectedTeam.description} /></p>
                     )}
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   {canCreateTeam && (
                     <button onClick={() => setIsCopying(true)} className="rounded-full bg-white border border-slate-300 px-3.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm">
                       Copy Team
                     </button>
                   )}
                   {canDeleteTeam && !selectedTeam.isArchived && (
-                    <button onClick={handleArchiveTeam} className="rounded-full bg-rose-50 border border-rose-200 px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition shadow-sm">
-                      Archive Team
+                    <button 
+                      onClick={() => setTeamToDelete(selectedTeam)} 
+                      className="rounded-full bg-rose-50 border border-rose-200 px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100 transition shadow-sm flex items-center gap-1.5"
+                    >
+                      <span>🗑️</span> Delete Team
+                    </button>
+                  )}
+                  {canEditTeam && selectedTeam.isArchived && (
+                    <button 
+                      onClick={() => handleRestoreTeam(selectedTeam.id, selectedTeam.name)} 
+                      className="rounded-full bg-emerald-50 border border-emerald-200 px-3.5 py-1.5 text-xs font-semibold text-emerald-700 hover:bg-emerald-100 transition shadow-sm flex items-center gap-1.5"
+                    >
+                      <span>♻️</span> Restore Team
                     </button>
                   )}
                 </div>
@@ -564,7 +665,7 @@ export default function Teams() {
             </div>
 
             {/* Tabs */}
-            <div className="flex gap-6 border-b border-slate-200 px-8 bg-white shrink-0 overflow-x-auto">
+            <div className="flex gap-4 sm:gap-6 border-b border-slate-200 px-4 sm:px-8 bg-white shrink-0 overflow-x-auto">
               {['overview', 'roster', 'projects', 'history', 'settings'].map(tab => {
                 if (tab === 'settings' && !canEditTeam) return null;
                 return (
@@ -837,6 +938,48 @@ export default function Teams() {
                     <div className="flex justify-end pt-2">
                       <button type="submit" className="rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white transition hover:bg-brand-600">Save Team Settings</button>
                     </div>
+
+                    {/* Danger Zone: Soft Delete */}
+                    {canDeleteTeam && !selectedTeam.isArchived && (
+                      <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-5 mt-6 space-y-3">
+                        <div className="flex items-center gap-2 text-rose-800 font-bold text-sm">
+                          <span>⚠️</span> Danger Zone
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          Deleting this team will soft-delete and archive it. All past project assignments, workload metrics, and member logs will be safely retained for historical auditing.
+                        </p>
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setTeamToDelete(selectedTeam)}
+                            className="rounded-xl bg-rose-600 px-4 py-2 text-xs font-bold text-white hover:bg-rose-700 transition shadow-sm flex items-center gap-1.5"
+                          >
+                            <span>🗑️</span> Delete Team
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Restore Banner if viewed while archived */}
+                    {canEditTeam && selectedTeam.isArchived && (
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-5 mt-6 space-y-3">
+                        <div className="flex items-center gap-2 text-emerald-800 font-bold text-sm">
+                          <span>♻️</span> Restore Archived Team
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed">
+                          This team is currently archived. Restoring it will make it active and selectable for new project assignments.
+                        </p>
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRestoreTeam(selectedTeam.id, selectedTeam.name)}
+                            className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition shadow-sm flex items-center gap-1.5"
+                          >
+                            <span>♻️</span> Restore Team
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </form>
                 </div>
               )}
@@ -1097,6 +1240,60 @@ export default function Teams() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ── Delete Team Confirmation Modal ── */}
+      {teamToDelete && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+          <div className="w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl border border-slate-100">
+            <div className="flex items-center gap-3 text-rose-600 mb-3">
+              <div className="h-10 w-10 rounded-2xl bg-rose-100 flex items-center justify-center text-xl">
+                🗑️
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">Delete Team</h3>
+                <p className="text-xs text-slate-500">Soft delete & archive</p>
+              </div>
+            </div>
+
+            <p className="text-sm text-slate-600 mb-4 leading-relaxed">
+              Are you sure you want to delete <strong className="text-slate-900">{teamToDelete.name}</strong>?
+            </p>
+
+            <div className="rounded-2xl bg-slate-50 border border-slate-200 p-3 mb-5 text-xs text-slate-600 space-y-1">
+              <div className="flex justify-between">
+                <span>Roster Members:</span>
+                <span className="font-semibold text-slate-800">{teamToDelete.members?.length || 0}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Assigned Projects:</span>
+                <span className="font-semibold text-slate-800">{teamToDelete.projects?.length || 0}</span>
+              </div>
+              <p className="text-[11px] text-slate-500 pt-2 border-t border-slate-200 mt-2">
+                ℹ️ The team will be archived. All assignment history and audit records will be retained. You can view or restore it anytime from the Archived view.
+              </p>
+            </div>
+
+            <div className="flex gap-3">
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={() => setTeamToDelete(null)}
+                className="flex-1 rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeleting}
+                onClick={handleDeleteTeam}
+                className="flex-1 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-semibold text-white hover:bg-rose-700 transition shadow-sm disabled:opacity-50"
+              >
+                {isDeleting ? 'Deleting...' : 'Yes, Delete Team'}
+              </button>
+            </div>
           </div>
         </div>
       )}

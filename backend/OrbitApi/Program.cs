@@ -263,6 +263,29 @@ app.MapHub<OrbitHub>("/hubs/orbit");
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<OrbitDbContext>();
+
+    // Purge any synthetic mock accounts (@orbit.org or demo.)
+    try
+    {
+        var mockUsers = db.Users.Where(u => u.Email.Contains("@orbit.org") || u.Email.StartsWith("demo.") || u.Name.Contains("Demo Persona")).ToList();
+        if (mockUsers.Count > 0)
+        {
+            var mockIds = mockUsers.Select(u => u.Id).ToList();
+            var teamMembers = db.TeamMembers.Where(m => mockIds.Contains(m.UserId)).ToList();
+            db.TeamMembers.RemoveRange(teamMembers);
+            var memberRecords = db.OrganizationMembers.Where(m => mockIds.Contains(m.UserId)).ToList();
+            db.OrganizationMembers.RemoveRange(memberRecords);
+            var assignRecords = db.RoleAssignments.Where(a => mockIds.Contains(a.UserId)).ToList();
+            db.RoleAssignments.RemoveRange(assignRecords);
+            db.Users.RemoveRange(mockUsers);
+            db.SaveChanges();
+        }
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($"[Startup] Notice purging mock users: {ex.Message}");
+    }
+
     var validPermNames = Enum.GetNames<Permission>().ToHashSet();
 
     // Remove any legacy dot-style permissions that don't match the Permission enum

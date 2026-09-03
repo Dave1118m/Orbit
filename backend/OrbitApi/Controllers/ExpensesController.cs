@@ -87,9 +87,9 @@ namespace OrbitApi.Controllers
                 .Include(e => e.Attachment)
                 .Include(e => e.BankAccount)
                 .Include(e => e.FinancialCategory)
-                .Where(e => (e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == orgId.Value) || 
-                            (e.Task != null && e.Task.Project != null && e.Task.Project.Workspace != null && e.Task.Project.Workspace.OrganizationId == orgId.Value) ||
-                            (e.BankAccount != null && e.BankAccount.OrganizationId == orgId.Value))
+                .Where(e => (e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == targetOrgId.Value) || 
+                            (e.Task != null && e.Task.Project != null && e.Task.Project.Workspace != null && e.Task.Project.Workspace.OrganizationId == targetOrgId.Value) ||
+                            (e.BankAccount != null && e.BankAccount.OrganizationId == targetOrgId.Value))
                 .OrderByDescending(e => e.CreatedAt)
                 .ToListAsync();
 

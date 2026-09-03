@@ -142,15 +142,14 @@ public class PermissionsController : ControllerBase
         }
 
         var cleanTitle = req.Title.Trim();
+        var activeOrgId = req.OrganizationId ?? GetActiveOrganizationId();
         var exists = await _db.Roles.AnyAsync(r => 
-            (r.CustomTitle != null && r.CustomTitle.ToLower() == cleanTitle.ToLower()) ||
-            r.Name.ToString().ToLower() == cleanTitle.ToLower());
+            (r.OrganizationId == activeOrgId && r.CustomTitle != null && r.CustomTitle.ToLower() == cleanTitle.ToLower()) ||
+            (r.IsSystemRole && r.Name.ToString().ToLower() == cleanTitle.ToLower()));
         if (exists)
         {
-            return BadRequest($"A role named '{cleanTitle}' already exists.");
+            return BadRequest($"A role named '{cleanTitle}' already exists in this organization.");
         }
-
-        var activeOrgId = req.OrganizationId ?? GetActiveOrganizationId();
         var newRole = new Role
         {
             Name = RoleName.Member,

@@ -84,9 +84,10 @@ namespace OrbitApi.Controllers
         /// Lists all teams within the active organization or filtered by workspace.
         /// </summary>
         /// <param name="workspaceId">Optional workspace ID filter.</param>
+        /// <param name="includeArchived">Whether to include soft-deleted/archived teams.</param>
         /// <returns>Collection of team DTOs.</returns>
         [HttpGet]
-        public async Task<ActionResult<IEnumerable<TeamDto>>> List([FromQuery] int? workspaceId)
+        public async Task<ActionResult<IEnumerable<TeamDto>>> List([FromQuery] int? workspaceId, [FromQuery] bool includeArchived = false)
         {
             var activeOrgId = GetActiveOrganizationId();
 
@@ -95,6 +96,11 @@ namespace OrbitApi.Controllers
                 .Include(t => t.TeamMembers)
                 .Include(t => t.ProjectTeams).ThenInclude(p => p.Project)
                 .Where(t => t.Workspace != null && t.Workspace.OrganizationId == activeOrgId);
+
+            if (!includeArchived)
+            {
+                query = query.Where(t => !t.IsArchived);
+            }
 
             if (workspaceId.HasValue)
             {
@@ -352,9 +358,64 @@ namespace OrbitApi.Controllers
 
             // soft-delete by archiving to avoid cascade problems
             team.IsArchived = true;
+
+            var activeOrgId = GetActiveOrganizationId();
+            _db.AuditLogs.Add(new AuditLog
+            {
+                OrganizationId = activeOrgId,
+                Entity = "Team",
+                Action = "SoftDelete",
+                NewValues = $"{{ TeamId: {team.Id}, Name: '{team.Name}', IsArchived: true }}",
+                Timestamp = DateTime.UtcNow
+            });
+
             await _db.SaveChangesAsync();
 
             return NoContent();
+        }
+
+        /// <summary>
+        /// Restores/unarchives a previously soft-deleted team.
+        /// </summary>
+        /// <param name="id">Team ID.</param>
+        /// <returns>Restored Team DTO.</returns>
+        [HttpPost("{id}/restore")]
+        public async Task<ActionResult<TeamDto>> Restore(int id)
+        {
+            var team = await _db.Teams
+                .Include(t => t.TeamMembers)
+                .Include(t => t.ProjectTeams).ThenInclude(p => p.Project)
+                .FirstOrDefaultAsync(t => t.Id == id);
+            if (team == null) return NotFound();
+
+            if (!(await IsAuthorizedForWorkspaceAsync(team.WorkspaceId, Permission.TeamEdit)))
+            {
+                return Forbid();
+            }
+
+            team.IsArchived = false;
+
+            var activeOrgId = GetActiveOrganizationId();
+            _db.AuditLogs.Add(new AuditLog
+            {
+                OrganizationId = activeOrgId,
+                Entity = "Team",
+                Action = "Restore",
+                NewValues = $"{{ TeamId: {team.Id}, Name: '{team.Name}', IsArchived: false }}",
+                Timestamp = DateTime.UtcNow
+            });
+
+            await _db.SaveChangesAsync();
+
+            return Ok(new TeamDto
+            {
+                Id = team.Id,
+                WorkspaceId = team.WorkspaceId,
+                Name = team.Name,
+                Description = team.Description,
+                TeamLeadUserId = team.TeamLeadUserId,
+                IsArchived = team.IsArchived
+            });
         }
 
         /// <summary>

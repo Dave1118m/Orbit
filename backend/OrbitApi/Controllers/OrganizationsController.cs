@@ -274,13 +274,14 @@ namespace OrbitApi.Controllers
             }
 
             detail.Members = org.Members
-                .Where(m => m.User != null && !m.User.Name.Contains("Demo") && !m.User.Email.StartsWith("demo."))
+                .Where(m => m.User != null && !m.User.Name.Contains("Demo") && !m.User.Email.StartsWith("demo.") && !m.User.Email.Contains("@orbit.org"))
                 .Select(m => new OrganizationMemberDto
                 {
                     UserId = m.UserId,
                     UserName = m.User?.Name ?? "Unknown",
                     Email = m.User?.Email ?? "Unknown",
-                    RoleName = m.Role?.Name.ToString() ?? "Unknown",
+                    RoleName = m.Role != null ? (!string.IsNullOrWhiteSpace(m.Role.CustomTitle) ? m.Role.CustomTitle : m.Role.Name.ToString()) : "Unknown",
+                    RoleId = m.RoleId,
                     Status = m.Status,
                     JoinedAt = m.JoinedAt
                 }).ToList();
@@ -535,11 +536,35 @@ namespace OrbitApi.Controllers
             var org = await _db.Organizations.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
             if (org == null) return NotFound();
 
-            if (!Enum.TryParse<RoleName>(req.PreAssignedRoleName, true, out var roleEnum))
-                return BadRequest("Invalid role");
+            Role? role = null;
+            if (req.PreAssignedRoleId.HasValue && req.PreAssignedRoleId.Value > 0)
+            {
+                role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == req.PreAssignedRoleId.Value && (r.OrganizationId == id || r.IsSystemRole));
+            }
 
-            var role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleEnum);
-            if (role == null) return BadRequest("Role not found");
+            if (role == null && !string.IsNullOrWhiteSpace(req.PreAssignedRoleName))
+            {
+                var cleanName = req.PreAssignedRoleName.Trim();
+                // Check custom roles for this organization
+                role = await _db.Roles.FirstOrDefaultAsync(r => r.OrganizationId == id && r.CustomTitle != null && r.CustomTitle.ToLower() == cleanName.ToLower());
+
+                // Check system roles
+                if (role == null && Enum.TryParse<RoleName>(cleanName, true, out var roleEnum))
+                {
+                    role = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleEnum && r.IsSystemRole);
+                }
+
+                // Check any custom role with matching title
+                if (role == null)
+                {
+                    role = await _db.Roles.FirstOrDefaultAsync(r => (r.OrganizationId == id || r.IsSystemRole) && r.CustomTitle != null && r.CustomTitle.ToLower() == cleanName.ToLower());
+                }
+            }
+
+            if (role == null)
+            {
+                return BadRequest("Invalid role or specified role not found for this organization.");
+            }
 
             // Check if user already exists
             var existingUser = await _userManager.FindByEmailAsync(req.Email);
@@ -610,9 +635,10 @@ namespace OrbitApi.Controllers
 
             try
             {
+                var displayRole = role.DisplayName;
                 var emailBody = existingUser == null 
-                    ? $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to set up your account and accept the invitation</a></p>"
-                    : $"<p>You have been invited to join <strong>{org.Name}</strong> as a {req.PreAssignedRoleName}.</p><p><a href='{inviteLink}'>Click here to accept the invitation</a></p>";
+                    ? $"<p>You have been invited to join <strong>{org.Name}</strong> as a {displayRole}.</p><p><a href='{inviteLink}'>Click here to set up your account and accept the invitation</a></p>"
+                    : $"<p>You have been invited to join <strong>{org.Name}</strong> as a {displayRole}.</p><p><a href='{inviteLink}'>Click here to accept the invitation</a></p>";
 
                 await _emailSender.SendEmailAsync(req.Email, $"You've been invited to {org.Name} on OrbitDesk", emailBody);
             }
@@ -702,6 +728,69 @@ namespace OrbitApi.Controllers
             member.Status = OrgMemberStatus.Removed;
             await _db.SaveChangesAsync();
             return NoContent();
+        }
+
+        /// <summary>
+        /// Updates an existing organization member's role (system role or specific custom role).
+        /// </summary>
+        /// <param name="id">Organization ID.</param>
+        /// <param name="userId">Member user ID.</param>
+        /// <param name="req">New role ID.</param>
+        /// <returns>Ok on success.</returns>
+        [HttpPut("{id}/members/{userId}/role")]
+        public async Task<ActionResult> UpdateMemberRole(int id, int userId, [FromBody] UpdateMemberRoleRequest req)
+        {
+            var orgResource = new ScopedResource(ScopeType.Organization, id);
+            if (!(await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.OrganizationManage))).Succeeded)
+            {
+                return Forbid();
+            }
+
+            var org = await _db.Organizations.FirstOrDefaultAsync(o => o.Id == id && !o.IsDeleted);
+            if (org == null) return NotFound("Organization not found.");
+
+            if (org.OwnerId == userId)
+            {
+                return BadRequest("Cannot change the Owner's role. Transfer organization ownership instead.");
+            }
+
+            var member = await _db.OrganizationMembers.FirstOrDefaultAsync(m => m.OrganizationId == id && m.UserId == userId);
+            if (member == null) return NotFound("Member not found in organization.");
+
+            var role = await _db.Roles.FirstOrDefaultAsync(r => r.Id == req.RoleId && (r.OrganizationId == id || r.IsSystemRole));
+            if (role == null) return BadRequest("Role not found for this organization.");
+
+            member.RoleId = role.Id;
+
+            // Sync RoleAssignment
+            var assignment = await _db.RoleAssignments.FirstOrDefaultAsync(ra => ra.UserId == userId && ra.ScopeType == ScopeType.Organization && ra.ScopeId == id);
+            if (assignment != null)
+            {
+                assignment.RoleId = role.Id;
+            }
+            else
+            {
+                _db.RoleAssignments.Add(new RoleAssignment
+                {
+                    UserId = userId,
+                    RoleId = role.Id,
+                    ScopeType = ScopeType.Organization,
+                    ScopeId = id
+                });
+            }
+
+            _db.AuditLogs.Add(new AuditLog
+            {
+                OrganizationId = id,
+                Entity = "OrganizationMember",
+                Action = "UpdateRole",
+                NewValues = $"{{ UserId: {userId}, NewRoleId: {role.Id}, Role: '{role.DisplayName}' }}",
+                Timestamp = DateTime.UtcNow,
+                PerformedByUserId = GetCurrentUserId()
+            });
+
+            await _db.SaveChangesAsync();
+            return Ok(new { message = $"Member role updated to {role.DisplayName}.", roleId = role.Id, roleName = role.DisplayName });
         }
 
         /// <summary>

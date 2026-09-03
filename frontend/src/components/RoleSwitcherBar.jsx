@@ -16,6 +16,8 @@ const ROLES = [
   { id: 'Viewer', label: 'Viewer', icon: '🔍', color: 'bg-slate-500/10 text-slate-700 border-slate-300 hover:bg-slate-500/20', badge: 'bg-slate-500' }
 ];
 
+
+
 /**
  * Topbar Role Switcher dropdown allowing instant role-swapping to test and preview role-specific dashboards, permissions, and features.
  */
@@ -105,11 +107,10 @@ export default function RoleSwitcherBar() {
                 <button
                   key={role.id}
                   onClick={() => handleSelectRole(role.id)}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-semibold rounded-lg transition ${
-                    isSelected
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-xs font-semibold rounded-lg transition ${isSelected
                       ? 'bg-slate-900 text-white'
                       : 'text-slate-700 hover:bg-slate-100'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-2">
                     <span>{role.icon}</span>

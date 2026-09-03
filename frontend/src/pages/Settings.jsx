@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useMemo } from 'react';
 import Modal from '../components/Modal';
 import SearchSelect from '../components/SearchSelect';
 import { parseApiResponse, showErrorToast } from '../utils/toastHelper';
@@ -35,7 +35,8 @@ export default function Settings() {
 
   const [inviteData, setInviteData] = useState({
     email: '',
-    preAssignedRoleName: 'Member'
+    preAssignedRoleName: 'Member',
+    preAssignedRoleId: null
   });
 
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
@@ -354,28 +355,40 @@ export default function Settings() {
     setCreatingCustomRole(true);
     try {
       const token = localStorage.getItem('token');
+      const targetOrg = selectedOrgId || selectedOrg?.id;
       const res = await fetch(`${import.meta.env.VITE_API_URL}/permissions/roles`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${token}`,
+          ...(targetOrg ? { 'X-Organization-Id': targetOrg.toString() } : {})
+        },
         body: JSON.stringify({
           title: customRoleTitle.trim(),
           description: customRoleDescription.trim() || null,
           defaultScope: customRoleScope === 'Organization' ? 0 : (customRoleScope === 'Workspace' ? 1 : 2),
-          organizationId: selectedOrgId
+          organizationId: targetOrg
         })
       });
       if (res.ok) {
-        showStatus('success', `Custom role "${customRoleTitle.trim()}" created successfully!`);
+        const createdRole = await res.json();
+        const newTitle = customRoleTitle.trim();
+        showStatus('success', `Role "${newTitle}" created successfully!`);
         setCustomRoleTitle('');
         setCustomRoleDescription('');
         setIsCreateRoleModalOpen(false);
-        fetchAbacData();
+        await fetchAbacData(targetOrg);
+        setInviteData(prev => ({
+          ...prev,
+          preAssignedRoleName: newTitle,
+          preAssignedRoleId: createdRole?.id || null
+        }));
       } else {
         const errText = await parseApiResponse(res);
-        showStatus('error', errText || 'Failed to create custom role.');
+        showStatus('error', errText || 'Failed to create role.');
       }
     } catch (err) {
-      showStatus('error', 'Network error creating custom role.');
+      showStatus('error', 'Network error creating role.');
     } finally {
       setCreatingCustomRole(false);
     }
@@ -614,20 +627,49 @@ export default function Settings() {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify(inviteData)
+        body: JSON.stringify({
+          email: inviteData.email,
+          preAssignedRoleName: inviteData.preAssignedRoleName,
+          preAssignedRoleId: inviteData.preAssignedRoleId || null
+        })
       });
       if (response.ok) {
-        setInviteData({ email: '', preAssignedRoleName: 'Member' });
+        setInviteData({ email: '', preAssignedRoleName: 'Member', preAssignedRoleId: null });
         showStatus('success', 'Invitation sent successfully!');
         fetchOrgMembers(selectedOrgId);
       } else {
-        showStatus('error', 'Failed to send invitation. Ensure you have Admin or Owner permissions.');
+        const errText = await parseApiResponse(response);
+        showStatus('error', errText || 'Failed to send invitation. Ensure you have Admin or Owner permissions.');
       }
     } catch (err) {
       console.error(err);
       showStatus('error', 'Error sending invitation.');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleUpdateMemberRole = async (memberUserId, newRoleId, memberName) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${API_URL}/${selectedOrgId}/members/${memberUserId}/role`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ roleId: Number(newRoleId) })
+      });
+      if (res.ok) {
+        showStatus('success', `Role for "${memberName}" updated successfully!`);
+        fetchOrgMembers(selectedOrgId);
+      } else {
+        const errText = await parseApiResponse(res);
+        showStatus('error', errText || 'Failed to update member role.');
+      }
+    } catch (err) {
+      console.error(err);
+      showStatus('error', 'Error updating member role.');
     }
   };
 
@@ -747,9 +789,34 @@ export default function Settings() {
     { name: 'Viewer', desc: 'Read-only access to organization information and reports.' }
   ];
 
+  const isOwner = selectedOrg?.ownerId === user?.id || user?.roles?.some(r => r.name === 'Owner');
+
+  const availableInviteRoles = useMemo(() => {
+    if (abacRoles && abacRoles.length > 0) {
+      return abacRoles
+        .filter((r) => r.name !== 'Owner' && r.displayName !== 'Owner')
+        .map((r) => ({
+          id: r.id,
+          name: r.displayName || r.customTitle || r.name,
+          rawName: r.name,
+          desc: r.description || (r.isSystemRole ? `${r.name} System Role` : 'Custom Organization Role'),
+          isCustom: !r.isSystemRole,
+          permissionCount: r.permissions?.length || 0
+        }));
+    }
+    return roles.map((r) => ({
+      id: null,
+      name: r.name,
+      rawName: r.name,
+      desc: r.desc,
+      isCustom: false,
+      permissionCount: 0
+    }));
+  }, [abacRoles, roles]);
+
   const eligibleTransferMembers = orgMembers.filter((m) => {
     if (m.userId === selectedOrg?.ownerId) return false;
-    if (m.email?.toLowerCase().startsWith('demo.') || m.userName?.toLowerCase().includes('demo')) return false;
+    if (m.email?.toLowerCase().includes('@orbit.org') || m.email?.toLowerCase().startsWith('demo.') || m.userName?.toLowerCase().includes('demo')) return false;
     if (!isDefinedSystemRole(m.roleName)) return false;
     if (transferRoleFilter !== 'all') {
       return getCleanRoleDisplay(m.roleName) === transferRoleFilter;
@@ -758,6 +825,7 @@ export default function Settings() {
   });
 
   const eligibleSecurityMembers = orgMembers.filter((m) => {
+    if (m.email?.toLowerCase().includes('@orbit.org') || m.email?.toLowerCase().startsWith('demo.') || m.userName?.toLowerCase().includes('demo')) return false;
     if (!isDefinedSystemRole(m.roleName)) return false;
     if (securityRoleFilter !== 'all') {
       return getCleanRoleDisplay(m.roleName) === securityRoleFilter;
@@ -983,10 +1051,10 @@ export default function Settings() {
           </div>
 
           {/* Independent Tab Navigation Bar */}
-          <div className="mt-6 flex border-b border-slate-200/80 pb-3 gap-2 overflow-x-auto">
+          <div className="mt-6 flex border-b border-slate-200/80 pb-3 gap-2 overflow-x-auto no-scrollbar">
             <button
               onClick={() => setActiveTab('edit')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'edit'
                   ? 'bg-gradient-to-r from-[#5A45FF] to-indigo-600 text-white shadow-md shadow-[#5A45FF]/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1000,7 +1068,7 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('invite')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'invite'
                   ? 'bg-gradient-to-r from-[#5A45FF] to-indigo-600 text-white shadow-md shadow-[#5A45FF]/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1014,7 +1082,7 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('transfer')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'transfer'
                   ? 'bg-gradient-to-r from-[#5A45FF] to-indigo-600 text-white shadow-md shadow-[#5A45FF]/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1028,7 +1096,7 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('security')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'security'
                   ? 'bg-gradient-to-r from-rose-500 to-red-600 text-white shadow-md shadow-rose-500/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1042,7 +1110,7 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('permissions')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'permissions'
                   ? 'bg-gradient-to-r from-teal-500 to-emerald-600 text-white shadow-md shadow-teal-500/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1056,7 +1124,7 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('workspaces')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'workspaces'
                   ? 'bg-gradient-to-r from-violet-500 to-purple-600 text-white shadow-md shadow-violet-500/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1070,7 +1138,7 @@ export default function Settings() {
 
             <button
               onClick={() => setActiveTab('partners')}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'partners'
                   ? 'bg-gradient-to-r from-indigo-500 to-blue-600 text-white shadow-md shadow-indigo-500/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1087,7 +1155,7 @@ export default function Settings() {
                 setActiveTab('inquiries');
                 fetchContactInquiries();
               }}
-              className={`flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
+              className={`shrink-0 flex items-center gap-2 px-4 py-2.5 text-sm font-semibold rounded-2xl transition-all duration-200 ${
                 activeTab === 'inquiries'
                   ? 'bg-gradient-to-r from-amber-500 to-orange-600 text-white shadow-md shadow-amber-500/20'
                   : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
@@ -1232,25 +1300,55 @@ export default function Settings() {
                 </div>
 
                 <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-700">Select Role</label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    {roles.map((role) => {
-                      const isSelected = inviteData.preAssignedRoleName === role.name;
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                      Select Role *
+                    </label>
+                    {isOwner && (
+                      <button
+                        type="button"
+                        onClick={() => setIsCreateRoleModalOpen(true)}
+                        className="text-xs font-bold text-[#5A45FF] hover:text-indigo-700 flex items-center gap-1.5 transition"
+                      >
+                        <span>➕</span> Create Role
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-80 overflow-y-auto pr-1">
+                    {availableInviteRoles.map((role) => {
+                      const isSelected = (inviteData.preAssignedRoleId && inviteData.preAssignedRoleId === role.id) ||
+                        (!inviteData.preAssignedRoleId && (inviteData.preAssignedRoleName === role.name || inviteData.preAssignedRoleName === role.rawName));
                       return (
                         <div
-                          key={role.name}
-                          onClick={() => setInviteData({ ...inviteData, preAssignedRoleName: role.name })}
+                          key={role.id || role.name}
+                          onClick={() => setInviteData({ 
+                            ...inviteData, 
+                            preAssignedRoleName: role.rawName || role.name,
+                            preAssignedRoleId: role.id || null
+                          })}
                           className={`p-3.5 rounded-2xl border cursor-pointer transition-all ${
                             isSelected
                               ? 'border-[#5A45FF] bg-[#5A45FF]/10 ring-2 ring-[#5A45FF]/30 shadow-sm'
                               : 'border-slate-200 bg-white hover:border-slate-300'
                           }`}
                         >
-                          <div className="flex items-center justify-between">
-                            <span className={`font-bold text-sm ${isSelected ? 'text-[#5A45FF]' : 'text-slate-900'}`}>{role.name}</span>
-                            {isSelected && <span className="text-[#5A45FF]">✓</span>}
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className={`font-bold text-sm ${isSelected ? 'text-[#5A45FF]' : 'text-slate-900'}`}>{role.name}</span>
+                              {role.isCustom && (
+                                <span className="rounded-full bg-purple-100 border border-purple-200 px-2 py-0.2 text-[10px] font-bold text-purple-700">
+                                  Custom
+                                </span>
+                              )}
+                            </div>
+                            {isSelected && <span className="text-[#5A45FF] font-bold">✓</span>}
                           </div>
-                          <p className="text-xs text-slate-500 mt-1 leading-normal">{role.desc}</p>
+                          <p className="text-xs text-slate-500 mt-1 leading-normal line-clamp-2">{role.desc}</p>
+                          {role.isCustom && role.permissionCount > 0 && (
+                            <span className="inline-block text-[10px] text-purple-600 font-medium mt-1">
+                              {role.permissionCount} scoped permissions
+                            </span>
+                          )}
                         </div>
                       );
                     })}
@@ -1270,24 +1368,64 @@ export default function Settings() {
 
               {/* Members Preview */}
               <div className="mt-8 border-t border-slate-200/60 pt-6">
-                <h4 className="font-bold text-slate-900 text-sm mb-3">Current Organization Members ({orgMembers.length})</h4>
-                <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
-                  {orgMembers.map((m) => (
-                    <div key={m.userId} className="flex items-center justify-between p-3 rounded-2xl bg-slate-50 border border-slate-200/60">
-                      <div className="flex items-center gap-3">
-                        <div className="h-8 w-8 rounded-full bg-[#5A45FF]/10 text-[#5A45FF] font-bold text-xs flex items-center justify-center">
-                          {m.userName?.charAt(0) || 'M'}
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-bold text-slate-900 text-sm">
+                    Current Organization Members ({orgMembers.length})
+                  </h4>
+                  {isOwner && (
+                    <span className="text-xs text-slate-500">
+                      💡 As Owner, you can update member roles directly using the dropdown
+                    </span>
+                  )}
+                </div>
+
+                <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                  {orgMembers.map((m) => {
+                    const isOrgOwner = m.userId === selectedOrg?.ownerId;
+                    return (
+                      <div key={m.userId} className="flex items-center justify-between p-3.5 rounded-2xl bg-slate-50 border border-slate-200/60">
+                        <div className="flex items-center gap-3">
+                          <div className="h-9 w-9 rounded-full bg-[#5A45FF]/10 text-[#5A45FF] font-bold text-xs flex items-center justify-center">
+                            {m.userName?.charAt(0) || 'M'}
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs font-bold text-slate-900">{m.userName}</p>
+                              {isOrgOwner && (
+                                <span className="rounded-full bg-amber-50 border border-amber-200 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                                  👑 Owner
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-[11px] text-slate-500">{m.email}</p>
+                          </div>
                         </div>
-                        <div>
-                          <p className="text-xs font-bold text-slate-900">{m.userName}</p>
-                          <p className="text-[11px] text-slate-500">{m.email}</p>
+
+                        <div className="flex items-center gap-2">
+                          {isOwner && !isOrgOwner ? (
+                            <div className="flex items-center gap-1.5">
+                              <label className="text-[11px] text-slate-400 font-medium">Role:</label>
+                              <select
+                                value={m.roleId || availableInviteRoles.find(r => r.name === m.roleName || r.rawName === m.roleName)?.id || ''}
+                                onChange={(e) => handleUpdateMemberRole(m.userId, e.target.value, m.userName)}
+                                className="rounded-xl border border-slate-300 bg-white px-2.5 py-1 text-xs font-semibold text-[#5A45FF] focus:border-[#5A45FF] focus:outline-none focus:ring-1 focus:ring-[#5A45FF]"
+                              >
+                                {availableInviteRoles.map((r) => (
+                                  <option key={r.id || r.name} value={r.id}>
+                                    {r.name} {r.isCustom ? '(Custom)' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          ) : (
+                            <span className="rounded-full bg-indigo-50 border border-indigo-100 px-2.5 py-0.5 text-xs font-semibold text-[#5A45FF]">
+                              {m.roleName || 'Member'}
+                            </span>
+                          )}
                         </div>
                       </div>
-                      <span className="rounded-full bg-indigo-50 px-2.5 py-0.5 text-xs font-semibold text-[#5A45FF]">
-                        {m.roleName || 'Member'}
-                      </span>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -1524,7 +1662,7 @@ export default function Settings() {
                     onClick={() => setIsCreateRoleModalOpen(true)}
                     className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 active:scale-95 text-white text-xs font-bold rounded-xl shadow-sm transition"
                   >
-                    <span>➕ Create Custom Role</span>
+                    <span>➕ Create Role</span>
                   </button>
                 </div>
 
@@ -1626,61 +1764,6 @@ export default function Settings() {
                     </table>
                   </div>
                 </div>
-
-                {/* Custom Role Creation Modal */}
-                <Modal isOpen={isCreateRoleModalOpen} onClose={() => setIsCreateRoleModalOpen(false)} title="Create Dynamic Custom Role">
-                  <form onSubmit={handleCreateCustomRole} className="flex flex-col gap-4">
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-slate-700">Role Title *</label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="e.g., Procurement Specialist, Field Officer"
-                        value={customRoleTitle}
-                        onChange={(e) => setCustomRoleTitle(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                      />
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-slate-700">Default Scope</label>
-                      <select
-                        value={customRoleScope}
-                        onChange={(e) => setCustomRoleScope(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs bg-white focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20"
-                      >
-                        <option value="Organization">Organization Scope (Full Organization Level)</option>
-                        <option value="Workspace">Workspace Scope (Assigned Workspaces Only)</option>
-                        <option value="Project">Project Scope (Assigned Projects Only)</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="mb-1 block text-xs font-semibold text-slate-700">Description</label>
-                      <textarea
-                        rows={3}
-                        placeholder="Describe duties and operational boundaries for this custom role..."
-                        value={customRoleDescription}
-                        onChange={(e) => setCustomRoleDescription(e.target.value)}
-                        className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20 resize-none"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2 pt-2">
-                      <button
-                        type="button"
-                        onClick={() => setIsCreateRoleModalOpen(false)}
-                        className="rounded-xl px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 transition"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="submit"
-                        disabled={creatingCustomRole}
-                        className="rounded-xl bg-teal-600 px-5 py-2 text-xs font-semibold text-white hover:bg-teal-700 transition shadow-sm disabled:opacity-50"
-                      >
-                        {creatingCustomRole ? 'Creating Role...' : 'Create Role'}
-                      </button>
-                    </div>
-                  </form>
-                </Modal>
 
                 {/* PERMISSION AUDIT LOG SECTION */}
                 <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-sm mt-4">
@@ -2138,6 +2221,62 @@ export default function Settings() {
           </div>
         )}
       </div>
+
+      {/* ── Globally Accessible Create Role Modal ── */}
+      <Modal isOpen={isCreateRoleModalOpen} onClose={() => setIsCreateRoleModalOpen(false)} title="Create Role">
+        <form onSubmit={handleCreateCustomRole} className="flex flex-col gap-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Role Title *</label>
+            <input
+              type="text"
+              required
+              autoFocus
+              placeholder="e.g., Procurement Specialist, Field Officer, Program Lead"
+              value={customRoleTitle}
+              onChange={(e) => setCustomRoleTitle(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Default Scope</label>
+            <select
+              value={customRoleScope}
+              onChange={(e) => setCustomRoleScope(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs bg-white focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20"
+            >
+              <option value="Organization">Organization Scope (Full Organization Level)</option>
+              <option value="Workspace">Workspace Scope (Assigned Workspaces Only)</option>
+              <option value="Project">Project Scope (Assigned Projects Only)</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-slate-700">Description</label>
+            <textarea
+              rows={3}
+              placeholder="Describe operational responsibilities and boundaries for this role..."
+              value={customRoleDescription}
+              onChange={(e) => setCustomRoleDescription(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-xs focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 resize-none"
+            />
+          </div>
+          <div className="flex justify-end gap-2 pt-2">
+            <button
+              type="button"
+              onClick={() => setIsCreateRoleModalOpen(false)}
+              className="rounded-xl px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={creatingCustomRole || !customRoleTitle.trim()}
+              className="rounded-xl bg-[#5A45FF] px-5 py-2 text-xs font-semibold text-white hover:bg-indigo-600 transition shadow-sm disabled:opacity-50"
+            >
+              {creatingCustomRole ? 'Creating Role...' : 'Create Role'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

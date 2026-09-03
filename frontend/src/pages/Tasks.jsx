@@ -343,7 +343,7 @@ export default function Tasks() {
   const inputClass = "w-full rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500";
 
   return (
-    <div className="flex flex-col gap-5" style={{ height: 'calc(100vh - 6rem)' }}>
+    <div className="flex flex-col gap-4 sm:gap-5 min-h-[calc(100vh-6rem)] pb-6">
       {/* ── Header ── */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between flex-shrink-0">
         <div>
@@ -425,12 +425,12 @@ export default function Tasks() {
           ))}
         </div>
         {/* Search */}
-        <div className="relative">
+        <div className="relative flex-1 sm:flex-initial">
           <svg className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
           </svg>
           <input type="text" placeholder="Search tasks..." value={searchQuery} onChange={e => setSearchQuery(e.target.value)}
-            className="pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-48" />
+            className="pl-9 pr-4 py-2 rounded-xl border border-slate-200 bg-white text-sm focus:border-brand-500 focus:outline-none focus:ring-1 focus:ring-brand-500 w-full sm:w-48" />
         </div>
       </div>
 
@@ -458,7 +458,7 @@ export default function Tasks() {
         )}
 
         {selectedProjectId && viewMode === 'list' && (
-          <div className="flex-1 min-h-0 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex-1 min-h-0 overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
             {filteredTasks.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-20 text-center">
                 <div className="h-14 w-14 rounded-full bg-slate-100 flex items-center justify-center text-2xl mb-3">✅</div>

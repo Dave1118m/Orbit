@@ -18,11 +18,20 @@ public class AiChatRequestDto
     public List<AiChatMessageDto>? History { get; set; } = new();
 }
 
+public class ProposedActionDto
+{
+    public string ActionType { get; set; } = "create_task";
+    public string Title { get; set; } = string.Empty;
+    public string Summary { get; set; } = string.Empty;
+    public Dictionary<string, object?> Parameters { get; set; } = new();
+}
+
 public class AiChatResponseDto
 {
     public string ResponseText { get; set; } = string.Empty;
     public string RolePersona { get; set; } = string.Empty;
     public List<ToolCallResult> ExecutedActions { get; set; } = new();
+    public ProposedActionDto? ProposedAction { get; set; }
     public string ModelUsed { get; set; } = string.Empty;
     public DateTime Timestamp { get; set; } = DateTime.UtcNow;
 }

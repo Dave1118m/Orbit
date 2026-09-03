@@ -327,8 +327,8 @@ export default function TaskDetailsDrawer({ task, onClose, onEdit, onTaskUpdated
       <div className="fixed inset-y-0 right-0 z-50 w-full max-w-4xl bg-slate-50 shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
         
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shrink-0">
-          <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3.5 sm:py-4 bg-white border-b border-slate-200 shrink-0 gap-3">
+          <div className="flex items-center gap-2.5 sm:gap-3 min-w-0">
             <span className={`px-2.5 py-1 text-xs font-bold rounded-full ${
               task.status === 'Done' ? 'bg-emerald-100 text-emerald-700' :
               task.status === 'InProgress' ? 'bg-blue-100 text-blue-700' :
@@ -362,10 +362,10 @@ export default function TaskDetailsDrawer({ task, onClose, onEdit, onTaskUpdated
         </div>
 
         {/* Content Body */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-col md:flex-row flex-1 overflow-y-auto md:overflow-hidden">
           
           {/* Main Left Column */}
-          <div className="flex-1 overflow-y-auto bg-white p-6 border-r border-slate-200">
+          <div className="flex-1 md:overflow-y-auto bg-white p-4 sm:p-6 md:border-r border-slate-200">
             {task.description && (
               <div className="mb-6">
                 <h3 className="text-sm font-bold text-slate-900 mb-2">Description</h3>
@@ -484,7 +484,7 @@ export default function TaskDetailsDrawer({ task, onClose, onEdit, onTaskUpdated
           </div>
 
           {/* Right Sidebar - Metadata & Compliance */}
-          <div className="w-80 bg-slate-50 p-6 overflow-y-auto">
+          <div className="w-full md:w-80 bg-slate-50 p-4 sm:p-6 md:overflow-y-auto border-t md:border-t-0 border-slate-200">
             
             {/* Strategic Alignment Widget */}
             <div className="mb-6 rounded-xl border border-indigo-100 bg-white overflow-hidden shadow-sm">

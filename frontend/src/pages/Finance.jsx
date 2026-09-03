@@ -33,7 +33,7 @@ export default function Finance() {
   return (
     <div className="flex flex-col h-full bg-slate-50/50">
       {/* Header */}
-      <div className="border-b border-slate-200 bg-white px-6 py-5 shadow-2xs">
+      <div className="border-b border-slate-200 bg-white px-4 sm:px-6 py-4 sm:py-5 shadow-2xs">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold text-slate-900 tracking-tight">
@@ -69,7 +69,7 @@ export default function Finance() {
       </div>
 
       {/* Main Tab Content Container */}
-      <div className="flex-1 p-6 overflow-auto">
+      <div className="flex-1 p-3.5 sm:p-6 overflow-auto">
         {activeTab === 'overview' && <FinancialOverview />}
         {activeTab === 'categories' && <CategoriesManagement />}
         {activeTab === 'donors' && <DonorsContributions />}

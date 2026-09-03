@@ -183,11 +183,11 @@ namespace OrbitApi.Controllers
                 foreach (var s in scopedRoleUserIds) allowedUserIds.Add(s);
                 foreach (var w in workspaceRoleUserIds) allowedUserIds.Add(w);
 
-                query = _db.Users.Where(u => allowedUserIds.Contains(u.Id));
+                query = _db.Users.Where(u => allowedUserIds.Contains(u.Id) && !u.Email.Contains("@orbit.org") && !u.Email.StartsWith("demo."));
             }
             else
             {
-                query = _db.Users.Where(u => u.Id == currentUserId.Value);
+                query = _db.Users.Where(u => u.Id == currentUserId.Value && !u.Email.Contains("@orbit.org") && !u.Email.StartsWith("demo."));
             }
 
             var users = await query.Distinct().ToListAsync();

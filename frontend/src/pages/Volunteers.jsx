@@ -507,7 +507,9 @@ export default function Volunteers() {
     <div className="flex flex-col lg:flex-row min-h-full lg:h-[calc(100vh-6rem)] gap-6 pb-4">
       
       {/* ── Left Panel: Compact Volunteer Cards List ── */}
-      <div className="flex w-full lg:w-96 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden shrink-0 max-h-[380px] lg:max-h-none">
+      <div className={`flex flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden shrink-0 transition-all ${
+        selectedVolunteer ? 'hidden lg:flex lg:w-96' : 'w-full lg:w-96'
+      }`}>
         
         {/* Header & Controls */}
         <div className="border-b border-slate-200 bg-slate-50/80 p-4 shrink-0">
@@ -608,7 +610,9 @@ export default function Volunteers() {
       </div>
 
       {/* ── Right Panel: Tabbed Detail Workspace ── */}
-      <div className="flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+      <div className={`flex flex-1 flex-col rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden ${
+        !selectedVolunteer ? 'hidden lg:flex' : 'flex w-full'
+      }`}>
         {!selectedVolunteer ? (
           <div className="flex h-full flex-col items-center justify-center text-center p-8">
             <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center text-3xl mb-4 text-slate-400">👈</div>
@@ -619,6 +623,14 @@ export default function Volunteers() {
           <>
             {/* Detail Banner Header */}
             <div className="border-b border-slate-200 bg-slate-50/80 px-4 sm:px-8 py-4 sm:py-6 shrink-0">
+              {/* Mobile Back Button */}
+              <button
+                type="button"
+                onClick={() => setSelectedVolunteer(null)}
+                className="lg:hidden mb-3 inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-semibold text-brand-600 bg-brand-50 hover:bg-brand-100 transition"
+              >
+                <span>← Back to Volunteers List</span>
+              </button>
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
                 <div className="flex items-center gap-3 sm:gap-4">
                   <InitialsAvatar name={selectedVolunteer.name} size="lg" />

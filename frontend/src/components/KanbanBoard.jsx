@@ -204,7 +204,7 @@ export default function KanbanBoard({ tasks, onTaskMove, onTaskClick, selectedTa
 
   return (
     <DndContext sensors={sensors} collisionDetection={closestCenter} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
-      <div className="flex h-full gap-6 overflow-x-auto pb-4 flex-wrap items-start">
+      <div className="flex gap-4 sm:gap-6 overflow-x-auto pb-4 items-start w-full">
         {Object.entries(statusMap).map(([statusId, title]) => {
           if (statusFilter !== 'all' && statusFilter !== statusId) return null;
           

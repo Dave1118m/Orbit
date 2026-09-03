@@ -398,6 +398,29 @@ public class AuthController : ControllerBase
             });
             Console.WriteLine($"Added user {user.Email} to organization {invite.OrganizationId} with role {invite.PreAssignedRole?.Name}");
         }
+        else
+        {
+            existingMember.RoleId = invite.PreAssignedRoleId;
+            existingMember.Status = OrgMemberStatus.Active;
+        }
+
+        // Also ensure RoleAssignment exists
+        var existingAssignment = await _db.RoleAssignments
+            .FirstOrDefaultAsync(ra => ra.UserId == user.Id && ra.ScopeType == ScopeType.Organization && ra.ScopeId == invite.OrganizationId);
+        if (existingAssignment == null)
+        {
+            _db.RoleAssignments.Add(new RoleAssignment
+            {
+                UserId = user.Id,
+                RoleId = invite.PreAssignedRoleId,
+                ScopeType = ScopeType.Organization,
+                ScopeId = invite.OrganizationId
+            });
+        }
+        else
+        {
+            existingAssignment.RoleId = invite.PreAssignedRoleId;
+        }
 
         // Update invitation status
         invite.Status = InvitationStatus.Accepted;
@@ -596,45 +619,49 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "No valid organization found." });
         }
 
-        // Purge any old synthetic demo accounts from DB
-        var demoUsers = await _db.Users
-            .Where(u => u.Email.StartsWith("demo.") || u.Name.Contains("Demo Persona"))
+        // Purge any synthetic mock accounts (@orbit.org or demo.)
+        var mockUsers = await _db.Users
+            .Where(u => u.Email.Contains("@orbit.org") || u.Email.StartsWith("demo.") || u.Name.Contains("Demo Persona"))
             .ToListAsync();
 
-        if (demoUsers.Any())
+        if (mockUsers.Any())
         {
-            foreach (var demoUser in demoUsers)
+            var mockIds = mockUsers.Select(u => u.Id).ToList();
+            var teamMembers = await _db.TeamMembers.Where(m => mockIds.Contains(m.UserId)).ToListAsync();
+            _db.TeamMembers.RemoveRange(teamMembers);
+
+            var memberRecords = await _db.OrganizationMembers.Where(m => mockIds.Contains(m.UserId)).ToListAsync();
+            _db.OrganizationMembers.RemoveRange(memberRecords);
+
+            var assignRecords = await _db.RoleAssignments.Where(a => mockIds.Contains(a.UserId)).ToListAsync();
+            _db.RoleAssignments.RemoveRange(assignRecords);
+
+            _db.Users.RemoveRange(mockUsers);
+
+            foreach (var mu in mockUsers)
             {
-                var memberRecords = await _db.OrganizationMembers.Where(m => m.UserId == demoUser.Id).ToListAsync();
-                _db.OrganizationMembers.RemoveRange(memberRecords);
-
-                var assignRecords = await _db.RoleAssignments.Where(a => a.UserId == demoUser.Id).ToListAsync();
-                _db.RoleAssignments.RemoveRange(assignRecords);
-
-                var orgsOwned = await _db.Organizations.Where(o => o.OwnerId == demoUser.Id).ToListAsync();
-                foreach (var o in orgsOwned)
+                var idUser = await _userManager.FindByEmailAsync(mu.Email);
+                if (idUser != null)
                 {
-                    var firstReal = await _db.Users.FirstOrDefaultAsync(u => !u.Email.StartsWith("demo.") && !u.Name.Contains("Demo"));
-                    if (firstReal != null) o.OwnerId = firstReal.Id;
-                }
-
-                _db.Users.Remove(demoUser);
-
-                var identityUser = await _userManager.FindByEmailAsync(demoUser.Email);
-                if (identityUser != null)
-                {
-                    await _userManager.DeleteAsync(identityUser);
+                    await _userManager.DeleteAsync(idUser);
                 }
             }
             await _db.SaveChangesAsync();
         }
 
-        // 1. Check if there is an existing REAL assigned user for this role in targetOrg
+        // 1. Determine active real user: prefer current authenticated user, else an existing member in targetOrg
         User? realUser = null;
+        var callerUserIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? User.FindFirst(System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
 
-        if (roleName == RoleName.Owner && targetOrg.OwnerId.HasValue)
+        if (int.TryParse(callerUserIdStr, out var callerUserId) && callerUserId > 0)
         {
-            realUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == targetOrg.OwnerId.Value && !u.Email.StartsWith("demo.") && !u.Name.Contains("Demo"));
+            realUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == callerUserId && !u.Email.Contains("@orbit.org"));
+        }
+
+        if (realUser == null && roleName == RoleName.Owner && targetOrg.OwnerId.HasValue)
+        {
+            realUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == targetOrg.OwnerId.Value && !u.Email.Contains("@orbit.org"));
         }
 
         if (realUser == null)
@@ -642,7 +669,7 @@ public class AuthController : ControllerBase
             var member = await _db.OrganizationMembers
                 .Include(m => m.User)
                 .Include(m => m.Role)
-                .FirstOrDefaultAsync(m => m.OrganizationId == targetOrg.Id && m.Role != null && m.Role.Name == roleName && m.Status == OrgMemberStatus.Active);
+                .FirstOrDefaultAsync(m => m.OrganizationId == targetOrg.Id && m.Role != null && m.Role.Name == roleName && m.Status == OrgMemberStatus.Active && m.User != null && !m.User.Email.Contains("@orbit.org"));
 
             if (member?.User != null)
             {
@@ -652,119 +679,56 @@ public class AuthController : ControllerBase
 
         if (realUser == null)
         {
-            var assignment = await _db.RoleAssignments
-                .Include(a => a.User)
-                .Include(a => a.Role)
-                .FirstOrDefaultAsync(a => a.RoleId != 0 && a.Role!.Name == roleName && a.ScopeType == ScopeType.Organization && a.ScopeId == targetOrg.Id);
-
-            if (assignment?.User != null)
+            // Fallback to the owner or first real user of the target organization
+            if (targetOrg.OwnerId.HasValue)
             {
-                realUser = assignment.User;
+                realUser = await _db.Users.FirstOrDefaultAsync(u => u.Id == targetOrg.OwnerId.Value && !u.Email.Contains("@orbit.org"));
+            }
+
+            if (realUser == null)
+            {
+                realUser = await _db.OrganizationMembers
+                    .Where(m => m.OrganizationId == targetOrg.Id && m.Status == OrgMemberStatus.Active && m.User != null && !m.User.Email.Contains("@orbit.org"))
+                    .Select(m => m.User)
+                    .FirstOrDefaultAsync();
+            }
+
+            if (realUser == null)
+            {
+                realUser = await _db.Users.FirstOrDefaultAsync(u => !u.Email.Contains("@orbit.org"));
             }
         }
 
-        ApplicationUser? appUser = null;
-
-        if (realUser != null && !string.IsNullOrEmpty(realUser.Email))
+        if (realUser == null)
         {
-            appUser = await _userManager.FindByEmailAsync(realUser.Email)
-                   ?? await _userManager.FindByIdAsync(realUser.Id.ToString());
+            return BadRequest(new { message = "No valid user exists in this organization to switch roles." });
         }
 
-        // 2. If no real user is assigned to this role yet, use/create a clean role account without "Demo"
+        var appUser = await _userManager.FindByEmailAsync(realUser.Email)
+            ?? await _userManager.FindByIdAsync(realUser.Id.ToString());
+
         if (appUser == null)
         {
-            var cleanEmail = $"{roleName.ToString().ToLower()}@orbit.org";
-            var cleanName = roleName switch
-            {
-                RoleName.Owner => "Organization Owner",
-                RoleName.Admin => "System Executive",
-                RoleName.Coordinator => "Program Coordinator",
-                RoleName.Manager => "Project Manager",
-                RoleName.FinanceOfficer => "Finance Officer",
-                RoleName.Member => "Team Member",
-                _ => "System Auditor"
-            };
-
-            appUser = await _userManager.FindByEmailAsync(cleanEmail);
-            if (appUser == null)
-            {
-                appUser = new ApplicationUser
-                {
-                    UserName = cleanEmail,
-                    Email = cleanEmail,
-                    FullName = cleanName,
-                    EmailConfirmed = true
-                };
-                var createRes = await _userManager.CreateAsync(appUser, "OrbitUser123!");
-                if (!createRes.Succeeded && !createRes.Errors.Any(e => e.Code.Contains("Duplicate")))
-                {
-                    return BadRequest(createRes.Errors.Select(e => e.Description));
-                }
-                appUser = await _userManager.FindByEmailAsync(cleanEmail);
-            }
-
-            if (appUser == null)
-            {
-                return BadRequest("Failed to retrieve or create role identity.");
-            }
-
-            var userEntity = await _db.Users.FindAsync(appUser.Id);
-            if (userEntity == null)
-            {
-                await _db.Database.OpenConnectionAsync();
-                try
-                {
-                    await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] ON");
-                    _db.Users.Add(new User
-                    {
-                        Id = appUser.Id,
-                        Name = cleanName,
-                        Email = cleanEmail
-                    });
-                    await _db.SaveChangesAsync();
-                    await _db.Database.ExecuteSqlRawAsync("SET IDENTITY_INSERT [Users] OFF");
-                }
-                catch
-                {
-                    // Key might already exist
-                }
-                finally
-                {
-                    await _db.Database.CloseConnectionAsync();
-                }
-                userEntity = await _db.Users.FindAsync(appUser.Id);
-            }
-
-            if (userEntity != null)
-            {
-                userEntity.Name = cleanName;
-                await _db.SaveChangesAsync();
-            }
-
-            realUser = userEntity;
-        }
-        else if (realUser == null)
-        {
-            realUser = await _db.Users.FindAsync(appUser.Id);
+            return BadRequest(new { message = "Identity account for user could not be found." });
         }
 
-        // Ensure role assignment exists for targetOrg
-        var dbRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleName);
+        // Ensure role exists
+        var dbRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleName && r.IsSystemRole);
         if (dbRole == null)
         {
-            dbRole = new Role { Name = roleName, Description = $"{roleName} System Role" };
+            dbRole = new Role { Name = roleName, Description = $"{roleName} System Role", IsSystemRole = true };
             _db.Roles.Add(dbRole);
             await _db.SaveChangesAsync();
         }
 
+        // Update or assign role to realUser
         var existingAssignment = await _db.RoleAssignments
-            .FirstOrDefaultAsync(a => a.UserId == appUser.Id && a.ScopeType == ScopeType.Organization && a.ScopeId == targetOrg.Id);
+            .FirstOrDefaultAsync(a => a.UserId == realUser.Id && a.ScopeType == ScopeType.Organization && a.ScopeId == targetOrg.Id);
         if (existingAssignment == null)
         {
             _db.RoleAssignments.Add(new RoleAssignment
             {
-                UserId = appUser.Id,
+                UserId = realUser.Id,
                 RoleId = dbRole.Id,
                 ScopeType = ScopeType.Organization,
                 ScopeId = targetOrg.Id
@@ -776,12 +740,12 @@ public class AuthController : ControllerBase
         }
 
         var existingOrgMember = await _db.OrganizationMembers
-            .FirstOrDefaultAsync(m => m.UserId == appUser.Id && m.OrganizationId == targetOrg.Id);
+            .FirstOrDefaultAsync(m => m.UserId == realUser.Id && m.OrganizationId == targetOrg.Id);
         if (existingOrgMember == null)
         {
             _db.OrganizationMembers.Add(new OrganizationMember
             {
-                UserId = appUser.Id,
+                UserId = realUser.Id,
                 OrganizationId = targetOrg.Id,
                 RoleId = dbRole.Id,
                 Status = OrgMemberStatus.Active,
@@ -798,9 +762,9 @@ public class AuthController : ControllerBase
         // Invalidate permission cache for the target role
         await _permissionService.InvalidateCacheAsync(roleName);
 
-        if (roleName == RoleName.Owner && targetOrg.OwnerId != appUser.Id)
+        if (roleName == RoleName.Owner && targetOrg.OwnerId != realUser.Id)
         {
-            targetOrg.OwnerId = appUser.Id;
+            targetOrg.OwnerId = realUser.Id;
             await _db.SaveChangesAsync();
         }
 
@@ -814,9 +778,9 @@ public class AuthController : ControllerBase
         var userDto = new UserDto
         {
             Id = appUser.Id,
-            Name = realUser?.Name ?? appUser.FullName ?? appUser.Email ?? roleName.ToString(),
-            Email = realUser?.Email ?? appUser.Email ?? string.Empty,
-            PhotoUrl = realUser?.PhotoUrl,
+            Name = realUser.Name ?? appUser.FullName ?? appUser.Email ?? roleName.ToString(),
+            Email = realUser.Email ?? appUser.Email ?? string.Empty,
+            PhotoUrl = realUser.PhotoUrl,
             Roles = new List<RoleInfoDto>
             {
                 new RoleInfoDto { Name = roleName.ToString(), ScopeType = ScopeType.Organization.ToString(), ScopeId = targetOrg.Id }
