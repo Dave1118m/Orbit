@@ -1,4 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
+import Modal from '../components/Modal';
 import WorkloadChart from '../components/WorkloadChart';
 import MultiSelectMembers from '../components/MultiSelectMembers';
 import SearchSelect from '../components/SearchSelect';
@@ -209,9 +210,9 @@ export default function Teams() {
   // ── Actions ──
   const handleCreateTeam = async (e) => {
     e.preventDefault();
-    const targetWsId = selectedWorkspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
+    const targetWsId = createData.workspaceId || selectedWorkspaceId || (workspaces.length > 0 ? workspaces[0].id : null);
     if (!targetWsId) {
-      showSuccessToast('Please select or create a workspace first.');
+      showErrorToast('Please select or create a workspace first before creating a team.');
       return;
     }
     try {
@@ -221,9 +222,10 @@ export default function Teams() {
         body: JSON.stringify({ ...createData, workspaceId: targetWsId })
       });
       if (res.ok) {
-        setCreateData({ name: '', description: '', teamLeadUserId: '' });
+        setCreateData({ name: '', description: '', teamLeadUserId: '', workspaceId: '' });
         setIsCreating(false);
-        fetchTeams(selectedWorkspaceId);
+        await fetchTeams(selectedWorkspaceId);
+        showSuccessToast('Team created successfully!');
       } else {
         const errText = await parseApiResponse(res);
         showErrorToast(errText, 'Failed to create team.');
@@ -475,9 +477,20 @@ export default function Teams() {
         
         {/* Workspace Context & Header */}
         <div className="border-b border-slate-200 bg-slate-50 p-4 shrink-0">
-          <div className="mb-4">
-            <h1 className="text-xl font-bold text-slate-900">Teams</h1>
-            <p className="text-xs text-slate-500">Reusable workspace groups & project assignment units</p>
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div>
+              <h1 className="text-xl font-bold text-slate-900">Teams</h1>
+              <p className="text-xs text-slate-500">Reusable workspace groups & project assignment units</p>
+            </div>
+            {canCreateTeam && (
+              <button
+                type="button"
+                onClick={() => setIsCreating(true)}
+                className="inline-flex items-center gap-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition shrink-0"
+              >
+                <span>+</span> Create Team
+              </button>
+            )}
           </div>
           
           <div className="mb-3">
@@ -535,7 +548,20 @@ export default function Teams() {
           {loadingTeams ? (
             <div className="p-8 text-center text-sm text-slate-500">Loading teams...</div>
           ) : filteredTeams.length === 0 ? (
-            <div className="p-8 text-center text-sm text-slate-500">No teams found in this workspace.</div>
+            <div className="p-8 text-center text-sm text-slate-500">
+              <div className="mx-auto w-12 h-12 rounded-2xl bg-slate-100 flex items-center justify-center text-2xl mb-2 text-slate-400">👥</div>
+              <p className="font-semibold text-slate-700">No teams found in this workspace.</p>
+              <p className="text-xs text-slate-400 mt-0.5 max-w-xs mx-auto">Create a team to organize members and assign project workloads.</p>
+              {canCreateTeam && (
+                <button
+                  type="button"
+                  onClick={() => setIsCreating(true)}
+                  className="mt-3.5 inline-flex items-center gap-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition"
+                >
+                  <span>+</span> Create New Team
+                </button>
+              )}
+            </div>
           ) : (
             <div className="space-y-1">
               {filteredTeams.map(team => (
@@ -570,30 +596,14 @@ export default function Teams() {
 
         {/* Create Team Button */}
         {canCreateTeam && (
-          <div className="border-t border-slate-200 p-4 shrink-0 bg-white">
-            {isCreating ? (
-              <form onSubmit={handleCreateTeam} className="space-y-3">
-                <input required autoFocus placeholder="Team name (e.g. Infrastructure Squad)" value={createData.name} onChange={e => setCreateData({...createData, name: e.target.value})} className={inputClass} />
-                <textarea rows={2} placeholder="Description / Purpose" value={createData.description} onChange={e => setCreateData({...createData, description: e.target.value})} className={inputClass} />
-                <div>
-                  <label className="mb-1 block text-xs font-semibold text-slate-700">Designated Team Lead</label>
-                  <SearchSelect
-                    options={users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
-                    value={createData.teamLeadUserId}
-                    onChange={val => setCreateData({...createData, teamLeadUserId: val || ''})}
-                    placeholder="Select Designated Team Lead..."
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <button type="button" onClick={() => setIsCreating(false)} className="flex-1 rounded-xl px-3 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100">Cancel</button>
-                  <button type="submit" className="flex-1 rounded-xl bg-brand-500 px-3 py-2 text-xs font-semibold text-white hover:bg-brand-600">Save Team</button>
-                </div>
-              </form>
-            ) : (
-              <button onClick={() => setIsCreating(true)} className="w-full flex items-center justify-center gap-2 rounded-xl border-2 border-dashed border-slate-200 px-4 py-2.5 text-sm font-semibold text-brand-600 hover:border-brand-300 hover:bg-brand-50 transition">
-                + Create New Team
-              </button>
-            )}
+          <div className="border-t border-slate-200 p-3 shrink-0 bg-white">
+            <button
+              type="button"
+              onClick={() => setIsCreating(true)}
+              className="w-full flex items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 py-2.5 px-3 text-xs font-semibold text-brand-600 hover:border-brand-400 hover:bg-brand-50 transition shadow-2xs"
+            >
+              <span>+</span> Create New Team
+            </button>
           </div>
         )}
       </div>
@@ -605,8 +615,17 @@ export default function Teams() {
         {!selectedTeam ? (
           <div className="flex h-full min-h-[350px] flex-col items-center justify-center text-center p-8">
             <div className="h-16 w-16 rounded-full bg-slate-100 flex items-center justify-center text-3xl mb-4 text-slate-400">👥</div>
-            <h2 className="text-lg font-bold text-slate-700">Select a Team</h2>
+            <h2 className="text-lg font-bold text-slate-700">Select or Create a Team</h2>
             <p className="text-sm text-slate-500 max-w-sm mt-1">Choose a team from the list to view roster workload, assign projects, or manage members.</p>
+            {canCreateTeam && (
+              <button
+                type="button"
+                onClick={() => setIsCreating(true)}
+                className="mt-4 inline-flex items-center gap-1.5 rounded-xl bg-brand-500 hover:bg-brand-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition"
+              >
+                <span>+</span> Create New Team
+              </button>
+            )}
           </div>
         ) : (
           <>
@@ -1297,6 +1316,92 @@ export default function Teams() {
           </div>
         </div>
       )}
+
+      {/* Create Team Modal */}
+      <Modal
+        isOpen={isCreating}
+        onClose={() => {
+          setIsCreating(false);
+          setCreateData({ name: '', description: '', teamLeadUserId: '', workspaceId: '' });
+        }}
+        title="Create New Team"
+      >
+        <form onSubmit={handleCreateTeam} className="space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Target Workspace *
+            </label>
+            <select
+              value={createData.workspaceId || selectedWorkspaceId || (workspaces.length > 0 ? workspaces[0].id : '')}
+              onChange={e => setCreateData({ ...createData, workspaceId: parseInt(e.target.value, 10) })}
+              className={inputClass}
+              required
+            >
+              {workspaces.map(ws => (
+                <option key={ws.id} value={ws.id}>{ws.name}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Team Name *
+            </label>
+            <input
+              required
+              autoFocus
+              placeholder="e.g. Infrastructure Squad, Field Logistics"
+              value={createData.name}
+              onChange={e => setCreateData({ ...createData, name: e.target.value })}
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Description / Purpose
+            </label>
+            <textarea
+              rows={3}
+              placeholder="Describe the mission, goals, or functional scope of this team..."
+              value={createData.description}
+              onChange={e => setCreateData({ ...createData, description: e.target.value })}
+              className={inputClass}
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Designated Team Lead (Optional)
+            </label>
+            <SearchSelect
+              options={users.map(u => ({ value: u.id, label: `${u.name} (${u.email})` }))}
+              value={createData.teamLeadUserId}
+              onChange={val => setCreateData({ ...createData, teamLeadUserId: val || '' })}
+              placeholder="Select designated team lead..."
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-3 border-t border-slate-100">
+            <button
+              type="button"
+              onClick={() => {
+                setIsCreating(false);
+                setCreateData({ name: '', description: '', teamLeadUserId: '', workspaceId: '' });
+              }}
+              className="rounded-xl px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 transition"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              className="rounded-xl bg-brand-500 hover:bg-brand-600 px-5 py-2 text-xs font-semibold text-white shadow-sm transition"
+            >
+              Create Team
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }
