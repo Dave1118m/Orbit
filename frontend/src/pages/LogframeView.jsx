@@ -141,10 +141,6 @@ export default function LogframeView() {
           const levelEnumMap = { goal: 'Goal', outcome: 'Outcome', output: 'Output', activity: 'Activity' };
           const levelStr = levelEnumMap[type] || 'Goal';
           const entityId = savedEntity.id;
-          const notesText = [
-            modalData.mov ? `MoV: ${modalData.mov}` : null,
-            modalData.assumption ? `Assumption: ${modalData.assumption}` : null
-          ].filter(Boolean).join(' | ');
 
           await fetch(`${API_URL}/projects/${projectId}/logframe/indicators`, {
             method: 'POST',
@@ -157,7 +153,7 @@ export default function LogframeView() {
               target: modalData.target || '100',
               actual: modalData.baseline || '0',
               unit: modalData.unit || '%',
-              notes: notesText
+              notes: modalData.notes || ''
             })
           });
         }
@@ -591,19 +587,13 @@ export default function LogframeView() {
                       value={modalData.description || ''} 
                       onChange={e => setModalData({...modalData, description: e.target.value})} 
                       className={inputClass} 
-                      placeholder={
-                        modalType.type === 'goal' ? 'e.g. End hunger & improve nutrition in 10 drought-affected districts.' :
-                        modalType.type === 'outcome' ? 'e.g. Increase daily food access for 15,000 vulnerable families.' :
-                        modalType.type === 'output' ? 'e.g. Distribute 5,000 emergency food baskets & 20 community gardens.' :
-                        'e.g. Procure 50 metric tons of grain & conduct farmer training.'
-                      }
                     />
                   </div>
 
                   {modalType.mode === 'create' && modalType.type !== 'activity' && (
                     <div className="space-y-3 pt-3 border-t border-slate-800">
                       <div className="text-xs font-bold text-indigo-400 uppercase tracking-wider">
-                        Linked Key Indicator (OVI) &amp; Verification
+                        Linked Key Indicator (OVI)
                       </div>
                       <div>
                         <label className="mb-1 block text-xs font-medium text-slate-400">Indicator (OVI) Name</label>
@@ -612,7 +602,6 @@ export default function LogframeView() {
                           value={modalData.indicatorName || ''} 
                           onChange={e => setModalData({...modalData, indicatorName: e.target.value})} 
                           className={inputClass} 
-                          placeholder="e.g. % reduction in severe child malnutrition rates" 
                         />
                       </div>
                       <div className="grid grid-cols-3 gap-3">
@@ -623,7 +612,6 @@ export default function LogframeView() {
                             value={modalData.baseline || ''} 
                             onChange={e => setModalData({...modalData, baseline: e.target.value})} 
                             className={inputClass} 
-                            placeholder="e.g. 35" 
                           />
                         </div>
                         <div>
@@ -633,7 +621,6 @@ export default function LogframeView() {
                             value={modalData.target || ''} 
                             onChange={e => setModalData({...modalData, target: e.target.value})} 
                             className={inputClass} 
-                            placeholder="e.g. 5" 
                           />
                         </div>
                         <div>
@@ -643,29 +630,8 @@ export default function LogframeView() {
                             value={modalData.unit || ''} 
                             onChange={e => setModalData({...modalData, unit: e.target.value})} 
                             className={inputClass} 
-                            placeholder="e.g. %" 
                           />
                         </div>
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-400">Means of Verification (MoV)</label>
-                        <input 
-                          type="text" 
-                          value={modalData.mov || ''} 
-                          onChange={e => setModalData({...modalData, mov: e.target.value})} 
-                          className={inputClass} 
-                          placeholder="e.g. WFP household food security survey & hospital logs" 
-                        />
-                      </div>
-                      <div>
-                        <label className="mb-1 block text-xs font-medium text-slate-400">Key Assumptions</label>
-                        <input 
-                          type="text" 
-                          value={modalData.assumption || ''} 
-                          onChange={e => setModalData({...modalData, assumption: e.target.value})} 
-                          className={inputClass} 
-                          placeholder="e.g. Regional food supply transport corridors remain open" 
-                        />
                       </div>
                     </div>
                   )}
@@ -676,30 +642,30 @@ export default function LogframeView() {
               {modalType.type === 'indicator' && (
                 <>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-400">Indicator Name</label>
-                    <input required type="text" value={modalData.name || ''} onChange={e => setModalData({...modalData, name: e.target.value})} className={inputClass} placeholder="e.g. Metric tons of grain distributed" />
+                    <label className="mb-1.5 block text-sm font-medium text-slate-400">Indicator Name *</label>
+                    <input required type="text" value={modalData.name || ''} onChange={e => setModalData({...modalData, name: e.target.value})} className={inputClass} />
                   </div>
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-slate-400">Baseline</label>
-                      <input required type="text" value={modalData.baseline || ''} onChange={e => setModalData({...modalData, baseline: e.target.value})} className={inputClass} placeholder="e.g. 0" />
+                      <input required type="text" value={modalData.baseline || ''} onChange={e => setModalData({...modalData, baseline: e.target.value})} className={inputClass} />
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-slate-400">Target</label>
-                      <input required type="text" value={modalData.target || ''} onChange={e => setModalData({...modalData, target: e.target.value})} className={inputClass} placeholder="e.g. 50" />
+                      <input required type="text" value={modalData.target || ''} onChange={e => setModalData({...modalData, target: e.target.value})} className={inputClass} />
                     </div>
                     <div>
                       <label className="mb-1.5 block text-sm font-medium text-slate-400">Actual</label>
-                      <input required type="text" value={modalData.actual || ''} onChange={e => setModalData({...modalData, actual: e.target.value})} className={inputClass} placeholder="e.g. 0" />
+                      <input required type="text" value={modalData.actual || ''} onChange={e => setModalData({...modalData, actual: e.target.value})} className={inputClass} />
                     </div>
                   </div>
                   <div>
                     <label className="mb-1.5 block text-sm font-medium text-slate-400">Unit *</label>
-                    <input required type="text" value={modalData.unit || ''} onChange={e => setModalData({...modalData, unit: e.target.value})} className={inputClass} placeholder="e.g. tons, families, %" />
+                    <input required type="text" value={modalData.unit || ''} onChange={e => setModalData({...modalData, unit: e.target.value})} className={inputClass} />
                   </div>
                   <div>
-                    <label className="mb-1.5 block text-sm font-medium text-slate-400">Notes (MoV &amp; Assumptions)</label>
-                    <textarea rows={2} value={modalData.notes || ''} onChange={e => setModalData({...modalData, notes: e.target.value})} className={inputClass} placeholder="e.g. MoV: Warehouse delivery receipts | Assumption: Grain prices remain stable" />
+                    <label className="mb-1.5 block text-sm font-medium text-slate-400">Notes (Optional)</label>
+                    <textarea rows={2} value={modalData.notes || ''} onChange={e => setModalData({...modalData, notes: e.target.value})} className={inputClass} />
                   </div>
                 </>
               )}
