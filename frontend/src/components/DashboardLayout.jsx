@@ -394,10 +394,6 @@ export default function DashboardLayout({ children }) {
                           <p className="text-sm text-slate-500">{user?.email || 'No email available'}</p>
                         </div>
                       </div>
-                      <div className="mt-4 space-y-2 text-sm text-slate-600">
-                        <p>{user?.preferredLanguage ? `Language: ${user.preferredLanguage}` : 'No language preference set.'}</p>
-                        <p>{user?.mfaEnabled ? 'MFA enabled' : 'MFA not enabled'}</p>
-                      </div>
                       <button
                         type="button"
                         onClick={() => {
