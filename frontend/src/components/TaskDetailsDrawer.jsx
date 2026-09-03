@@ -561,7 +561,7 @@ export default function TaskDetailsDrawer({ task, onClose, onEdit, onTaskUpdated
                 <p className="text-xs font-semibold text-slate-500 mb-1">Schedule</p>
                 <div className="flex items-center gap-2 text-sm text-slate-700">
                   <Clock className="w-4 h-4 text-slate-400" />
-                  {task.startDate ? new Date(task.startDate).toLocaleDateString() : '--'} &rarr; {task.deadline ? new Date(task.deadline).toLocaleDateString() : '--'}
+                  {task.startDate ? new Date(task.startDate).toLocaleDateString() : 'Not set'} &rarr; {task.deadline ? new Date(task.deadline).toLocaleDateString() : 'Not set'}
                 </div>
               </div>
             </div>

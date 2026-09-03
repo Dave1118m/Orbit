@@ -726,7 +726,7 @@ export default function LogframeView() {
                   options={tasks.map(t => ({ value: t.id, label: `${t.title} (${t.status === 4 ? 'Done' : 'Open'})` }))}
                   value={modalData.linkedTaskId ? parseInt(modalData.linkedTaskId) : null}
                   onChange={val => setModalData({...modalData, linkedTaskId: val ? String(val) : ''})}
-                  placeholder="-- None (Unlink) --"
+                  placeholder="None (Unlink)"
                 />
               </div>
               <div className="mt-6 flex justify-end gap-3 pt-2">

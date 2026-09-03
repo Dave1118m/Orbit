@@ -364,7 +364,7 @@ export default function RiskRegister({ projectId }) {
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 uppercase mb-1">Link to Logframe Level (Optional)</label>
                   <select name="logframeLevel" value={form.logframeLevel || ''} onChange={handleChange} className="w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-brand-500 focus:outline-none bg-white">
-                    <option value="">-- No Link --</option>
+                    <option value="">No link</option>
                     <option value="Goal">Goal</option>
                     <option value="Outcome">Outcome</option>
                     <option value="Output">Output</option>
@@ -380,7 +380,7 @@ export default function RiskRegister({ projectId }) {
                     disabled={!form.logframeLevel}
                     className="w-full rounded-lg border border-slate-300 p-2.5 text-sm focus:border-brand-500 focus:outline-none bg-white disabled:bg-slate-100 disabled:text-slate-400"
                   >
-                    <option value="">-- Select Entity --</option>
+                    <option value="">Select entity</option>
                     {getLogframeEntities(form.logframeLevel).map(e => (
                       <option key={e.id} value={e.id}>{e.description}</option>
                     ))}

@@ -643,7 +643,7 @@ export default function Organizations() {
                 }}
                 className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-800 bg-white focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition"
               >
-                <option value="">-- Select Member from Dropdown Menu --</option>
+                <option value="">Select member</option>
                 {orgMembers
                   .filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo') && isDefinedSystemRole(m.roleName) && (transferRoleFilter === 'all' || getCleanRoleDisplay(m.roleName) === transferRoleFilter))
                   .map(member => (

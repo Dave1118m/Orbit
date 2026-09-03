@@ -1472,7 +1472,7 @@ export default function Settings() {
                       }}
                       className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-800 bg-white focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 transition"
                     >
-                      <option value="">-- Select Member from Dropdown Menu --</option>
+                      <option value="">Select member</option>
                       {eligibleTransferMembers.map((member) => (
                         <option key={member.userId} value={member.userId}>
                           {getCleanRoleDisplay(member.roleName)}
@@ -1557,7 +1557,7 @@ export default function Settings() {
                           onChange={(e) => setSelectedRevokeUserId(e.target.value)}
                           className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-800 bg-white focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/20 transition"
                         >
-                          <option value="">-- Choose Role from Dropdown to Revoke --</option>
+                          <option value="">Select session to revoke</option>
                           {eligibleSecurityMembers
                             .filter((m) => !(user && m.userId === user.id))
                             .map((member) => (
