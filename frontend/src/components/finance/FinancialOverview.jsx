@@ -83,6 +83,30 @@ export default function FinancialOverview() {
     loading: false
   });
 
+  const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('orbit_selected_currency') || 'USD');
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 161.44 });
+
+  useEffect(() => {
+    fetch(`${API_BASE}/Currency/rates?baseCurrency=USD`, { headers: authHeaders() })
+      .then(res => res.ok ? res.json() : null)
+      .then(rates => {
+        if (rates && rates.ETB) setExchangeRates(rates);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleCurrencyToggle = (newCurr) => {
+    setSelectedCurrency(newCurr);
+    localStorage.setItem('orbit_selected_currency', newCurr);
+  };
+
+  const currRate = selectedCurrency === 'ETB' ? (exchangeRates.ETB || 161.44) : 1;
+  const currSymbol = selectedCurrency === 'ETB' ? 'Br ' : '$';
+  const formatMoney = (usdVal) => {
+    const converted = (usdVal || 0) * currRate;
+    return `${currSymbol}${converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
+
   useEffect(() => {
     fetchData();
     fetchCategories();
@@ -347,6 +371,14 @@ export default function FinancialOverview() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <select
+            value={selectedCurrency}
+            onChange={(e) => handleCurrencyToggle(e.target.value)}
+            className="bg-white border border-slate-300 text-slate-700 text-xs font-bold px-3 py-2 rounded-lg shadow-xs focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            <option value="USD">USD ($)</option>
+            <option value="ETB">ETB (Br)</option>
+          </select>
           <button
             onClick={() => setIsTxnModalOpen(true)}
             className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm transition"
@@ -371,7 +403,7 @@ export default function FinancialOverview() {
           <div>
             <span className="font-bold">Over-Budget Early Warning: </span>
             <span>
-              {overBudgetCategories.map(c => `${c.name} ($${c.currentExpenses.toLocaleString()} / limit $${c.targetBudgetLimit.toLocaleString()})`).join('; ')}
+              {overBudgetCategories.map(c => `${c.name} (${formatMoney(c.currentExpenses)} / limit ${formatMoney(c.targetBudgetLimit)})`).join('; ')}
             </span>
           </div>
         </div>
@@ -397,9 +429,9 @@ export default function FinancialOverview() {
             <TrendingUp className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Grant Revenue (USD eq.)</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Grant Revenue ({selectedCurrency})</span>
             <h3 className="text-xl font-bold text-slate-900 mt-0.5">
-              ${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              +{formatMoney(summary?.totalIncome)}
             </h3>
           </div>
         </div>
@@ -409,9 +441,9 @@ export default function FinancialOverview() {
             <TrendingDown className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Expenditures (USD eq.)</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Total Expenditures ({selectedCurrency})</span>
             <h3 className="text-xl font-bold text-slate-900 mt-0.5">
-              ${(summary?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              -{formatMoney(summary?.totalExpenses)}
             </h3>
           </div>
         </div>
@@ -421,9 +453,9 @@ export default function FinancialOverview() {
             <DollarSign className="w-6 h-6" />
           </div>
           <div>
-            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Net Surplus / Cash Flow (USD eq.)</span>
+            <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Net Surplus / Cash Flow ({selectedCurrency})</span>
             <h3 className={`text-xl font-bold mt-0.5 ${(summary?.netCashFlow || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-              ${(summary?.netCashFlow || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+              {(summary?.netCashFlow || 0) >= 0 ? '+' : ''}{formatMoney(summary?.netCashFlow)}
             </h3>
           </div>
         </div>
@@ -518,7 +550,9 @@ export default function FinancialOverview() {
           </div>
 
           <span className="text-[10px] text-slate-400 block text-right">
-            Rate: 1 USD = {converterData.rate ? converterData.rate.toFixed(2) : '160.60'} ETB
+            {converterData.from === 'USD'
+              ? `Rate: 1 USD = ${converterData.rate ? converterData.rate.toFixed(2) : (exchangeRates.ETB || 161.44).toFixed(2)} ETB`
+              : `Rate: 1 ETB = ${converterData.rate ? converterData.rate.toFixed(4) : (1 / (exchangeRates.ETB || 161.44)).toFixed(4)} USD`}
           </span>
         </div>
       </div>

@@ -184,6 +184,7 @@ namespace OrbitApi.Controllers
 
             _db.AuditLogs.Add(new AuditLog
             {
+                OrganizationId = org.Id,
                 Entity = "Organization",
                 Action = "Create",
                 NewValues = $"{{ Name: '{org.Name}' }}",
@@ -471,6 +472,7 @@ namespace OrbitApi.Controllers
 
             _db.AuditLogs.Add(new AuditLog
             {
+                OrganizationId = org.Id,
                 Entity = "Organization",
                 Action = "Delete",
                 Timestamp = DateTime.UtcNow,
@@ -504,6 +506,7 @@ namespace OrbitApi.Controllers
 
             _db.AuditLogs.Add(new AuditLog
             {
+                OrganizationId = org.Id,
                 Entity = "Organization",
                 Action = "Restore",
                 Timestamp = DateTime.UtcNow,
@@ -730,18 +733,53 @@ namespace OrbitApi.Controllers
             };
 
             _db.OwnershipTransferRequests.Add(transfer);
-            await _db.SaveChangesAsync();
 
             var newOwner = await _db.Users.FindAsync(req.NewOwnerUserId);
             if (newOwner != null)
             {
-                var frontendUrl = _configuration["App:FrontendBaseUrl"] ?? "https://localhost:5173";
-                var confirmLink = $"{frontendUrl}/orgs/{id}/transfer-confirm?token={token}";
-                await _emailSender.SendEmailAsync(newOwner.Email, $"Ownership Transfer: {org.Name}",
-                    $"<p>You have been requested to take ownership of {org.Name}.</p><p><a href='{confirmLink}'>Click here to confirm</a></p>");
+                var previousOwnerId = org.OwnerId;
+                org.OwnerId = newOwner.Id;
+
+                var ownerRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == RoleName.Owner);
+                var adminRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == RoleName.Admin);
+
+                if (ownerRole != null)
+                {
+                    var newOwnerMember = await _db.OrganizationMembers
+                        .FirstOrDefaultAsync(om => om.OrganizationId == id && om.UserId == newOwner.Id);
+                    if (newOwnerMember != null)
+                    {
+                        newOwnerMember.RoleId = ownerRole.Id;
+                    }
+                }
+
+                if (adminRole != null && previousOwnerId.HasValue)
+                {
+                    var prevOwnerMember = await _db.OrganizationMembers
+                        .FirstOrDefaultAsync(om => om.OrganizationId == id && om.UserId == previousOwnerId.Value);
+                    if (prevOwnerMember != null)
+                    {
+                        prevOwnerMember.RoleId = adminRole.Id;
+                    }
+                }
+
+                _db.AuditLogs.Add(new AuditLog
+                {
+                    OrganizationId = id,
+                    Entity = "Organization",
+                    Action = "TransferOwnership",
+                    NewValues = $"{{ PreviousOwnerId: {previousOwnerId}, NewOwnerId: {newOwner.Id} }}",
+                    Timestamp = DateTime.UtcNow,
+                    PerformedByUserId = GetCurrentUserId()
+                });
+
+                transfer.Status = OwnershipTransferStatus.Confirmed;
+                transfer.ConfirmedAt = DateTime.UtcNow;
             }
 
-            return Ok(new { transfer.Id, transfer.ConfirmationToken });
+            await _db.SaveChangesAsync();
+
+            return Ok(new { transfer.Id, transfer.ConfirmationToken, message = "Ownership transferred successfully." });
         }
 
         /// <summary>
@@ -766,6 +804,7 @@ namespace OrbitApi.Controllers
                 
                 _db.AuditLogs.Add(new AuditLog
                 {
+                    OrganizationId = id,
                     Entity = "Organization",
                     Action = "TransferOwnership",
                     NewValues = $"{{ OwnerId: {transfer.ToUserId} }}",

@@ -66,6 +66,10 @@ export default function Settings() {
 
   const [orgMembers, setOrgMembers] = useState([]);
   const [selectedNewOwner, setSelectedNewOwner] = useState(null);
+  const [transferRoleFilter, setTransferRoleFilter] = useState('all');
+  const [securityRoleFilter, setSecurityRoleFilter] = useState('all');
+  const [selectedRevokeUserId, setSelectedRevokeUserId] = useState('');
+  const [revokedUserIds, setRevokedUserIds] = useState([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusMessage, setStatusMessage] = useState({ type: '', text: '' });
 
@@ -399,14 +403,21 @@ export default function Settings() {
     }
   };
 
-  const fetchAbacData = async () => {
+  const fetchAbacData = async (orgIdOverride) => {
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
+      const targetOrg = orgIdOverride ?? selectedOrgId ?? selectedOrg?.id;
+      const headers = { 
+        'Authorization': `Bearer ${token}`,
+        ...(targetOrg ? { 'X-Organization-Id': targetOrg.toString() } : {})
+      };
+      const orgQuery = targetOrg ? `?orgId=${targetOrg}` : '';
+
       const [permRes, roleRes, logRes] = await Promise.all([
-        fetch(`${import.meta.env.VITE_API_URL}/permissions`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${import.meta.env.VITE_API_URL}/permissions/roles`, { headers: { 'Authorization': `Bearer ${token}` } }),
-        fetch(`${import.meta.env.VITE_API_URL}/permissions/audit-log`, { headers: { 'Authorization': `Bearer ${token}` } })
+        fetch(`${import.meta.env.VITE_API_URL}/permissions`, { headers }),
+        fetch(`${import.meta.env.VITE_API_URL}/permissions/roles${orgQuery}`, { headers }),
+        fetch(`${import.meta.env.VITE_API_URL}/permissions/audit-log${orgQuery}`, { headers })
       ]);
       
       if (permRes.ok && roleRes.ok) {
@@ -421,12 +432,19 @@ export default function Settings() {
     }
   };
 
-  const fetchActivityFeed = async () => {
+  const fetchActivityFeed = async (orgIdOverride) => {
     try {
       const token = localStorage.getItem('token');
       if (!token) return;
-      const res = await fetch(`${import.meta.env.VITE_API_URL}/activity?limit=30`, {
-        headers: { 'Authorization': `Bearer ${token}` }
+      const targetOrg = orgIdOverride ?? selectedOrgId ?? selectedOrg?.id;
+      const headers = { 
+        'Authorization': `Bearer ${token}`,
+        ...(targetOrg ? { 'X-Organization-Id': targetOrg.toString() } : {})
+      };
+      const orgQuery = targetOrg ? `&orgId=${targetOrg}` : '';
+
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/activity?limit=30${orgQuery}`, {
+        headers
       });
       if (res.ok) setActivityFeed(await res.json());
     } catch (err) { console.error('Failed to fetch activity feed', err); }
@@ -478,6 +496,8 @@ export default function Settings() {
       setEditOrgLogoFile(null);
       fetchOrgMembers(selectedOrg.id);
       fetchWorkspaces(selectedOrg.id);
+      fetchAbacData(selectedOrg.id);
+      fetchActivityFeed(selectedOrg.id);
     }
   }, [selectedOrgId, organizations]);
 
@@ -614,7 +634,7 @@ export default function Settings() {
   const handleTransferOwnership = async (e) => {
     e.preventDefault();
     if (!selectedOrgId || !selectedNewOwner) {
-      showStatus('error', 'Please select a new owner from the list.');
+      showStatus('error', 'Please select a new owner from the dropdown menu.');
       return;
     }
     try {
@@ -629,9 +649,10 @@ export default function Settings() {
         body: JSON.stringify({ newOwnerUserId: selectedNewOwner.userId })
       });
       if (response.ok) {
-        showStatus('success', 'Ownership transfer request sent successfully!');
+        showStatus('success', 'Ownership transferred successfully!');
         setSelectedNewOwner(null);
-        fetchOrganizations();
+        await fetchOrganizations();
+        await fetchOrgMembers(selectedOrgId);
       } else {
         const error = await parseApiResponse(response);
         showStatus('error', 'Failed to transfer ownership: ' + error);
@@ -641,6 +662,25 @@ export default function Settings() {
       showStatus('error', 'Failed to transfer ownership: ' + err.message);
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleRevokeSession = async (targetUserId, targetUserName) => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/revoke`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ userId: targetUserId, tokenId: '*' })
+      });
+      if (res.ok) {
+        showStatus('success', `Active sessions successfully revoked for ${targetUserName}`);
+        setRevokedUserIds((prev) => [...prev, targetUserId]);
+      } else {
+        showStatus('error', 'Failed to revoke sessions.');
+      }
+    } catch (e) {
+      showStatus('error', 'Network error while attempting to revoke session.');
     }
   };
 
@@ -678,6 +718,26 @@ export default function Settings() {
     org: org
   }));
 
+  const DEFINED_SYSTEM_ROLES = ['Admin', 'Manager', 'Finance', 'Coordinator', 'Member', 'Viewer'];
+
+  const isDefinedSystemRole = (roleName) => {
+    if (!roleName) return false;
+    const normalized = roleName.toLowerCase().replace(/[^a-z]/g, '');
+    return ['admin', 'manager', 'finance', 'financeofficer', 'coordinator', 'member', 'viewer'].includes(normalized);
+  };
+
+  const getCleanRoleDisplay = (roleName) => {
+    if (!roleName) return 'Member';
+    const lower = roleName.toLowerCase();
+    if (lower.includes('admin')) return 'Admin';
+    if (lower.includes('manager')) return 'Manager';
+    if (lower.includes('finance')) return 'Finance';
+    if (lower.includes('coordinator')) return 'Coordinator';
+    if (lower.includes('viewer')) return 'Viewer';
+    if (lower.includes('owner')) return 'Owner';
+    return 'Member';
+  };
+
   const roles = [
     { name: 'Admin', desc: 'Full organization management, member invitations, and settings.' },
     { name: 'Coordinator', desc: 'Coordinates activities, teams, and volunteers across projects.' },
@@ -686,6 +746,24 @@ export default function Settings() {
     { name: 'Member', desc: 'Standard team contributor access to assigned projects and tasks.' },
     { name: 'Viewer', desc: 'Read-only access to organization information and reports.' }
   ];
+
+  const eligibleTransferMembers = orgMembers.filter((m) => {
+    if (m.userId === selectedOrg?.ownerId) return false;
+    if (m.email?.toLowerCase().startsWith('demo.') || m.userName?.toLowerCase().includes('demo')) return false;
+    if (!isDefinedSystemRole(m.roleName)) return false;
+    if (transferRoleFilter !== 'all') {
+      return getCleanRoleDisplay(m.roleName) === transferRoleFilter;
+    }
+    return true;
+  });
+
+  const eligibleSecurityMembers = orgMembers.filter((m) => {
+    if (!isDefinedSystemRole(m.roleName)) return false;
+    if (securityRoleFilter !== 'all') {
+      return getCleanRoleDisplay(m.roleName) === securityRoleFilter;
+    }
+    return true;
+  });
 
   return (
     <div className="flex flex-col gap-6 max-w-7xl mx-auto w-full pb-16">
@@ -1219,70 +1297,84 @@ export default function Settings() {
           {activeTab === 'transfer' && (
             <div className="mt-6 max-w-3xl">
               <form onSubmit={handleTransferOwnership} className="flex flex-col gap-6">
-                <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 p-4 text-amber-900">
-                  <div className="flex gap-3">
-                    <span className="text-xl">⚠️</span>
+                <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-7 shadow-xs space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                     <div>
-                      <p className="font-bold text-sm text-amber-900">Important Ownership Transfer Notice</p>
-                      <p className="text-xs text-amber-800/90 mt-1 leading-relaxed">
-                        Transferring ownership will grant complete administrative authority over this organization to the chosen member.
-                      </p>
+                      <h4 className="text-base font-bold text-slate-900">Transfer Organization Ownership</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Assign full administrative ownership of {selectedOrg?.name || 'this organization'} to a verified member.</p>
+                    </div>
+
+                    {/* Role Filter Dropdown - contains strictly defined system roles */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">Filter Role:</label>
+                      <select
+                        value={transferRoleFilter}
+                        onChange={(e) => setTransferRoleFilter(e.target.value)}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20"
+                      >
+                        <option value="all">All Defined Roles</option>
+                        {DEFINED_SYSTEM_ROLES.map((role) => (
+                          <option key={role} value={role}>{role}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                </div>
 
-                <div>
-                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-700">Select New Owner *</label>
-                  {orgMembers.filter(m => m.userId !== selectedOrg?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo')).length === 0 ? (
-                    <div className="rounded-2xl bg-slate-50 border border-slate-200 p-6 text-center text-slate-500 text-sm">
-                      No other real members found in this organization to transfer ownership to. Invite real team members first.
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                      {orgMembers
-                        .filter(m => m.userId !== selectedOrg?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo'))
-                        .map((member) => {
-                          const isSelected = selectedNewOwner?.userId === member.userId;
-                          return (
-                            <label
-                              key={member.userId}
-                              className={`flex items-center justify-between p-4 rounded-2xl border cursor-pointer transition-all ${
-                                isSelected
-                                  ? 'border-[#5A45FF] bg-[#5A45FF]/10 ring-2 ring-[#5A45FF]/30 shadow-sm'
-                                  : 'border-slate-200 bg-white hover:border-slate-300'
-                              }`}
-                            >
-                              <div className="flex items-center gap-3.5">
-                                <input
-                                  type="radio"
-                                  name="newOwner"
-                                  checked={isSelected}
-                                  onChange={() => setSelectedNewOwner(member)}
-                                  className="text-[#5A45FF] focus:ring-[#5A45FF] h-4 w-4"
-                                />
-                                <div>
-                                  <p className="font-bold text-sm text-slate-900">{member.userName}</p>
-                                  <p className="text-xs text-slate-500">{member.email}</p>
-                                </div>
-                              </div>
-                              <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
-                                {member.roleName || 'Member'}
-                              </span>
-                            </label>
-                          );
-                        })}
+                  {/* Dropdown Menu for selecting new owner */}
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                      Select New Owner (Defined Roles Only) *
+                    </label>
+                    <select
+                      value={selectedNewOwner?.userId || ''}
+                      onChange={(e) => {
+                        const uid = parseInt(e.target.value, 10);
+                        const member = orgMembers.find((m) => m.userId === uid);
+                        setSelectedNewOwner(member || null);
+                      }}
+                      className="w-full rounded-2xl border border-slate-300 px-4 py-3 text-sm font-medium text-slate-800 bg-white focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 transition"
+                    >
+                      <option value="">-- Select Member from Dropdown Menu --</option>
+                      {eligibleTransferMembers.map((member) => (
+                        <option key={member.userId} value={member.userId}>
+                          {getCleanRoleDisplay(member.roleName)}
+                        </option>
+                      ))}
+                    </select>
+                    {eligibleTransferMembers.length === 0 && (
+                      <p className="text-xs text-slate-400 mt-2 italic">
+                        No members with defined roles found matching the current filter.
+                      </p>
+                    )}
+                  </div>
+
+                  {/* Selected New Owner Preview Card */}
+                  {selectedNewOwner && (
+                    <div className="p-4 rounded-2xl border border-indigo-200 bg-indigo-50/50 flex items-center justify-between">
+                      <div className="flex items-center gap-3.5">
+                        <div className="h-10 w-10 rounded-xl bg-[#5A45FF] text-white font-bold text-sm flex items-center justify-center shadow-xs">
+                          {getCleanRoleDisplay(selectedNewOwner.roleName).charAt(0)}
+                        </div>
+                        <div>
+                          <p className="font-bold text-sm text-slate-900">{getCleanRoleDisplay(selectedNewOwner.roleName)}</p>
+                          <p className="text-xs text-indigo-600 font-medium">Ready for Ownership Transfer</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold px-3 py-1 rounded-full bg-white text-[#5A45FF] border border-indigo-200 shadow-2xs">
+                        {getCleanRoleDisplay(selectedNewOwner.roleName)}
+                      </span>
                     </div>
                   )}
-                </div>
 
-                <div className="mt-2 flex justify-end gap-3 pt-4 border-t border-slate-200/60">
-                  <button
-                    type="submit"
-                    disabled={!selectedNewOwner || isSubmitting}
-                    className="rounded-full bg-rose-600 px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-rose-600/20 hover:bg-rose-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {isSubmitting ? 'Transferring...' : 'Transfer Ownership'}
-                  </button>
+                  <div className="flex justify-end pt-2 border-t border-slate-100">
+                    <button
+                      type="submit"
+                      disabled={!selectedNewOwner || isSubmitting}
+                      className="rounded-full bg-gradient-to-r from-indigo-600 to-[#5A45FF] hover:from-indigo-700 hover:to-[#5A45FF] px-6 py-2.5 text-sm font-semibold text-white shadow-md shadow-[#5A45FF]/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {isSubmitting ? 'Transferring...' : 'Transfer Ownership'}
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>
@@ -1292,70 +1384,122 @@ export default function Settings() {
           {activeTab === 'security' && (
             <div className="mt-6 max-w-3xl">
               <div className="flex flex-col gap-6">
-                <div className="rounded-2xl bg-rose-50 border border-rose-100 p-4 text-rose-900">
-                  <div className="flex gap-3">
-                    <span className="text-xl">🛡️</span>
+                <div className="bg-white rounded-3xl border border-slate-200 p-6 sm:p-7 shadow-xs space-y-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
                     <div>
-                      <p className="font-bold text-sm text-rose-900">Active Session Control</p>
-                      <p className="text-xs text-rose-800/90 mt-1 leading-relaxed">
-                        Instantly revoke access tokens for active users in this organization. The user will be instantly logged out on their next action and their active JWT token will be administratively blocked.
-                      </p>
+                      <h4 className="text-base font-bold text-slate-900">Active Session Control</h4>
+                      <p className="text-xs text-slate-500 mt-0.5">Revoke active user sessions and administratively block tokens for {selectedOrg?.name || 'organization'}.</p>
+                    </div>
+
+                    {/* Role Filter Dropdown - strictly defined roles only */}
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">Filter Role:</label>
+                      <select
+                        value={securityRoleFilter}
+                        onChange={(e) => setSecurityRoleFilter(e.target.value)}
+                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-700 focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/20"
+                      >
+                        <option value="all">All Defined Roles</option>
+                        {DEFINED_SYSTEM_ROLES.map((role) => (
+                          <option key={role} value={role}>{role}</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
-                </div>
 
-                <div>
-                  <h4 className="font-bold text-slate-900 text-sm mb-3">Organization Users</h4>
-                  <div className="space-y-2.5 max-h-64 overflow-y-auto pr-1">
-                    {orgMembers.map((member) => {
-                      const isSelf = user && member.userId === user.id;
-                      return (
-                        <div key={member.userId} className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 bg-white">
-                          <div className="flex items-center gap-3.5">
-                            <div className="h-8 w-8 rounded-full bg-slate-100 text-slate-600 font-bold text-xs flex items-center justify-center">
-                              {member.userName?.charAt(0) || 'U'}
-                            </div>
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <p className="font-bold text-sm text-slate-900">{member.userName}</p>
-                                {isSelf && (
-                                  <span className="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-bold">
-                                    Current Active Session
-                                  </span>
-                                )}
+                  {/* Dropdown Menu for Quick Revoke User */}
+                  <div>
+                    <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+                      Select Role to Revoke Session
+                    </label>
+                    <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center">
+                      <div className="flex-1">
+                        <select
+                          value={selectedRevokeUserId}
+                          onChange={(e) => setSelectedRevokeUserId(e.target.value)}
+                          className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-800 bg-white focus:border-rose-500 focus:outline-none focus:ring-2 focus:ring-rose-500/20 transition"
+                        >
+                          <option value="">-- Choose Role from Dropdown to Revoke --</option>
+                          {eligibleSecurityMembers
+                            .filter((m) => !(user && m.userId === user.id))
+                            .map((member) => (
+                              <option key={member.userId} value={member.userId}>
+                                {getCleanRoleDisplay(member.roleName)}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={!selectedRevokeUserId}
+                        onClick={() => {
+                          const uid = parseInt(selectedRevokeUserId, 10);
+                          const targetMember = orgMembers.find((m) => m.userId === uid);
+                          if (targetMember) {
+                            handleRevokeSession(targetMember.userId, getCleanRoleDisplay(targetMember.roleName));
+                            setSelectedRevokeUserId('');
+                          }
+                        }}
+                        className="rounded-2xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-5 py-3 shadow-md shadow-rose-600/20 transition disabled:opacity-40 disabled:cursor-not-allowed whitespace-nowrap"
+                      >
+                        Revoke Selected
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* User List with Defined Roles */}
+                  <div>
+                    <h5 className="font-bold text-slate-900 text-xs uppercase tracking-wider mb-3">
+                      Organization Users ({eligibleSecurityMembers.length})
+                    </h5>
+                    {eligibleSecurityMembers.length === 0 ? (
+                      <p className="text-xs text-slate-400 italic py-4 text-center">
+                        No users found with defined roles matching the current filter.
+                      </p>
+                    ) : (
+                      <div className="space-y-2.5 max-h-72 overflow-y-auto pr-1">
+                        {eligibleSecurityMembers.map((member) => {
+                          const isSelf = user && member.userId === user.id;
+                          const isRevoked = revokedUserIds.includes(member.userId);
+                          const singleRoleName = getCleanRoleDisplay(member.roleName);
+                          return (
+                            <div key={member.userId} className="flex items-center justify-between p-4 rounded-2xl border border-slate-200 bg-white hover:border-slate-300 transition">
+                              <div className="flex items-center gap-3.5">
+                                <div className="h-9 w-9 rounded-full bg-slate-100 text-slate-700 font-bold text-xs flex items-center justify-center">
+                                  {singleRoleName.charAt(0)}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <p className="font-bold text-sm text-slate-900">{singleRoleName}</p>
+                                    {isSelf && (
+                                      <span className="rounded-full bg-emerald-100 text-emerald-700 px-2 py-0.5 text-[10px] font-bold">
+                                        Current Active Session
+                                      </span>
+                                    )}
+                                    {isRevoked && (
+                                      <span className="rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[10px] font-bold">
+                                        Session Terminated
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
                               </div>
-                              <p className="text-xs text-slate-500">{member.email}</p>
+                              {isSelf ? (
+                                <span className="text-xs font-semibold text-slate-400 italic">Self (Protected)</span>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleRevokeSession(member.userId, singleRoleName)}
+                                  className="rounded-full bg-rose-50 text-rose-600 px-4 py-1.5 text-xs font-semibold hover:bg-rose-100 hover:text-rose-700 transition"
+                                >
+                                  {isRevoked ? 'Re-Revoke' : 'Revoke Session'}
+                                </button>
+                              )}
                             </div>
-                          </div>
-                          {isSelf ? (
-                            <span className="text-xs font-semibold text-slate-400 italic">Self (Protected)</span>
-                          ) : (
-                            <button
-                              onClick={async () => {
-                                try {
-                                  const token = localStorage.getItem('token');
-                                  const res = await fetch(`${import.meta.env.VITE_API_URL}/auth/revoke`, {
-                                    method: 'POST',
-                                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                                    body: JSON.stringify({ userId: member.userId, tokenId: '*' })
-                                  });
-                                  if (res.ok) {
-                                    showStatus('success', `All active sessions revoked for ${member.userName}`);
-                                  } else {
-                                    showStatus('error', 'Failed to revoke sessions.');
-                                  }
-                                } catch (e) {
-                                  showStatus('error', 'Network error while attempting to revoke session.');
-                                }
-                              }}
-                              className="rounded-full bg-rose-50 text-rose-600 px-4 py-1.5 text-xs font-semibold hover:bg-rose-100 hover:text-rose-700 transition"
-                            >
-                              Revoke Sessions
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

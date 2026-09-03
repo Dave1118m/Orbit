@@ -11,7 +11,12 @@ import {
 export default function Reports() {
   const [activeTab, setActiveTab] = useState('operational');
   const [finSubTab, setFinSubTab] = useState('dashboard');
-  const [selectedCurrency, setSelectedCurrency] = useState('USD');
+  const [selectedCurrency, setSelectedCurrency] = useState(() => localStorage.getItem('orbit_selected_currency') || 'USD');
+
+  const handleCurrencyChange = (curr) => {
+    setSelectedCurrency(curr);
+    localStorage.setItem('orbit_selected_currency', curr);
+  };
 
   const tabs = [
     {
@@ -60,7 +65,7 @@ export default function Reports() {
               </div>
               <select
                 value={selectedCurrency}
-                onChange={(e) => setSelectedCurrency(e.target.value)}
+                onChange={(e) => handleCurrencyChange(e.target.value)}
                 className="bg-slate-900/80 text-white text-xs font-bold px-3 py-1.5 rounded-xl border border-white/20 focus:outline-none focus:ring-2 focus:ring-indigo-400"
               >
                 <option value="USD">USD ($)</option>
@@ -132,10 +137,14 @@ export default function Reports() {
                 </button>
               </div>
 
-              {finSubTab === 'dashboard' ? <FinancialDashboard /> : <FinancialReports />}
+              {finSubTab === 'dashboard' ? (
+                <FinancialDashboard selectedCurrency={selectedCurrency} />
+              ) : (
+                <FinancialReports selectedCurrency={selectedCurrency} />
+              )}
             </div>
           )}
-          {activeTab === 'export' && <ExportCapabilities />}
+          {activeTab === 'export' && <ExportCapabilities selectedCurrency={selectedCurrency} />}
           {activeTab === 'scheduled' && <ScheduledReports />}
         </div>
       </div>

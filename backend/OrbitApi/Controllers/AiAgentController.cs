@@ -60,22 +60,213 @@ public class AiAgentController : ControllerBase
         public int OrganizationId { get; set; }
         public string RolePersona { get; set; } = "Admin";
         public bool IsAgentModeActive { get; set; }
+        public decimal? MaxAutoApprovalAmount { get; set; }
         public string? AutoReplyMessage { get; set; }
+        public bool? AutoApproveVerifiedReceipts { get; set; }
+        public bool? AutoTriageTasks { get; set; }
+    }
+
+    [HttpGet("delegate-status")]
+    public async Task<IActionResult> GetDelegateStatus([FromQuery] int orgId = 1)
+    {
+        var userId = GetCurrentUserId();
+        if (userId <= 0) return Unauthorized();
+
+        var config = await _db.AiDelegateConfigurations
+            .FirstOrDefaultAsync(c => c.UserId == userId && c.OrganizationId == orgId);
+
+        if (config == null)
+        {
+            return Ok(new
+            {
+                isAgentModeActive = false,
+                rolePersona = "Admin",
+                organizationId = orgId,
+                maxAutoApprovalAmount = 100.00m,
+                autoReplyMessage = (string?)null,
+                autoApproveVerifiedReceipts = true,
+                autoTriageTasks = true,
+                activatedAt = (DateTime?)null,
+                lastDeactivatedAt = (DateTime?)null,
+                updatedAt = DateTime.UtcNow
+            });
+        }
+
+        return Ok(new
+        {
+            isAgentModeActive = config.IsActive,
+            rolePersona = config.RolePersona,
+            organizationId = config.OrganizationId,
+            maxAutoApprovalAmount = config.MaxAutoApprovalAmount,
+            autoReplyMessage = config.AutoReplyMessage,
+            autoApproveVerifiedReceipts = config.AutoApproveVerifiedReceipts,
+            autoTriageTasks = config.AutoTriageTasks,
+            activatedAt = config.ActivatedAt,
+            lastDeactivatedAt = config.LastDeactivatedAt,
+            updatedAt = config.UpdatedAt
+        });
     }
 
     [HttpPost("delegate-status")]
-    public IActionResult SetDelegateStatus([FromBody] DelegateStatusRequest request)
+    public async Task<IActionResult> SetDelegateStatus([FromBody] DelegateStatusRequest request)
     {
-        // Return active state acknowledgment
+        var userId = GetCurrentUserId();
+        if (userId <= 0) return Unauthorized();
+
+        var config = await _db.AiDelegateConfigurations
+            .FirstOrDefaultAsync(c => c.UserId == userId && c.OrganizationId == request.OrganizationId);
+
+        var wasActive = config?.IsActive ?? false;
+
+        if (config == null)
+        {
+            config = new AiDelegateConfiguration
+            {
+                UserId = userId,
+                OrganizationId = request.OrganizationId,
+                IsActive = request.IsAgentModeActive,
+                RolePersona = string.IsNullOrWhiteSpace(request.RolePersona) ? "Admin" : request.RolePersona,
+                MaxAutoApprovalAmount = request.MaxAutoApprovalAmount ?? 100.00m,
+                AutoReplyMessage = request.AutoReplyMessage,
+                AutoApproveVerifiedReceipts = request.AutoApproveVerifiedReceipts ?? true,
+                AutoTriageTasks = request.AutoTriageTasks ?? true,
+                ActivatedAt = request.IsAgentModeActive ? DateTime.UtcNow : null,
+                UpdatedAt = DateTime.UtcNow
+            };
+            _db.AiDelegateConfigurations.Add(config);
+        }
+        else
+        {
+            config.IsActive = request.IsAgentModeActive;
+            if (!string.IsNullOrWhiteSpace(request.RolePersona))
+            {
+                config.RolePersona = request.RolePersona;
+            }
+            if (request.MaxAutoApprovalAmount.HasValue)
+            {
+                config.MaxAutoApprovalAmount = request.MaxAutoApprovalAmount.Value;
+            }
+            if (request.AutoReplyMessage != null)
+            {
+                config.AutoReplyMessage = request.AutoReplyMessage;
+            }
+            if (request.AutoApproveVerifiedReceipts.HasValue)
+            {
+                config.AutoApproveVerifiedReceipts = request.AutoApproveVerifiedReceipts.Value;
+            }
+            if (request.AutoTriageTasks.HasValue)
+            {
+                config.AutoTriageTasks = request.AutoTriageTasks.Value;
+            }
+
+            if (!wasActive && request.IsAgentModeActive)
+            {
+                config.ActivatedAt = DateTime.UtcNow;
+            }
+            else if (wasActive && !request.IsAgentModeActive)
+            {
+                config.LastDeactivatedAt = DateTime.UtcNow;
+            }
+            config.UpdatedAt = DateTime.UtcNow;
+        }
+
+        _db.AuditLogs.Add(new AuditLog
+        {
+            OrganizationId = request.OrganizationId,
+            Action = request.IsAgentModeActive ? "AiDelegateActivated" : "AiDelegateDeactivated",
+            Entity = "AiDelegateConfiguration",
+            PerformedByUserId = userId,
+            Timestamp = DateTime.UtcNow,
+            NewValues = $"AI Delegate {(request.IsAgentModeActive ? "ACTIVATED" : "DEACTIVATED")} for {config.RolePersona} in Org #{request.OrganizationId}"
+        });
+
+        await _db.SaveChangesAsync();
+
         return Ok(new
         {
             message = request.IsAgentModeActive
-                ? $"🤖 Agent Delegate is now ACTIVE for {request.RolePersona}. Auto-delegation enabled."
-                : $"👤 Switched back to Human Mode for {request.RolePersona}.",
-            isAgentModeActive = request.IsAgentModeActive,
-            rolePersona = request.RolePersona,
-            organizationId = request.OrganizationId,
-            updatedAt = DateTime.UtcNow
+                ? $"🤖 Agent Delegate is now ACTIVE for {config.RolePersona}. Auto-delegation enabled."
+                : $"👤 Switched back to Human Mode for {config.RolePersona}.",
+            isAgentModeActive = config.IsActive,
+            rolePersona = config.RolePersona,
+            organizationId = config.OrganizationId,
+            maxAutoApprovalAmount = config.MaxAutoApprovalAmount,
+            autoReplyMessage = config.AutoReplyMessage,
+            autoApproveVerifiedReceipts = config.AutoApproveVerifiedReceipts,
+            autoTriageTasks = config.AutoTriageTasks,
+            activatedAt = config.ActivatedAt,
+            lastDeactivatedAt = config.LastDeactivatedAt,
+            updatedAt = config.UpdatedAt
+        });
+    }
+
+    [HttpGet("delegate-handoff")]
+    public async Task<IActionResult> GetDelegateHandoff([FromQuery] int orgId = 1)
+    {
+        var userId = GetCurrentUserId();
+        if (userId <= 0) return Unauthorized();
+
+        var unacknowledgedLogs = await _db.AiDelegateActionLogs
+            .Where(l => l.OrganizationId == orgId && l.UserId == userId && !l.WasAcknowledged)
+            .OrderByDescending(l => l.Timestamp)
+            .Take(50)
+            .Select(l => new
+            {
+                l.Id,
+                l.ActionType,
+                l.Entity,
+                l.EntityId,
+                l.Summary,
+                l.DetailsJson,
+                l.Timestamp
+            })
+            .ToListAsync();
+
+        var autoApprovedCount = unacknowledgedLogs.Count(l => l.ActionType == "AutoApproveExpense");
+        var tasksTriagedCount = unacknowledgedLogs.Count(l => l.ActionType == "TriageTask");
+
+        return Ok(new
+        {
+            totalUnacknowledged = unacknowledgedLogs.Count,
+            autoApprovedCount,
+            tasksTriagedCount,
+            actions = unacknowledgedLogs
+        });
+    }
+
+    public class AcknowledgeHandoffRequest
+    {
+        public int OrganizationId { get; set; }
+        public List<int>? ActionLogIds { get; set; }
+    }
+
+    [HttpPost("delegate-handoff/acknowledge")]
+    public async Task<IActionResult> AcknowledgeHandoff([FromBody] AcknowledgeHandoffRequest request)
+    {
+        var userId = GetCurrentUserId();
+        if (userId <= 0) return Unauthorized();
+
+        var query = _db.AiDelegateActionLogs
+            .Where(l => l.OrganizationId == request.OrganizationId && l.UserId == userId && !l.WasAcknowledged);
+
+        if (request.ActionLogIds != null && request.ActionLogIds.Any())
+        {
+            query = query.Where(l => request.ActionLogIds.Contains(l.Id));
+        }
+
+        var logsToUpdate = await query.ToListAsync();
+        foreach (var log in logsToUpdate)
+        {
+            log.WasAcknowledged = true;
+        }
+
+        await _db.SaveChangesAsync();
+
+        return Ok(new
+        {
+            message = $"{logsToUpdate.Count} AI Delegate actions acknowledged.",
+            acknowledgedCount = logsToUpdate.Count
         });
     }
 }
+

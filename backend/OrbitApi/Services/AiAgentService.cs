@@ -34,39 +34,66 @@ public class AiAgentService : IAiAgentService
         {
             new AiPersonaDto
             {
-                RoleName = "Admin",
-                DisplayTitle = "Administrator Delegate",
-                Description = "Organization governance, user invitations, access security, workspace oversight.",
+                RoleName = "Owner",
+                DisplayTitle = "Owner",
+                Description = "Organization governance, executive oversight, policy control.",
                 Icon = "",
                 IsCustomRole = false,
-                Capabilities = new List<string> { "Invite Members", "Manage Workspaces", "Audit Security", "Overview Briefing", "System Architecture Guide" }
+                Capabilities = new List<string> { "Executive Briefing", "Audit Security", "Approve Expenses", "Overview Briefing" }
+            },
+            new AiPersonaDto
+            {
+                RoleName = "Admin",
+                DisplayTitle = "Admin",
+                Description = "User invitations, workspace management, access security.",
+                Icon = "",
+                IsCustomRole = false,
+                Capabilities = new List<string> { "Invite Members", "Manage Workspaces", "Audit Security", "Overview Briefing" }
             },
             new AiPersonaDto
             {
                 RoleName = "Manager",
-                DisplayTitle = "Project Manager Delegate",
-                Description = "Project milestones, task scheduling, team assignments, risk log oversight.",
+                DisplayTitle = "Manager",
+                Description = "Project milestones, task scheduling, team assignments, risk logs.",
                 Icon = "",
                 IsCustomRole = false,
-                Capabilities = new List<string> { "Create Tasks", "Track Project Milestones", "Review Risk Logs", "Check Deadlines", "Workflows Walkthrough" }
+                Capabilities = new List<string> { "Create Tasks", "Track Milestones", "Review Risks", "Check Deadlines" }
             },
             new AiPersonaDto
             {
                 RoleName = "FinanceOfficer",
-                DisplayTitle = "Finance Officer Delegate",
-                Description = "Budget allocation, financial transaction audits, expense claim approvals.",
+                DisplayTitle = "Finance",
+                Description = "Budget allocation, transaction audits, expense claim approvals.",
                 Icon = "",
                 IsCustomRole = false,
-                Capabilities = new List<string> { "Approve/Reject Expenses", "Financial Summary", "Audit Budgets", "Track Category Spend", "Finance Engine Guide" }
+                Capabilities = new List<string> { "Approve/Reject Expenses", "Financial Summary", "Audit Budgets", "Track Spend" }
             },
             new AiPersonaDto
             {
                 RoleName = "Coordinator",
-                DisplayTitle = "Program Coordinator Delegate",
+                DisplayTitle = "Coordinator",
                 Description = "Field operations, volunteer mobilization, cross-team activities.",
                 Icon = "",
                 IsCustomRole = false,
-                Capabilities = new List<string> { "Manage Volunteers", "Track Volunteer Hours", "Assign Field Tasks", "Logframe & MEL Guide" }
+                Capabilities = new List<string> { "Manage Volunteers", "Track Hours", "Assign Field Tasks" }
+            },
+            new AiPersonaDto
+            {
+                RoleName = "Member",
+                DisplayTitle = "Member",
+                Description = "Task execution, progress tracking, project updates.",
+                Icon = "",
+                IsCustomRole = false,
+                Capabilities = new List<string> { "My Tasks", "Upcoming Deadlines", "Track Progress" }
+            },
+            new AiPersonaDto
+            {
+                RoleName = "Viewer",
+                DisplayTitle = "Viewer",
+                Description = "Read-only workspace viewing and project tracking.",
+                Icon = "",
+                IsCustomRole = false,
+                Capabilities = new List<string> { "View Projects", "Summary Briefing", "Read-Only Reports" }
             }
         };
 
@@ -81,7 +108,7 @@ public class AiAgentService : IAiAgentService
                 RoleName = "Member",
                 RoleId = cr.Id,
                 DisplayTitle = cr.DisplayName,
-                Description = cr.Description ?? $"Dynamic role delegate for {cr.DisplayName}.",
+                Description = cr.Description ?? $"Custom role for {cr.DisplayName}.",
                 Icon = "",
                 IsCustomRole = true,
                 Capabilities = new List<string> { "Scoped Task Execution", "Assigned Workspaces", "Operational Action" }
@@ -311,7 +338,7 @@ IMPORTANT FORMATTING RULES:
         var client = _httpClientFactory.CreateClient();
         client.Timeout = TimeSpan.FromSeconds(45);
 
-        var candidateModels = new[] { "gemini-3.6-flash", "gemini-3.7-flash", "gemini-flash-latest", "gemini-2.5-flash-lite" }.Distinct();
+        var candidateModels = new[] { "gemini-flash-latest", "gemini-3.7-flash", "gemini-3.6-flash" }.Distinct();
 
         foreach (var m in candidateModels)
         {

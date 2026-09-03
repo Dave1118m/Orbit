@@ -15,6 +15,7 @@ export default function Organizations() {
   const [selectedOrgForTransfer, setSelectedOrgForTransfer] = useState(null);
   const [orgMembers, setOrgMembers] = useState([]);
   const [selectedNewOwner, setSelectedNewOwner] = useState(null);
+  const [transferRoleFilter, setTransferRoleFilter] = useState('all');
   const [formData, setFormData] = useState({
     name: '',
     description: '',
@@ -248,10 +249,30 @@ export default function Organizations() {
     }
   };
 
+  const DEFINED_SYSTEM_ROLES = ['Admin', 'Manager', 'Finance', 'Coordinator', 'Member', 'Viewer'];
+
+  const isDefinedSystemRole = (roleName) => {
+    if (!roleName) return false;
+    const normalized = roleName.toLowerCase().replace(/[^a-z]/g, '');
+    return ['admin', 'manager', 'finance', 'financeofficer', 'coordinator', 'member', 'viewer'].includes(normalized);
+  };
+
+  const getCleanRoleDisplay = (roleName) => {
+    if (!roleName) return 'Member';
+    const lower = roleName.toLowerCase();
+    if (lower.includes('admin')) return 'Admin';
+    if (lower.includes('manager')) return 'Manager';
+    if (lower.includes('finance')) return 'Finance';
+    if (lower.includes('coordinator')) return 'Coordinator';
+    if (lower.includes('viewer')) return 'Viewer';
+    if (lower.includes('owner')) return 'Owner';
+    return 'Member';
+  };
+
   const handleTransferOwnership = async (e) => {
     e.preventDefault();
     if (!selectedOrgForTransfer || !selectedNewOwner) {
-      showSuccessToast('Please select a new owner');
+      showSuccessToast('Please select a new owner from the dropdown');
       return;
     }
     try {
@@ -265,11 +286,12 @@ export default function Organizations() {
         body: JSON.stringify({ newOwnerUserId: selectedNewOwner.userId })
       });
       if (response.ok) {
-        showSuccessToast('Ownership transfer request sent. The new owner will receive an email to confirm the transfer.');
+        showSuccessToast('Ownership transferred successfully!');
         setIsTransferModalOpen(false);
         setSelectedOrgForTransfer(null);
         setSelectedNewOwner(null);
         setOrgMembers([]);
+        await fetchOrganizations();
       } else {
         const error = await parseApiResponse(response);
         showErrorToast('Failed to transfer ownership: ' + error);
@@ -586,46 +608,69 @@ export default function Organizations() {
         }}
         title={`Transfer Ownership: ${selectedOrgForTransfer?.name}`}
       >
-        <form onSubmit={handleTransferOwnership} className="flex flex-col gap-4">
-          <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-            <p className="text-sm text-amber-800">
-              ⚠️ You are about to transfer ownership of this organization. The new owner will receive an email to confirm the transfer. You will lose all owner privileges once the transfer is confirmed.
-            </p>
+        <form onSubmit={handleTransferOwnership} className="flex flex-col gap-5">
+          <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <p className="text-xs text-slate-500">Select a verified member with a system-defined role to assign ownership.</p>
+            <div className="flex items-center gap-2">
+              <label className="text-xs font-semibold text-slate-500 whitespace-nowrap">Filter:</label>
+              <select
+                value={transferRoleFilter}
+                onChange={(e) => setTransferRoleFilter(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-semibold text-slate-700 focus:border-brand-500 focus:outline-none"
+              >
+                <option value="all">All Defined Roles</option>
+                {DEFINED_SYSTEM_ROLES.map((r) => (
+                  <option key={r} value={r}>{r}</option>
+                ))}
+              </select>
+            </div>
           </div>
+
           <div>
-            <label className="mb-2 block text-sm font-medium text-slate-700">Select New Owner *</label>
-            {orgMembers.filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo')).length === 0 ? (
-              <p className="text-sm text-slate-500">No real members available to transfer ownership to.</p>
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-slate-700">
+              Select New Owner (Defined Roles Only) *
+            </label>
+            {orgMembers
+              .filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo') && isDefinedSystemRole(m.roleName) && (transferRoleFilter === 'all' || getCleanRoleDisplay(m.roleName) === transferRoleFilter)).length === 0 ? (
+              <p className="text-xs text-slate-500 italic py-2">No eligible members found with defined roles matching the current filter.</p>
             ) : (
-              <div className="space-y-2 max-h-60 overflow-y-auto">
+              <select
+                value={selectedNewOwner?.userId || ''}
+                onChange={(e) => {
+                  const uid = parseInt(e.target.value, 10);
+                  const member = orgMembers.find(m => m.userId === uid);
+                  setSelectedNewOwner(member || null);
+                }}
+                className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-800 bg-white focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-500/20 transition"
+              >
+                <option value="">-- Select Member from Dropdown Menu --</option>
                 {orgMembers
-                  .filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo'))
+                  .filter(m => m.userId !== selectedOrgForTransfer?.ownerId && !m.email?.toLowerCase().startsWith('demo.') && !m.userName?.toLowerCase().includes('demo') && isDefinedSystemRole(m.roleName) && (transferRoleFilter === 'all' || getCleanRoleDisplay(m.roleName) === transferRoleFilter))
                   .map(member => (
-                    <label 
-                      key={member.userId} 
-                      className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition ${
-                        selectedNewOwner?.userId === member.userId 
-                          ? 'border-brand-500 bg-brand-50' 
-                          : 'border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <input
-                        type="radio"
-                        name="newOwner"
-                        checked={selectedNewOwner?.userId === member.userId}
-                        onChange={() => setSelectedNewOwner(member)}
-                        className="text-brand-500 focus:ring-brand-500"
-                      />
-                      <div>
-                        <p className="font-medium text-slate-900">{member.userName}</p>
-                        <p className="text-xs text-slate-500">{member.email}</p>
-                        <p className="text-xs text-slate-600 mt-1">Role: {member.roleName}</p>
-                      </div>
-                    </label>
+                    <option key={member.userId} value={member.userId}>
+                      {getCleanRoleDisplay(member.roleName)}
+                    </option>
                   ))}
-              </div>
+              </select>
             )}
           </div>
+
+          {selectedNewOwner && (
+            <div className="p-3.5 rounded-2xl border border-brand-200 bg-brand-50/50 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="h-9 w-9 rounded-xl bg-brand-600 text-white font-bold text-xs flex items-center justify-center">
+                  {getCleanRoleDisplay(selectedNewOwner.roleName).charAt(0)}
+                </div>
+                <div>
+                  <p className="font-bold text-sm text-slate-900">{getCleanRoleDisplay(selectedNewOwner.roleName)}</p>
+                  <p className="text-xs text-brand-600 font-medium">Ready for Ownership Transfer</p>
+                </div>
+              </div>
+              <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-white text-brand-600 border border-brand-200">
+                {getCleanRoleDisplay(selectedNewOwner.roleName)}
+              </span>
+            </div>
+          )}
           <div className="flex justify-end gap-3 mt-4">
             <button
               type="button"

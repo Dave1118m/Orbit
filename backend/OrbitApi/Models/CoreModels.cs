@@ -311,6 +311,7 @@ public class AuditLog
 {
     [Key]
     public int Id { get; set; }
+    public int? OrganizationId { get; set; }
     public string Entity { get; set; } = string.Empty;
     public string Action { get; set; } = string.Empty;
     public string? OldValues { get; set; }
@@ -318,6 +319,7 @@ public class AuditLog
     public DateTime Timestamp { get; set; }
     public int? PerformedByUserId { get; set; }
 
+    public Organization? Organization { get; set; }
     public User? PerformedByUser { get; set; }
 }
 
@@ -902,3 +904,46 @@ public class ContactInquiry
     public DateTime? RepliedAt { get; set; }
     public string? RepliedByUserName { get; set; }
 }
+
+public class AiDelegateConfiguration
+{
+    [Key]
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    public int OrganizationId { get; set; }
+    public bool IsActive { get; set; } = false;
+    [MaxLength(100)]
+    public string RolePersona { get; set; } = "Admin";
+    public decimal MaxAutoApprovalAmount { get; set; } = 100.00m;
+    public string? AutoReplyMessage { get; set; }
+    public bool AutoApproveVerifiedReceipts { get; set; } = true;
+    public bool AutoTriageTasks { get; set; } = true;
+    public DateTime? ActivatedAt { get; set; }
+    public DateTime? LastDeactivatedAt { get; set; }
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public User? User { get; set; }
+    public Organization? Organization { get; set; }
+}
+
+public class AiDelegateActionLog
+{
+    [Key]
+    public int Id { get; set; }
+    public int UserId { get; set; }
+    public int OrganizationId { get; set; }
+    [MaxLength(100)]
+    public string ActionType { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string Entity { get; set; } = string.Empty;
+    public int? EntityId { get; set; }
+    [MaxLength(500)]
+    public string Summary { get; set; } = string.Empty;
+    public string? DetailsJson { get; set; }
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public bool WasAcknowledged { get; set; } = false;
+
+    public User? User { get; set; }
+    public Organization? Organization { get; set; }
+}
+

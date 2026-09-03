@@ -22,7 +22,7 @@ function authHeaders() {
   return headers;
 }
 
-export default function FinancialReports() {
+export default function FinancialReports({ selectedCurrency = 'USD' }) {
   const { currentOrganization } = useUser();
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
@@ -31,12 +31,31 @@ export default function FinancialReports() {
   const [categories, setCategories] = useState([]);
   const [summary, setSummary] = useState(null);
   const [transactions, setTransactions] = useState([]);
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 161.44 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchReportData();
   }, [orgId]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/Currency/rates?baseCurrency=USD`, { headers: authHeaders() })
+      .then(res => res.ok ? res.json() : null)
+      .then(rates => {
+        if (rates && rates.ETB) setExchangeRates(rates);
+      })
+      .catch(() => {});
+  }, []);
+
+  const rate = selectedCurrency === 'ETB' ? (exchangeRates.ETB || 161.44) : 1;
+  const currSymbol = selectedCurrency === 'ETB' ? 'Br ' : '$';
+  const currLabel = selectedCurrency;
+
+  const formatMoney = (usdVal) => {
+    const converted = (usdVal || 0) * rate;
+    return `${currSymbol}${converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   const fetchReportData = async () => {
     setLoading(true);
@@ -85,20 +104,21 @@ export default function FinancialReports() {
   }
 
   const handleExportCSV = () => {
-    let csv = 'Category Name,Classification,Target Budget Limit ($),Actual Spent / Income ($),Variance / Surplus ($)\n';
+    let csv = `Category Name,Classification,Target Budget Limit (${currLabel}),Actual Spent / Income (${currLabel}),Variance / Surplus (${currLabel})\n`;
     categories.forEach(cat => {
       const isExpense = cat.type === 0 || cat.type === 2;
-      const spent = isExpense ? getCategorySpent(cat) : getCategoryIncome(cat);
-      const limit = cat.targetBudgetLimit || 0;
+      const rawSpent = isExpense ? getCategorySpent(cat) : getCategoryIncome(cat);
+      const spent = rawSpent * rate;
+      const limit = (cat.targetBudgetLimit || 0) * rate;
       const variance = limit > 0 ? limit - spent : 0;
-      csv += `"${cat.name}",${cat.type === 0 ? 'Program Expense' : (cat.type === 1 ? 'Grant Revenue' : 'General')},${limit},${spent},${variance}\n`;
+      csv += `"${cat.name}",${cat.type === 0 ? 'Program Expense' : (cat.type === 1 ? 'Grant Revenue' : 'General')},${limit.toFixed(2)},${spent.toFixed(2)},${variance.toFixed(2)}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `NGO_Statement_of_Activities_Org_${orgId}.csv`);
+    link.setAttribute('download', `NGO_Statement_of_Activities_Org_${orgId}_${currLabel}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -120,7 +140,7 @@ export default function FinancialReports() {
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1 flex items-center gap-2">
             <BarChart3 className="w-6 h-6 text-brand-600" />
-            Statement of Activities & Grant Financial Reports
+            Statement of Activities & Grant Financial Reports ({currLabel})
           </h2>
           <p className="text-sm text-slate-500 mt-1">
             Statement of Revenue & Expenditures, Grant Budget Variance, Liquidity Statements, and Donor Fund Audits.
@@ -185,8 +205,8 @@ export default function FinancialReports() {
                   {/* Revenue Breakdown */}
                   <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3">
                     <h4 className="text-xs font-extrabold uppercase tracking-wide text-emerald-800 flex items-center justify-between">
-                      <span>Grant Revenues & Donor Contributions (USD eq.)</span>
-                      <span>+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      <span>Grant Revenues & Donor Contributions ({currLabel})</span>
+                      <span>+{formatMoney(summary?.totalIncome)}</span>
                     </h4>
                     <div className="divide-y divide-slate-200 bg-white rounded-lg border border-slate-200 overflow-hidden">
                       {incomeCategories.length > 0 ? (
@@ -195,7 +215,7 @@ export default function FinancialReports() {
                           return (
                             <div key={c.id} className="p-3 flex items-center justify-between text-xs">
                               <span className="font-semibold text-slate-800">{c.name}</span>
-                              <span className="font-bold text-emerald-600">+${inc.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                              <span className="font-bold text-emerald-600">+{formatMoney(inc)}</span>
                             </div>
                           );
                         })
@@ -208,8 +228,8 @@ export default function FinancialReports() {
                   {/* Programmatic & Operational Expenditures Breakdown */}
                   <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3">
                     <h4 className="text-xs font-extrabold uppercase tracking-wide text-rose-800 flex items-center justify-between">
-                      <span>Programmatic & Operating Expenditures (USD eq.)</span>
-                      <span>-${(summary?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                      <span>Programmatic & Operating Expenditures ({currLabel})</span>
+                      <span>-{formatMoney(summary?.totalExpenses)}</span>
                     </h4>
                     <div className="divide-y divide-slate-200 bg-white rounded-lg border border-slate-200 overflow-hidden">
                       {expenseCategories.length > 0 ? (
@@ -218,7 +238,7 @@ export default function FinancialReports() {
                           return (
                             <div key={c.id} className="p-3 flex items-center justify-between text-xs">
                               <span className="font-semibold text-slate-800">{c.name}</span>
-                              <span className="font-bold text-rose-600">-${spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</span>
+                              <span className="font-bold text-rose-600">-{formatMoney(spent)}</span>
                             </div>
                           );
                         })
@@ -233,14 +253,14 @@ export default function FinancialReports() {
                 <div className="p-6 rounded-xl bg-slate-900 text-white flex items-center justify-between shadow-sm">
                   <div>
                     <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Net Change in Unrestricted & Restricted Assets (Surplus / Deficit) (USD eq.)
+                      Net Change in Unrestricted & Restricted Assets (Surplus / Deficit) ({currLabel})
                     </span>
                     <p className="text-xs text-slate-400 mt-0.5">
                       Calculated as Total Grant Revenue minus Total Programmatic Expenditures
                     </p>
                   </div>
                   <span className={`text-2xl font-black ${(summary?.netCashFlow || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                    ${(summary?.netCashFlow || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                    {(summary?.netCashFlow || 0) >= 0 ? '+' : ''}{formatMoney(summary?.netCashFlow)}
                   </span>
                 </div>
               </div>
@@ -256,9 +276,9 @@ export default function FinancialReports() {
                       <tr>
                         <th className="px-4 py-3">Category Name</th>
                         <th className="px-4 py-3">Classification</th>
-                        <th className="px-4 py-3 text-right">Target Grant Limit (USD eq.)</th>
-                        <th className="px-4 py-3 text-right">Actual Expended (USD eq.)</th>
-                        <th className="px-4 py-3 text-right">Remaining Fund (USD eq.)</th>
+                        <th className="px-4 py-3 text-right">Target Grant Limit ({currLabel})</th>
+                        <th className="px-4 py-3 text-right">Actual Expended ({currLabel})</th>
+                        <th className="px-4 py-3 text-right">Remaining Fund ({currLabel})</th>
                         <th className="px-4 py-3 text-center">Burn %</th>
                       </tr>
                     </thead>
@@ -280,11 +300,11 @@ export default function FinancialReports() {
                               {cat.type === 0 ? 'Program Expense' : (cat.type === 1 ? 'Grant Revenue' : 'General')}
                             </td>
                             <td className="px-4 py-3 text-right font-semibold text-slate-800 font-mono">
-                              {limit > 0 ? `$${limit.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'Uncapped'}
+                              {limit > 0 ? formatMoney(limit) : 'Uncapped'}
                             </td>
-                            <td className="px-4 py-3 text-right font-bold text-rose-600 font-mono">${spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td className="px-4 py-3 text-right font-bold text-rose-600 font-mono">{formatMoney(spent)}</td>
                             <td className={`px-4 py-3 text-right font-bold font-mono ${variance >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              {limit > 0 ? `$${variance.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                              {limit > 0 ? formatMoney(variance) : '—'}
                             </td>
                             <td className="px-4 py-3 text-center">
                               {limit > 0 ? (
@@ -315,7 +335,7 @@ export default function FinancialReports() {
                   <div className="text-right">
                     <span className="text-xs font-bold text-slate-400 block uppercase tracking-wider">Net Cash Position</span>
                     <span className={`text-xl font-black ${(summary?.netCashFlow || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                      ${(summary?.netCashFlow || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                      {(summary?.netCashFlow || 0) >= 0 ? '+' : ''}{formatMoney(summary?.netCashFlow)}
                     </span>
                   </div>
                 </div>
@@ -324,7 +344,7 @@ export default function FinancialReports() {
                 <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
                   <div className="bg-slate-900 px-5 py-3 text-white text-xs font-bold uppercase tracking-wider flex justify-between items-center">
                     <span>Cash Flow Activity Section</span>
-                    <span>Amount (USD eq.)</span>
+                    <span>Amount ({currLabel})</span>
                   </div>
                   <div className="divide-y divide-slate-100 text-xs">
                     {/* Operating Inflows */}
@@ -335,7 +355,7 @@ export default function FinancialReports() {
                           1. Cash Inflows from Operating Activities (Grant Revenues &amp; Contributions)
                         </span>
                         <span className="text-sm font-mono font-extrabold text-emerald-600">
-                          +${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          +{formatMoney(summary?.totalIncome)}
                         </span>
                       </div>
                       <p className="text-[11px] text-emerald-700 mt-1 pl-6">
@@ -351,7 +371,7 @@ export default function FinancialReports() {
                           2. Cash Outflows for Program &amp; Operational Activities
                         </span>
                         <span className="text-sm font-mono font-extrabold text-rose-600">
-                          -${(summary?.totalExpenses || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                          -{formatMoney(summary?.totalExpenses)}
                         </span>
                       </div>
                       <p className="text-[11px] text-rose-700 mt-1 pl-6">
@@ -363,7 +383,7 @@ export default function FinancialReports() {
                     <div className="p-4 bg-slate-900 text-white font-extrabold flex justify-between items-center">
                       <span>Net Cash Provided by / (Used in) Operating Activities</span>
                       <span className={`text-base font-mono ${(summary?.netCashFlow || 0) >= 0 ? 'text-emerald-400' : 'text-rose-400'}`}>
-                        ${(summary?.netCashFlow || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {(summary?.netCashFlow || 0) >= 0 ? '+' : ''}{formatMoney(summary?.netCashFlow)}
                       </span>
                     </div>
                   </div>
@@ -389,7 +409,7 @@ export default function FinancialReports() {
                           <div className="pt-3 border-t border-slate-200 flex justify-between items-baseline">
                             <span className="text-[11px] text-slate-500 font-semibold">Available Liquidity:</span>
                             <span className="text-base font-black text-slate-900 font-mono">
-                              {acc.currency === 'USD' ? '$' : ''}{(acc.calculatedBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              {acc.currency === 'USD' ? '$' : 'Br '}{(acc.calculatedBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} {acc.currency}
                             </span>
                           </div>
                         </div>
@@ -413,7 +433,7 @@ export default function FinancialReports() {
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
                   <div className="flex items-center justify-between font-bold text-slate-900 border-b border-slate-200 pb-2 mb-2">
                     <span>Total Allocated Donor Grants & Contributions</span>
-                    <span className="text-emerald-600">+${(summary?.totalIncome || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })} USD eq.</span>
+                    <span className="text-emerald-600">+{formatMoney(summary?.totalIncome)} ({currLabel})</span>
                   </div>
                   <p className="text-[11px] text-slate-400">
                     All donor contributions are tracked to donor agreements and linked bank accounts.

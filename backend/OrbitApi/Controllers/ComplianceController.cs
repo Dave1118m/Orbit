@@ -142,20 +142,23 @@ namespace OrbitApi.Controllers
                 ?? User.FindFirst(ClaimTypes.Name)?.Value;
             int.TryParse(userIdClaim, out var userId);
             if (userId <= 0) userId = 1;
+            
+            var targetOrgId = project?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
 
             _db.AuditLogs.Add(new AuditLog
             {
+                OrganizationId = targetOrgId,
                 PerformedByUserId = userId,
                 Action = "Created Grant Report Schedule",
                 Entity = "GrantReportSchedule",
                 Timestamp = DateTime.UtcNow,
-                NewValues = $"{req.ReportType} report schedule created for Project {project.Title} (Due {req.DeadlineDate:yyyy-MM-dd})."
+                NewValues = $"{req.ReportType} report schedule created for Project {project?.Title} (Due {req.DeadlineDate:yyyy-MM-dd})."
             });
 
             _db.Notifications.Add(new Notification
             {
                 UserId = userId,
-                Message = $"📄 Grant Report Scheduled: {req.ReportType} report for '{project.Title}' due on {req.DeadlineDate:yyyy-MM-dd}.",
+                Message = $"📄 Grant Report Scheduled: {req.ReportType} report for '{project?.Title}' due on {req.DeadlineDate:yyyy-MM-dd}.",
                 Channel = NotificationChannel.InApp,
                 IsRead = false,
                 CreatedAt = DateTime.UtcNow,
@@ -170,7 +173,7 @@ namespace OrbitApi.Controllers
             {
                 Id = schedule.Id,
                 ProjectId = schedule.ProjectId,
-                ProjectName = project.Title,
+                ProjectName = project?.Title,
                 DonorId = schedule.DonorId,
                 DonorName = donor?.Name,
                 ReportType = schedule.ReportType,
@@ -201,8 +204,12 @@ namespace OrbitApi.Controllers
             int.TryParse(userIdClaim, out var userId);
             if (userId <= 0) userId = 1;
 
+            var proj = await _db.Projects.Include(p => p.Workspace).FirstOrDefaultAsync(p => p.Id == report.ProjectId);
+            var reportOrgId = proj?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
+
             _db.AuditLogs.Add(new AuditLog
             {
+                OrganizationId = reportOrgId,
                 PerformedByUserId = userId,
                 Action = "Submitted Grant Report",
                 Entity = "GrantReportSchedule",
@@ -222,7 +229,7 @@ namespace OrbitApi.Controllers
 
             await _db.SaveChangesAsync();
 
-            return Ok(new { message = "Report marked as submitted." });
+            return Ok(new { message = "Grant report marked as submitted." });
         }
 
         /// <summary>
@@ -258,13 +265,21 @@ namespace OrbitApi.Controllers
             return Ok(new { message = "Automated report triggered successfully and dispatched." });
         }
 
+
+
         /// <summary>
-        /// GET /api/v1/compliance/audit-logs — Fetch chronological ledger
+        /// GET /api/v1/compliance/audit-logs — Fetch chronological ledger scoped to active organization
         /// </summary>
         [HttpGet("audit-logs")]
-        public async Task<ActionResult<IEnumerable<AuditLogDto>>> GetAuditLogs()
+        public async Task<ActionResult<IEnumerable<AuditLogDto>>> GetAuditLogs([FromQuery] int? orgId)
         {
-            const string cacheKey = "compliance_auditlogs";
+            var targetOrgId = orgId ?? GetActiveOrganizationId();
+            if (!targetOrgId.HasValue || targetOrgId.Value <= 0)
+            {
+                return Ok(new List<AuditLogDto>());
+            }
+
+            var cacheKey = $"compliance_auditlogs_{targetOrgId.Value}";
             var cachedLogs = await _cache.GetAsync<IEnumerable<AuditLogDto>>(cacheKey);
             
             if (cachedLogs != null)
@@ -274,6 +289,7 @@ namespace OrbitApi.Controllers
 
             var logs = await _db.AuditLogs
                 .Include(a => a.PerformedByUser)
+                .Where(a => a.OrganizationId == targetOrgId.Value)
                 .OrderByDescending(a => a.Timestamp)
                 .Take(100) // Limit to last 100 for performance
                 .ToListAsync();
@@ -285,7 +301,7 @@ namespace OrbitApi.Controllers
                 UserName = a.PerformedByUser?.Name ?? "System",
                 Action = a.Action,
                 EntityType = a.Entity,
-                EntityId = 0, // original model didn't have EntityId
+                EntityId = 0,
                 Timestamp = a.Timestamp,
                 Details = a.NewValues ?? string.Empty
             });

@@ -491,6 +491,14 @@ namespace OrbitApi.Controllers
                 int.TryParse(userIdClaim, out var userId);
                 if (userId <= 0) userId = 1;
 
+                decimal rate = 1.0m;
+                decimal baseCurrencyAmount = contribution.Amount;
+                if (!string.IsNullOrWhiteSpace(contribution.Currency) && !string.Equals(contribution.Currency, "USD", StringComparison.OrdinalIgnoreCase))
+                {
+                    rate = await _currencyService.GetExchangeRateAsync(contribution.Currency, "USD");
+                    baseCurrencyAmount = await _currencyService.ConvertAsync(contribution.Amount, contribution.Currency, "USD");
+                }
+
                 var txn = new FinancialTransaction
                 {
                     OrganizationId = orgId.Value,
@@ -499,8 +507,8 @@ namespace OrbitApi.Controllers
                     TransactionDate = contribution.Date,
                     Amount = contribution.Amount,
                     Currency = contribution.Currency,
-                    ExchangeRate = 1.0m,
-                    BaseCurrencyAmount = contribution.Amount,
+                    ExchangeRate = rate,
+                    BaseCurrencyAmount = baseCurrencyAmount,
                     CategoryId = contribution.CategoryId,
                     BankAccountId = contribution.BankAccountId,
                     ProjectId = contribution.AllocatedProjectId,

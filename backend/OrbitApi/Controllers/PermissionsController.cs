@@ -39,6 +39,42 @@ public class PermissionsController : ControllerBase
     }
 
     /// <summary>
+    /// Resolves the active organization ID via headers, query string, or active membership.
+    /// </summary>
+    private int? GetActiveOrganizationId()
+    {
+        if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
+        {
+            var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+            if (validOrg != null) return validOrg.Id;
+        }
+
+        if (Request.Query.TryGetValue("orgId", out var queryOrgStr) && int.TryParse(queryOrgStr, out var queryOrgId) && queryOrgId > 0)
+        {
+            var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == queryOrgId && !o.IsDeleted);
+            if (validOrg != null) return validOrg.Id;
+        }
+
+        var userId = GetCurrentUserId();
+        if (userId.HasValue && userId.Value > 0)
+        {
+            var userOrgId = _db.OrganizationMembers
+                .Where(om => om.UserId == userId.Value && om.Status == OrgMemberStatus.Active)
+                .Select(om => om.OrganizationId)
+                .FirstOrDefault();
+            if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+
+            var ownedOrgId = _db.Organizations
+                .Where(o => o.OwnerId == userId.Value && !o.IsDeleted)
+                .Select(o => o.Id)
+                .FirstOrDefault();
+            if (ownedOrgId > 0) return ownedOrgId;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Returns the complete catalog of all available permissions in the system.
     /// </summary>
     /// <returns>List of permissions with Id, Name, and Description.</returns>
@@ -53,14 +89,17 @@ public class PermissionsController : ControllerBase
 
     /// <summary>
     /// Retrieves all system and custom roles alongside their currently granted permissions for the Permissions Matrix UI.
+    /// Scoped to system roles and roles created by the active organization.
     /// </summary>
     /// <returns>Collection of roles containing granted permission IDs and names.</returns>
     [HttpGet("roles")]
     public async Task<IActionResult> GetRolesWithPermissions()
     {
+        var activeOrgId = GetActiveOrganizationId();
         var roles = await _db.Roles
             .Include(r => r.RolePermissions)
             .ThenInclude(rp => rp.Permission)
+            .Where(r => r.IsSystemRole || (activeOrgId.HasValue && r.OrganizationId == activeOrgId.Value))
             .Select(r => new
             {
                 r.Id,
@@ -111,6 +150,7 @@ public class PermissionsController : ControllerBase
             return BadRequest($"A role named '{cleanTitle}' already exists.");
         }
 
+        var activeOrgId = req.OrganizationId ?? GetActiveOrganizationId();
         var newRole = new Role
         {
             Name = RoleName.Member,
@@ -118,7 +158,7 @@ public class PermissionsController : ControllerBase
             Description = req.Description?.Trim(),
             IsSystemRole = false,
             DefaultScope = req.DefaultScope,
-            OrganizationId = req.OrganizationId
+            OrganizationId = activeOrgId
         };
 
         _db.Roles.Add(newRole);
@@ -136,6 +176,7 @@ public class PermissionsController : ControllerBase
         var currentUserId = GetCurrentUserId();
         _db.AuditLogs.Add(new AuditLog
         {
+            OrganizationId = activeOrgId,
             Entity = "Role",
             Action = "CreateCustomRole",
             OldValues = null,
@@ -218,6 +259,8 @@ public class PermissionsController : ControllerBase
             return BadRequest($"Cannot delete role '{role.CustomTitle}' because it is currently assigned to {role.RoleAssignments.Count} user(s). Please reassign users first.");
         }
 
+        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
+
         _db.RolePermissions.RemoveRange(role.RolePermissions);
         _db.Roles.Remove(role);
         await _db.SaveChangesAsync();
@@ -227,6 +270,7 @@ public class PermissionsController : ControllerBase
         var currentUserId = GetCurrentUserId();
         _db.AuditLogs.Add(new AuditLog
         {
+            OrganizationId = activeOrgId,
             Entity = "Role",
             Action = "DeleteCustomRole",
             OldValues = $"Role: {role.CustomTitle} (Id: {id})",
@@ -273,6 +317,7 @@ public class PermissionsController : ControllerBase
             .FirstOrDefaultAsync(rp => rp.RoleId == req.RoleId && rp.PermissionId == req.PermissionId);
 
         var currentUserId = GetCurrentUserId();
+        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
 
         if (req.IsGranted)
         {
@@ -282,6 +327,7 @@ public class PermissionsController : ControllerBase
 
                 _db.AuditLogs.Add(new AuditLog
                 {
+                    OrganizationId = activeOrgId,
                     Entity = "RolePermission",
                     Action = "GrantPermission",
                     OldValues = $"Granted: false",
@@ -299,6 +345,7 @@ public class PermissionsController : ControllerBase
 
                 _db.AuditLogs.Add(new AuditLog
                 {
+                    OrganizationId = activeOrgId,
                     Entity = "RolePermission",
                     Action = "RevokePermission",
                     OldValues = $"Role: {role.Name}, Permission: {perm.Name}, Granted: true",
@@ -318,15 +365,16 @@ public class PermissionsController : ControllerBase
     }
 
     /// <summary>
-    /// Retrieves the most recent 100 permission modification audit trail logs.
+    /// Retrieves the most recent 100 permission modification audit trail logs scoped to the active organization.
     /// </summary>
     /// <returns>List of audit log records detailing permission modifications.</returns>
     [HttpGet("audit-log")]
     public async Task<IActionResult> GetPermissionAuditLogs()
     {
+        var activeOrgId = GetActiveOrganizationId();
         var logs = await _db.AuditLogs
             .Include(a => a.PerformedByUser)
-            .Where(a => a.Entity == "RolePermission")
+            .Where(a => (a.Entity == "RolePermission" || a.Entity == "Role") && (a.OrganizationId == activeOrgId || (!activeOrgId.HasValue && a.OrganizationId == null)))
             .OrderByDescending(a => a.Timestamp)
             .Take(100)
             .Select(a => new

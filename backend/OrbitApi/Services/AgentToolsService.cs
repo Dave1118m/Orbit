@@ -150,7 +150,7 @@ public class AgentToolsService : IAgentToolsService
                     return await SearchTasksAsync(organizationId, query, taskStatus);
 
                 case "create_task":
-                    return await CreateTaskAsync(organizationId, currentUserId, arguments);
+                    return await CreateTaskAsync(organizationId, currentUserId, currentRole, arguments);
 
                 case "get_financial_summary":
                     return await GetFinancialSummaryAsync(organizationId);
@@ -168,7 +168,7 @@ public class AgentToolsService : IAgentToolsService
                     return await ListRiskIssuesAsync(organizationId);
 
                 case "invite_team_member":
-                    return await InviteTeamMemberAsync(organizationId, currentUserId, arguments);
+                    return await InviteTeamMemberAsync(organizationId, currentUserId, currentRole, arguments);
 
                 default:
                     return new ToolCallResult
@@ -304,8 +304,13 @@ public class AgentToolsService : IAgentToolsService
         };
     }
 
-    private async Task<ToolCallResult> CreateTaskAsync(int orgId, int currentUserId, JsonElement arguments)
+    private async Task<ToolCallResult> CreateTaskAsync(int orgId, int currentUserId, RoleName currentRole, JsonElement arguments)
     {
+        if (currentRole == RoleName.Viewer)
+        {
+            return new ToolCallResult { ToolName = "create_task", Success = false, Message = "Permission Denied: Viewers cannot create tasks." };
+        }
+
         if (!arguments.TryGetProperty("projectId", out var pIdEl) || !arguments.TryGetProperty("title", out var titleEl))
         {
             return new ToolCallResult { ToolName = "create_task", Success = false, Message = "Missing required parameters (projectId, title)." };
@@ -327,10 +332,13 @@ public class AgentToolsService : IAgentToolsService
             deadline = dt;
         }
 
-        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == projectId && !p.IsDeleted);
-        if (project == null)
+        var project = await _db.Projects
+            .Include(p => p.Workspace)
+            .FirstOrDefaultAsync(p => p.Id == projectId && !p.IsDeleted);
+
+        if (project == null || project.Workspace == null || project.Workspace.OrganizationId != orgId)
         {
-            return new ToolCallResult { ToolName = "create_task", Success = false, Message = $"Project with ID {projectId} not found." };
+            return new ToolCallResult { ToolName = "create_task", Success = false, Message = $"Project with ID {projectId} not found in this organization." };
         }
 
         var task = new TaskItem
@@ -347,6 +355,7 @@ public class AgentToolsService : IAgentToolsService
 
         _db.AuditLogs.Add(new AuditLog
         {
+            OrganizationId = project.Workspace?.OrganizationId,
             Action = "AiDelegateCreateTask",
             Entity = "Task",
             PerformedByUserId = currentUserId,
@@ -431,6 +440,16 @@ public class AgentToolsService : IAgentToolsService
 
     private async Task<ToolCallResult> ApproveOrRejectExpenseAsync(int orgId, int currentUserId, RoleName currentRole, JsonElement arguments)
     {
+        if (currentRole != RoleName.Owner && currentRole != RoleName.Admin && currentRole != RoleName.FinanceOfficer)
+        {
+            return new ToolCallResult
+            {
+                ToolName = "approve_or_reject_expense",
+                Success = false,
+                Message = $"Permission Denied: Role '{currentRole}' is not authorized to approve or reject expenses. Only Finance Officers, Admins, or Owners can execute financial approvals."
+            };
+        }
+
         if (!arguments.TryGetProperty("expenseId", out var expIdEl) || !arguments.TryGetProperty("action", out var actEl))
         {
             return new ToolCallResult { ToolName = "approve_or_reject_expense", Success = false, Message = "Missing required parameters (expenseId, action)." };
@@ -440,10 +459,14 @@ public class AgentToolsService : IAgentToolsService
         var action = actEl.GetString()?.ToLowerInvariant();
         var notes = arguments.TryGetProperty("notes", out var nEl) ? nEl.GetString() : null;
 
-        var expense = await _db.Expenses.Include(e => e.Project).FirstOrDefaultAsync(e => e.Id == expenseId);
-        if (expense == null)
+        var expense = await _db.Expenses
+            .Include(e => e.Project)
+            .ThenInclude(p => p!.Workspace)
+            .FirstOrDefaultAsync(e => e.Id == expenseId);
+
+        if (expense == null || expense.Project == null || expense.Project.Workspace == null || expense.Project.Workspace.OrganizationId != orgId)
         {
-            return new ToolCallResult { ToolName = "approve_or_reject_expense", Success = false, Message = $"Expense #{expenseId} not found." };
+            return new ToolCallResult { ToolName = "approve_or_reject_expense", Success = false, Message = $"Expense #{expenseId} not found in this organization." };
         }
 
         if (action == "approve")
@@ -464,8 +487,11 @@ public class AgentToolsService : IAgentToolsService
             return new ToolCallResult { ToolName = "approve_or_reject_expense", Success = false, Message = "Action must be 'approve' or 'reject'." };
         }
 
+        var expenseOrgId = expense.Project?.Workspace?.OrganizationId ?? expense.BankAccount?.OrganizationId;
+
         _db.AuditLogs.Add(new AuditLog
         {
+            OrganizationId = expenseOrgId,
             Action = $"AiDelegate_{expense.ApprovalStatus}Expense",
             Entity = "Expense",
             PerformedByUserId = currentUserId,
@@ -538,8 +564,18 @@ public class AgentToolsService : IAgentToolsService
         };
     }
 
-    private async Task<ToolCallResult> InviteTeamMemberAsync(int orgId, int currentUserId, JsonElement arguments)
+    private async Task<ToolCallResult> InviteTeamMemberAsync(int orgId, int currentUserId, RoleName currentRole, JsonElement arguments)
     {
+        if (currentRole != RoleName.Owner && currentRole != RoleName.Admin)
+        {
+            return new ToolCallResult
+            {
+                ToolName = "invite_team_member",
+                Success = false,
+                Message = $"Permission Denied: Role '{currentRole}' is not authorized to invite members. Only Admins or Owners can send invitations."
+            };
+        }
+
         if (!arguments.TryGetProperty("email", out var emailEl))
         {
             return new ToolCallResult { ToolName = "invite_team_member", Success = false, Message = "Email is required to invite a member." };
@@ -570,6 +606,7 @@ public class AgentToolsService : IAgentToolsService
 
         _db.AuditLogs.Add(new AuditLog
         {
+            OrganizationId = orgId,
             Action = "AiDelegateInviteMember",
             Entity = "OrganizationInvitation",
             PerformedByUserId = currentUserId,

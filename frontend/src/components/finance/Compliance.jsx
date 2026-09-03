@@ -118,7 +118,7 @@ export default function Compliance() {
   async function fetchAuditLogs() {
     try {
       setLoading(true);
-      const res = await fetch(`${API_BASE}/compliance/audit-logs`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/compliance/audit-logs${orgId ? `?orgId=${orgId}` : ''}`, { headers: authHeaders() });
       if (res.ok) {
         setAuditLogs(await res.json());
       }

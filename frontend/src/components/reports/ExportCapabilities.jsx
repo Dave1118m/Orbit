@@ -35,7 +35,7 @@ const isTaskDone = (t) => {
   return s === 'done' || s === 'completed' || s === '4' || s === '3';
 };
 
-export default function ExportCapabilities() {
+export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
   const { currentOrganization } = useUser();
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
@@ -48,7 +48,24 @@ export default function ExportCapabilities() {
   const [categories, setCategories] = useState([]);
   const [transactions, setTransactions] = useState([]);
   const [summary, setSummary] = useState(null);
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 161.44 });
   const [taskAnalytics, setTaskAnalytics] = useState(null);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/Currency/rates?baseCurrency=USD`, { headers: authHeaders() })
+      .then(r => r.ok ? r.json() : null)
+      .then(rates => { if (rates && rates.ETB) setExchangeRates(rates); })
+      .catch(() => {});
+  }, []);
+
+  const rate = selectedCurrency === 'ETB' ? (exchangeRates.ETB || 161.44) : 1;
+  const currSymbol = selectedCurrency === 'ETB' ? 'Br ' : '$';
+  const currLabel = selectedCurrency;
+
+  const formatMoney = (usdVal) => {
+    const converted = (usdVal || 0) * rate;
+    return `${currSymbol}${converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
   const [taskList, setTaskList] = useState([]);
   const [donorsList, setDonorsList] = useState([]);
   const [risksList, setRisksList] = useState([]);
@@ -774,7 +791,7 @@ export default function ExportCapabilities() {
                           <th className="py-2 px-3">Metric / Indicator</th>
                           <th className="py-2 px-3">Classification</th>
                           <th className="py-2 px-3 text-right">Target / Benchmark</th>
-                          <th className="py-2 px-3 text-right font-mono">Actual Amount ($ / %)</th>
+                          <th className="py-2 px-3 text-right font-mono">Actual Amount ({currLabel} / %)</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -782,19 +799,19 @@ export default function ExportCapabilities() {
                           <td className="py-2 px-3 font-semibold text-slate-900">Total Confirmed Grant Revenue / Budget</td>
                           <td className="py-2 px-3 text-emerald-600 font-bold text-[11px]">REVENUE</td>
                           <td className="py-2 px-3 text-right text-slate-400">—</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${activeBudget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+{formatMoney(activeBudget)}</td>
                         </tr>
                         <tr className="hover:bg-slate-50">
                           <td className="py-2 px-3 font-semibold text-slate-900">Total Program Expenditures / Money Spent</td>
                           <td className="py-2 px-3 text-rose-600 font-bold text-[11px]">EXPENSE</td>
                           <td className="py-2 px-3 text-right text-slate-400">—</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">-${activeSpent.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">-{formatMoney(activeSpent)}</td>
                         </tr>
                         <tr className="hover:bg-slate-50 bg-slate-50 font-bold">
                           <td className="py-2 px-3 font-bold text-slate-900">Remaining Unspent Cash Balance</td>
                           <td className="py-2 px-3 text-indigo-600 font-bold text-[11px]">NET POSITION</td>
                           <td className="py-2 px-3 text-right text-slate-400">—</td>
-                          <td className="py-2 px-3 text-right font-mono font-black text-indigo-600">${activeRemaining.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right font-mono font-black text-indigo-600">{formatMoney(activeRemaining)}</td>
                         </tr>
                         <tr className="hover:bg-slate-50 bg-indigo-50/40 font-bold">
                           <td className="py-2 px-3 font-bold text-indigo-950">Overall Execution Progress (% Complete)</td>
@@ -856,8 +873,8 @@ export default function ExportCapabilities() {
                     <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200 text-[11px]">
                       <th className="py-2 px-3">Donor Partner Name</th>
                       <th className="py-2 px-3">Allocation / Funding Type</th>
-                      <th className="py-2 px-3 text-right">Total Pledged / Allocated ($)</th>
-                      <th className="py-2 px-3 text-right">Total Received ($)</th>
+                      <th className="py-2 px-3 text-right">Total Pledged / Allocated ({currLabel})</th>
+                      <th className="py-2 px-3 text-right">Total Received ({currLabel})</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -869,16 +886,16 @@ export default function ExportCapabilities() {
                             <td className="py-2 px-3 text-slate-500 font-medium">
                               {projectDonors.length === 1 ? 'Sole Funder (100%)' : `Co-Funding (${pd.coFundingPercentage || 100}%)`}
                             </td>
-                            <td className="py-2 px-3 text-right font-mono text-slate-600">${(pd.allocatedAmount || activeBudget).toLocaleString()}</td>
-                            <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(pd.allocatedAmount || activeBudget).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                            <td className="py-2 px-3 text-right font-mono text-slate-600">{formatMoney(pd.allocatedAmount || activeBudget)}</td>
+                            <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+{formatMoney(pd.allocatedAmount || activeBudget)}</td>
                           </tr>
                         ))
                       ) : (
                         <tr className="hover:bg-slate-50">
                           <td className="py-2 px-3 font-semibold text-slate-800">{activeProj.donorName || 'Sole Funding Partner'}</td>
                           <td className="py-2 px-3 text-slate-500 font-medium">Sole Funder (100%)</td>
-                          <td className="py-2 px-3 text-right font-mono text-slate-600">${activeBudget.toLocaleString()}</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${activeBudget.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-600">{formatMoney(activeBudget)}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+{formatMoney(activeBudget)}</td>
                         </tr>
                       )
                     ) : donorsList.length > 0 ? (
@@ -886,8 +903,8 @@ export default function ExportCapabilities() {
                         <tr key={d.id} className="hover:bg-slate-50">
                           <td className="py-2 px-3 font-semibold text-slate-800">{d.name}</td>
                           <td className="py-2 px-3 text-slate-500">{d.donorType || 'Institutional'}</td>
-                          <td className="py-2 px-3 text-right font-mono text-slate-600">${(d.totalPledged || 0).toLocaleString()}</td>
-                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+${(d.totalReceived || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
+                          <td className="py-2 px-3 text-right font-mono text-slate-600">{formatMoney(d.totalPledged || 0)}</td>
+                          <td className="py-2 px-3 text-right font-mono font-bold text-emerald-600">+{formatMoney(d.totalReceived || 0)}</td>
                         </tr>
                       ))
                     ) : (
@@ -902,7 +919,7 @@ export default function ExportCapabilities() {
               {/* 4. Category BVA — Federal Standard Report */}
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden text-xs shadow-2xs">
                 <div className="bg-gradient-to-r from-slate-900 to-emerald-900 text-white px-3 py-2 font-bold text-[11px] uppercase tracking-wider flex items-center justify-between">
-                  <span className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-emerald-300" /> 4. Category Budget vs Actuals (BVA) — Standard Financial Report</span>
+                  <span className="flex items-center gap-1.5"><ShieldCheck className="w-3.5 h-3.5 text-emerald-300" /> 4. Category Budget vs Actuals (BVA) — Standard Financial Report ({currLabel})</span>
                   <span className="text-[9px] bg-emerald-600 px-2 py-0.5 rounded text-white font-semibold">Federal BVA</span>
                 </div>
                 {categoryRollups.length > 0 ? (
@@ -911,9 +928,9 @@ export default function ExportCapabilities() {
                       <tr className="bg-slate-100 text-slate-700 font-bold border-b border-slate-200">
                         <th className="py-2 px-3">Category Name</th>
                         <th className="py-2 px-3 font-mono text-[10px]">Code</th>
-                        <th className="py-2 px-3 text-right">Approved Budget ($)</th>
-                        <th className="py-2 px-3 text-right">Actual Expense ($)</th>
-                        <th className="py-2 px-3 text-right">Remaining Balance ($)</th>
+                        <th className="py-2 px-3 text-right">Approved Budget ({currLabel})</th>
+                        <th className="py-2 px-3 text-right">Actual Expense ({currLabel})</th>
+                        <th className="py-2 px-3 text-right">Remaining Balance ({currLabel})</th>
                         <th className="py-2 px-3 text-center">Burn Rate / Status</th>
                       </tr>
                     </thead>
@@ -925,13 +942,13 @@ export default function ExportCapabilities() {
                             <td className="py-2 px-3 font-semibold text-slate-800">{cat.name}</td>
                             <td className="py-2 px-3 font-mono text-[10px] text-slate-500">{cat.code || 'CAT'}</td>
                             <td className="py-2 px-3 text-right font-mono text-slate-700">
-                              {cat.budgetAmount > 0 ? `$${cat.budgetAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                              {cat.budgetAmount > 0 ? formatMoney(cat.budgetAmount) : '—'}
                             </td>
                             <td className="py-2 px-3 text-right font-mono font-bold text-rose-600">
-                              ${(cat.incurredSpent || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                              -{formatMoney(cat.incurredSpent)}
                             </td>
                             <td className={`py-2 px-3 text-right font-mono font-bold ${(cat.remainingBalance || 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                              {cat.budgetAmount > 0 ? `$${(cat.remainingBalance || 0).toLocaleString(undefined, { minimumFractionDigits: 2 })}` : '—'}
+                              {cat.budgetAmount > 0 ? formatMoney(cat.remainingBalance) : '—'}
                             </td>
                             <td className="py-2 px-3 text-center">
                               {cat.budgetAmount > 0 ? (

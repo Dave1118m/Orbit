@@ -64,7 +64,20 @@ export default function Expenses() {
   // Drawer modal
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 130 });
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 161.44 });
+  const [displayCurrency, setDisplayCurrency] = useState(() => localStorage.getItem('orbit_selected_currency') || 'USD');
+
+  const handleDisplayCurrencyChange = (curr) => {
+    setDisplayCurrency(curr);
+    localStorage.setItem('orbit_selected_currency', curr);
+  };
+
+  const displayRate = displayCurrency === 'ETB' ? (exchangeRates.ETB || 161.44) : 1;
+  const formatDisplayAmount = (usdVal) => {
+    const converted = (usdVal || 0) * displayRate;
+    return formatCurrency(converted, displayCurrency);
+  };
+
   const [form, setForm] = useState({
     projectId: '', taskId: '', donorId: '', bankAccountId: '',
     category: '', amount: '', grossAmount: '', taxAmount: '', hasVat: false, currency: 'USD',
@@ -544,6 +557,14 @@ export default function Expenses() {
           <p className="text-sm text-slate-500 mt-1">Multi-step approval hierarchy, receipt attachments, and budget safety verification.</p>
         </div>
         <div className="flex items-center gap-2.5 self-start sm:self-auto">
+          <select
+            value={displayCurrency}
+            onChange={(e) => handleDisplayCurrencyChange(e.target.value)}
+            className="bg-white border border-slate-300 text-slate-700 font-bold py-2 px-3 rounded-xl shadow-xs text-xs focus:outline-none focus:ring-2 focus:ring-[#5A45FF]"
+          >
+            <option value="USD">USD ($)</option>
+            <option value="ETB">ETB (Br)</option>
+          </select>
           <button
             onClick={handleClearFinancialData}
             className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold py-2.5 px-4 text-xs transition shadow-xs flex items-center gap-1.5"
@@ -566,16 +587,16 @@ export default function Expenses() {
           <p className="text-3xl font-extrabold text-slate-900">{totalExpenses}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Amount Claimed (USD)</p>
-          <p className="text-3xl font-extrabold text-slate-900">{formatCurrency(totalAmount, 'USD')}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Amount Claimed ({displayCurrency})</p>
+          <p className="text-3xl font-extrabold text-slate-900">{formatDisplayAmount(totalAmount)}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
           <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Pending Approvals</p>
           <p className="text-3xl font-extrabold text-amber-600">{pendingCount}</p>
         </div>
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-slate-200/80">
-          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Disbursed (USD)</p>
-          <p className="text-3xl font-extrabold text-emerald-600">{formatCurrency(paidAmount, 'USD')}</p>
+          <p className="text-xs text-slate-500 uppercase font-bold tracking-wider mb-1">Total Disbursed ({displayCurrency})</p>
+          <p className="text-3xl font-extrabold text-emerald-600">{formatDisplayAmount(paidAmount)}</p>
         </div>
       </div>
 

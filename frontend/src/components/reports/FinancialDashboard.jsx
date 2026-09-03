@@ -47,7 +47,7 @@ function authHeaders() {
   return headers;
 }
 
-export default function FinancialDashboard() {
+export default function FinancialDashboard({ selectedCurrency = 'USD' }) {
   const { currentOrganization } = useUser();
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
@@ -56,11 +56,30 @@ export default function FinancialDashboard() {
   const [summary, setSummary] = useState(null);
   const [categories, setCategories] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [exchangeRates, setExchangeRates] = useState({ USD: 1, ETB: 161.44 });
   const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchFinancialData();
   }, [orgId]);
+
+  useEffect(() => {
+    fetch(`${API_BASE}/Currency/rates?baseCurrency=USD`, { headers: authHeaders() })
+      .then(res => res.ok ? res.json() : null)
+      .then(rates => {
+        if (rates && rates.ETB) setExchangeRates(rates);
+      })
+      .catch(() => {});
+  }, []);
+
+  const rate = selectedCurrency === 'ETB' ? (exchangeRates.ETB || 161.44) : 1;
+  const currSymbol = selectedCurrency === 'ETB' ? 'Br ' : '$';
+  const currLabel = selectedCurrency;
+
+  const formatMoney = (usdVal) => {
+    const converted = (usdVal || 0) * rate;
+    return `${currSymbol}${converted.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  };
 
   const fetchFinancialData = async () => {
     setLoading(true);
@@ -167,14 +186,14 @@ export default function FinancialDashboard() {
     labels: last6MonthLabels,
     datasets: [
       {
-        label: 'Grant Revenue / Income ($)',
-        data: monthlyIncome,
+        label: `Grant Revenue / Income (${currSymbol.trim()})`,
+        data: monthlyIncome.map(v => Number((v * rate).toFixed(2))),
         backgroundColor: 'rgba(16, 185, 129, 0.85)',
         borderRadius: 6,
       },
       {
-        label: 'Program Expenditures ($)',
-        data: monthlyExpenses,
+        label: `Program Expenditures (${currSymbol.trim()})`,
+        data: monthlyExpenses.map(v => Number((v * rate).toFixed(2))),
         backgroundColor: 'rgba(99, 102, 241, 0.85)',
         borderRadius: 6,
       },
@@ -200,7 +219,7 @@ export default function FinancialDashboard() {
             <TrendingUp className="w-4 h-4 text-emerald-400" />
           </div>
           <div className="text-2xl font-black tracking-tight text-white">
-            ${totalIncome.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(totalIncome)}
           </div>
           <p className="mt-2 text-xs text-indigo-300 flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
@@ -214,7 +233,7 @@ export default function FinancialDashboard() {
             <TrendingDown className="w-4 h-4 text-amber-500" />
           </div>
           <div className="text-2xl font-black tracking-tight text-slate-900">
-            ${totalExpenses.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {formatMoney(totalExpenses)}
           </div>
           <p className="mt-2 text-xs text-slate-500 flex items-center gap-1">
             <span className="inline-block w-2 h-2 rounded-full bg-indigo-500"></span>
@@ -230,7 +249,7 @@ export default function FinancialDashboard() {
             </span>
           </div>
           <div className={`text-2xl font-black tracking-tight ${netCashFlow >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-            ${netCashFlow.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+            {(netCashFlow >= 0 ? '+' : '')}{formatMoney(netCashFlow)}
           </div>
           <p className="mt-2 text-xs text-slate-500">
             Fund balance available for projects
@@ -243,7 +262,7 @@ export default function FinancialDashboard() {
             <TrendingUp className="w-4 h-4 text-amber-400" />
           </div>
           <div className="text-2xl font-black tracking-tight text-white">
-            ${(totalExpenses > 0 ? (totalExpenses / 6) : 0).toLocaleString(undefined, { maximumFractionDigits: 0 })}/mo
+            {formatMoney(totalExpenses > 0 ? (totalExpenses / 6) : 0)}/mo
           </div>
           <p className="mt-2 text-xs text-amber-200/80 flex items-center justify-between">
             <span>Est. Run-Out Date:</span>
@@ -332,8 +351,8 @@ export default function FinancialDashboard() {
               <tr className="bg-slate-50 text-slate-600 font-semibold text-xs uppercase tracking-wider border-y border-slate-200">
                 <th className="py-3 px-4">Category / Code</th>
                 <th className="py-3 px-4">Type</th>
-                <th className="py-3 px-4 text-right">Target Limit</th>
-                <th className="py-3 px-4 text-right">Actual Spent</th>
+                <th className="py-3 px-4 text-right">Target Limit ({currLabel})</th>
+                <th className="py-3 px-4 text-right">Actual Expended ({currLabel})</th>
                 <th className="py-3 px-4 text-right">Budget Utilization</th>
               </tr>
             </thead>
@@ -394,10 +413,10 @@ export default function FinancialDashboard() {
                         </span>
                       </td>
                       <td className="py-3.5 px-4 text-right font-medium text-slate-700 font-mono">
-                        {limit > 0 ? `$${limit.toLocaleString(undefined, { minimumFractionDigits: 2 })}` : 'Uncapped'}
+                        {limit > 0 ? formatMoney(limit) : 'Uncapped'}
                       </td>
                       <td className={`py-3.5 px-4 text-right font-bold font-mono ${isIncomeCat ? 'text-emerald-600' : 'text-slate-900'}`}>
-                        {isIncomeCat ? '+' : ''}${spent.toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                        {isIncomeCat ? '+' : ''}{formatMoney(spent)}
                       </td>
                       <td className="py-3.5 px-4 text-right">
                         {limit > 0 ? (

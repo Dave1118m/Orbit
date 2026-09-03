@@ -191,6 +191,7 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHostedService<OrbitApi.Services.ComplianceReminderService>();
 builder.Services.AddHostedService<OrbitApi.Services.ScheduledReportWorkerService>();
 builder.Services.AddHostedService<OrbitApi.Services.RecurringTaskWorkerService>();
+builder.Services.AddHostedService<OrbitApi.Services.AiDelegateWorkerService>();
 
 builder.Services.AddScoped<OrbitApi.Services.IPermissionService, OrbitApi.Services.PermissionService>();
 builder.Services.AddScoped<OrbitApi.Services.IAgentToolsService, OrbitApi.Services.AgentToolsService>();

@@ -101,6 +101,8 @@ public class OrbitDbContext : DbContext
     public DbSet<FinancialCategory> FinancialCategories => Set<FinancialCategory>();
     public DbSet<FinancialTransaction> FinancialTransactions => Set<FinancialTransaction>();
     public DbSet<ContactInquiry> ContactInquiries => Set<ContactInquiry>();
+    public DbSet<AiDelegateConfiguration> AiDelegateConfigurations => Set<AiDelegateConfiguration>();
+    public DbSet<AiDelegateActionLog> AiDelegateActionLogs => Set<AiDelegateActionLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -265,6 +267,12 @@ public class OrbitDbContext : DbContext
             .WithMany(u => u.Attachments)
             .HasForeignKey(a => a.UserId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<AuditLog>()
+            .HasOne(a => a.Organization)
+            .WithMany()
+            .HasForeignKey(a => a.OrganizationId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         modelBuilder.Entity<AuditLog>()
             .HasOne(a => a.PerformedByUser)
@@ -622,6 +630,10 @@ public class OrbitDbContext : DbContext
             .HasDatabaseName("IX_AuditLogs_Entity_Timestamp");
 
         modelBuilder.Entity<AuditLog>()
+            .HasIndex(a => new { a.OrganizationId, a.Timestamp })
+            .HasDatabaseName("IX_AuditLogs_OrganizationId_Timestamp");
+
+        modelBuilder.Entity<AuditLog>()
             .HasIndex(a => a.PerformedByUserId)
             .HasDatabaseName("IX_AuditLogs_PerformedByUserId");
 
@@ -629,6 +641,17 @@ public class OrbitDbContext : DbContext
         modelBuilder.Entity<Notification>()
             .HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt })
             .HasDatabaseName("IX_Notifications_UserId_IsRead_CreatedAt");
+
+        modelBuilder.Entity<AiDelegateConfiguration>(entity =>
+        {
+            entity.HasIndex(e => new { e.UserId, e.OrganizationId }).IsUnique();
+            entity.Property(e => e.MaxAutoApprovalAmount).HasPrecision(18, 2);
+        });
+
+        modelBuilder.Entity<AiDelegateActionLog>(entity =>
+        {
+            entity.HasIndex(e => new { e.OrganizationId, e.UserId });
+        });
     }
 
     protected override void OnConfiguring(DbContextOptionsBuilder optionsBuilder)

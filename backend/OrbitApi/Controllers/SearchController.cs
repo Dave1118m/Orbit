@@ -36,6 +36,39 @@ public class SearchController : ControllerBase
         return int.TryParse(sub, out var id) ? id : 0;
     }
 
+    private int? GetActiveOrganizationId()
+    {
+        if (Request.Headers.TryGetValue("X-Organization-Id", out var orgIdStr) && int.TryParse(orgIdStr, out var orgId) && orgId > 0)
+        {
+            var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == orgId && !o.IsDeleted);
+            if (validOrg != null) return validOrg.Id;
+        }
+
+        if (Request.Query.TryGetValue("orgId", out var queryOrgStr) && int.TryParse(queryOrgStr, out var queryOrgId) && queryOrgId > 0)
+        {
+            var validOrg = _db.Organizations.FirstOrDefault(o => o.Id == queryOrgId && !o.IsDeleted);
+            if (validOrg != null) return validOrg.Id;
+        }
+
+        var userId = GetCurrentUserId();
+        if (userId > 0)
+        {
+            var userOrgId = _db.OrganizationMembers
+                .Where(om => om.UserId == userId && om.Status == OrgMemberStatus.Active)
+                .Select(om => om.OrganizationId)
+                .FirstOrDefault();
+            if (userOrgId > 0 && _db.Organizations.Any(o => o.Id == userOrgId && !o.IsDeleted)) return userOrgId;
+
+            var ownedOrgId = _db.Organizations
+                .Where(o => o.OwnerId == userId && !o.IsDeleted)
+                .Select(o => o.Id)
+                .FirstOrDefault();
+            if (ownedOrgId > 0) return ownedOrgId;
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Computes the highest organizational role the current user holds to enforce sensitive data visibility (e.g. financial filtering).
     /// </summary>
@@ -71,6 +104,7 @@ public class SearchController : ControllerBase
 
     /// <summary>
     /// Executes a federated search across Projects, Tasks, Donors, and Expenses based on query terms and filters.
+    /// Scoped strictly to the active organization tenant.
     /// </summary>
     /// <param name="q">Search keyword.</param>
     /// <param name="type">Optional entity filter ('project', 'task', 'donor', 'expense').</param>
@@ -91,6 +125,11 @@ public class SearchController : ControllerBase
         if (string.IsNullOrWhiteSpace(q) || q.Length < 2)
             return Ok(new { results = Array.Empty<object>(), totalCount = 0 });
 
+        var activeOrgId = GetActiveOrganizationId();
+        if (!activeOrgId.HasValue || activeOrgId.Value <= 0)
+            return Ok(new { results = Array.Empty<object>(), totalCount = 0 });
+
+        var targetOrgId = activeOrgId.Value;
         var userId = GetCurrentUserId();
         var highestRole = await GetUserHighestRole(userId);
 
@@ -101,11 +140,12 @@ public class SearchController : ControllerBase
         bool canSeeFinancials = highestRole.HasValue && highestRole.Value is
             RoleName.Owner or RoleName.Admin or RoleName.FinanceOfficer or RoleName.Manager;
 
-        // ── PROJECTS ───────────────────────────────────────────────────────
+        // ── PROJECTS (organization-scoped) ─────────────────────────────────
         if (type is null or "project")
         {
             var projectsQuery = _db.Projects
-                .Where(p => !p.IsDeleted && (p.Title.ToLower().Contains(term) || (p.Description != null && p.Description.ToLower().Contains(term))));
+                .Where(p => !p.IsDeleted && p.Workspace != null && p.Workspace.OrganizationId == targetOrgId &&
+                    (p.Title.ToLower().Contains(term) || (p.Description != null && p.Description.ToLower().Contains(term))));
 
             if (status != null)
             {
@@ -133,11 +173,12 @@ public class SearchController : ControllerBase
             }));
         }
 
-        // ── TASKS ──────────────────────────────────────────────────────────
+        // ── TASKS (organization-scoped) ────────────────────────────────────
         if (type is null or "task")
         {
             var tasksQuery = _db.Tasks
-                .Where(t => !t.IsDeleted && t.Title.ToLower().Contains(term));
+                .Where(t => !t.IsDeleted && t.Project != null && t.Project.Workspace != null && t.Project.Workspace.OrganizationId == targetOrgId &&
+                    t.Title.ToLower().Contains(term));
 
             if (status != null)
             {
@@ -167,11 +208,11 @@ public class SearchController : ControllerBase
             }));
         }
 
-        // ── DONORS (finance-gated) ─────────────────────────────────────────
+        // ── DONORS (organization-scoped & finance-gated) ───────────────────
         if (canSeeFinancials && type is null or "donor")
         {
             var donors = await _db.Donors
-                .Where(d => d.Name.ToLower().Contains(term))
+                .Where(d => d.OrganizationId == targetOrgId && d.Name.ToLower().Contains(term))
                 .Take(10)
                 .ToListAsync();
 
@@ -186,11 +227,14 @@ public class SearchController : ControllerBase
             }));
         }
 
-        // ── EXPENSES (finance-gated) ───────────────────────────────────────
+        // ── EXPENSES (organization-scoped & finance-gated) ─────────────────
         if (canSeeFinancials && type is null or "expense")
         {
             var expensesQuery = _db.Expenses
-                .Where(e => e.Description.ToLower().Contains(term));
+                .Where(e => ((e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == targetOrgId) ||
+                             (e.BankAccount != null && e.BankAccount.OrganizationId == targetOrgId) ||
+                             (e.Task != null && e.Task.Project != null && e.Task.Project.Workspace != null && e.Task.Project.Workspace.OrganizationId == targetOrgId)) &&
+                            e.Description.ToLower().Contains(term));
 
             if (status != null && Enum.TryParse<ApprovalStatus>(status, true, out var approvalStatus))
                 expensesQuery = expensesQuery.Where(e => e.ApprovalStatus == approvalStatus);

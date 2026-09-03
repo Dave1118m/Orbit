@@ -20,12 +20,12 @@ export default function AiCopilotDrawer() {
     }
   ]);
 
-  // Chat state for Role Delegate
+  // Chat state for Role Stand-In
   const [delegateMessages, setDelegateMessages] = useState([
     {
       id: 1,
       role: 'assistant',
-      text: 'Autonomous Role Delegate is ready. Select a role persona to monitor workflows, audit records, or execute tasks on your behalf.',
+      text: 'Stand-in ready. Select a role (Owner, Admin, Manager, Finance, Coordinator, Member, Viewer) to run tasks or monitor workflows.',
       actions: [],
       timestamp: new Date()
     }
@@ -50,8 +50,13 @@ export default function AiCopilotDrawer() {
           const orgs = await orgRes.json();
           setOrganizations(orgs);
           if (orgs.length > 0) {
-            setSelectedOrgId(orgs[0].id);
-            fetchPersonas(orgs[0].id);
+            const stored = localStorage.getItem('selectedOrganizationId');
+            const targetOrg = stored && orgs.find(o => o.id === parseInt(stored));
+            const activeId = targetOrg ? targetOrg.id : orgs[0].id;
+            setSelectedOrgId(activeId);
+            fetchPersonas(activeId);
+            fetchDelegateStatus(activeId);
+            fetchHandoffReport(activeId);
           }
         }
       } catch (e) {
@@ -60,6 +65,21 @@ export default function AiCopilotDrawer() {
     }
     init();
   }, []);
+
+  useEffect(() => {
+    if (isOpen && organizations.length > 0) {
+      const stored = localStorage.getItem('selectedOrganizationId');
+      const activeId = stored && organizations.some(o => o.id === parseInt(stored))
+        ? parseInt(stored)
+        : selectedOrgId;
+      if (activeId !== selectedOrgId) {
+        setSelectedOrgId(activeId);
+      }
+      fetchPersonas(activeId);
+      fetchDelegateStatus(activeId);
+      fetchHandoffReport(activeId);
+    }
+  }, [isOpen]);
 
   const fetchPersonas = async (orgId) => {
     const token = localStorage.getItem('token');
@@ -74,6 +94,77 @@ export default function AiCopilotDrawer() {
       }
     } catch (e) {
       console.error('Failed to fetch personas', e);
+    }
+  };
+
+  // Policy & Handoff State
+  const [maxAutoApprovalAmount, setMaxAutoApprovalAmount] = useState(100);
+  const [autoReplyMessage, setAutoReplyMessage] = useState('');
+  const [autoApproveReceipts, setAutoApproveReceipts] = useState(true);
+  const [autoTriage, setAutoTriage] = useState(true);
+  const [showPolicySettings, setShowPolicySettings] = useState(false);
+  const [handoffData, setHandoffData] = useState(null);
+  const [showHandoffBanner, setShowHandoffBanner] = useState(false);
+
+  const fetchDelegateStatus = async (orgId) => {
+    const token = localStorage.getItem('token');
+    if (!token || !orgId) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/delegate-status?orgId=${orgId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setIsAgentMode(Boolean(data.isAgentModeActive));
+        if (data.rolePersona) setSelectedPersona(data.rolePersona);
+        if (data.maxAutoApprovalAmount != null) setMaxAutoApprovalAmount(data.maxAutoApprovalAmount);
+        if (data.autoReplyMessage != null) setAutoReplyMessage(data.autoReplyMessage);
+        if (data.autoApproveVerifiedReceipts != null) setAutoApproveReceipts(data.autoApproveVerifiedReceipts);
+        if (data.autoTriageTasks != null) setAutoTriage(data.autoTriageTasks);
+      }
+    } catch (e) {
+      console.error('Failed to fetch delegate status', e);
+    }
+  };
+
+  const fetchHandoffReport = async (orgId) => {
+    const token = localStorage.getItem('token');
+    if (!token || !orgId) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/delegate-handoff?orgId=${orgId}`, {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setHandoffData(data);
+        if (data.totalUnacknowledged > 0) {
+          setShowHandoffBanner(true);
+        }
+      }
+    } catch (e) {
+      console.error('Failed to fetch handoff report', e);
+    }
+  };
+
+  const handleAcknowledgeHandoff = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    try {
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/delegate-handoff/acknowledge`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ organizationId: selectedOrgId })
+      });
+      if (res.ok) {
+        setShowHandoffBanner(false);
+        setHandoffData(null);
+        showSuccessToast('Stand-in actions acknowledged.');
+      }
+    } catch (e) {
+      showErrorToast('Failed to acknowledge actions');
     }
   };
 
@@ -97,15 +188,50 @@ export default function AiCopilotDrawer() {
         body: JSON.stringify({
           organizationId: selectedOrgId,
           rolePersona: selectedPersona,
-          isAgentModeActive: nextState
+          isAgentModeActive: nextState,
+          maxAutoApprovalAmount: parseFloat(maxAutoApprovalAmount) || 100,
+          autoReplyMessage,
+          autoApproveVerifiedReceipts: autoApproveReceipts,
+          autoTriageTasks: autoTriage
         })
       });
       if (res.ok) {
         const data = await res.json();
         showSuccessToast(data.message);
+        if (!nextState) {
+          fetchHandoffReport(selectedOrgId);
+        }
       }
     } catch (e) {
       showErrorToast('Failed to update delegate status');
+    }
+  };
+
+  const handleSavePolicy = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL}/ai/delegate-status`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({
+          organizationId: selectedOrgId,
+          rolePersona: selectedPersona,
+          isAgentModeActive: isAgentMode,
+          maxAutoApprovalAmount: parseFloat(maxAutoApprovalAmount) || 100,
+          autoReplyMessage,
+          autoApproveVerifiedReceipts: autoApproveReceipts,
+          autoTriageTasks: autoTriage
+        })
+      });
+      if (res.ok) {
+        showSuccessToast('Delegation guardrails policy saved.');
+        setShowPolicySettings(false);
+      }
+    } catch (e) {
+      showErrorToast('Failed to save policy');
     }
   };
 
@@ -179,41 +305,65 @@ export default function AiCopilotDrawer() {
   };
 
   const generalPrompts = [
-    'How does the system work?',
-    'Explain Logframe and MEL indicators',
-    'Explain Budget and $500 threshold rules',
-    'Explain the 37-Point Permission Matrix'
+    'System Overview',
+    'Logframe & MEL Guide',
+    'Budget & $500 Receipt Rule',
+    'Role Permissions Matrix'
   ];
 
-  const delegatePrompts = {
+  const rolePrompts = {
+    Owner: [
+      'Org Overview',
+      'Portfolio Status',
+      'Audit Logs',
+      'Financial Summary'
+    ],
     Admin: [
-      'Executive Organization Overview',
-      'Invite team member',
-      'List active projects portfolio',
-      'Audit active workspace sessions'
+      'Org Overview',
+      'Invite Member',
+      'Active Projects',
+      'Security Audit'
     ],
     Manager: [
-      'Create task "Field Supply Verification"',
-      'Project milestones and deadlines',
-      'List open risk logs & issues',
-      'Search pending tasks'
+      'Create Task',
+      'Milestones',
+      'Risk Logs',
+      'Pending Tasks'
     ],
     FinanceOfficer: [
-      'Financial health & budget summary',
-      'Review pending expense claims',
-      'Category expenditure breakdown',
-      'Check funding status'
+      'Budget Summary',
+      'Pending Expenses',
+      'Category Spend',
+      'Funding Status'
+    ],
+    Finance: [
+      'Budget Summary',
+      'Pending Expenses',
+      'Category Spend',
+      'Funding Status'
     ],
     Coordinator: [
-      'List active volunteers & hours',
-      'Dispatch volunteer task assignment',
-      'Check team task dependencies'
+      'Volunteers',
+      'Assign Task',
+      'Dependencies',
+      'Field Schedule'
+    ],
+    Member: [
+      'My Tasks',
+      'Deadlines',
+      'Submit Note',
+      'Project Updates'
+    ],
+    Viewer: [
+      'Project Status',
+      'Read-Only Briefing',
+      'Reports Overview'
     ]
   };
 
   const activeQuickPrompts = activeTab === 'chat'
     ? generalPrompts
-    : (delegatePrompts[selectedPersona] || ['Summary Briefing', 'List active projects', 'Create operational task']);
+    : (rolePrompts[selectedPersona] || ['Summary Briefing', 'Active Projects', 'Pending Tasks']);
 
   const activeMessages = activeTab === 'chat' ? chatMessages : delegateMessages;
 
@@ -231,10 +381,10 @@ export default function AiCopilotDrawer() {
           </div>
           <div className="text-left">
             <p className="text-xs font-bold text-white">
-              {activeTab === 'chat' ? 'Orbit Assistant' : `${selectedPersona} Delegate`}
+              {activeTab === 'chat' ? 'Assistant' : (selectedPersona === 'FinanceOfficer' ? 'Finance' : selectedPersona)}
             </p>
             <p className="text-[10px] text-slate-400">
-              {isAgentMode ? 'Autonomous Active' : 'Ready'}
+              {isAgentMode ? 'Auto Active' : 'Ready'}
             </p>
           </div>
         </button>
@@ -254,8 +404,8 @@ export default function AiCopilotDrawer() {
                       O
                     </div>
                     <div>
-                      <h2 className="text-sm font-bold tracking-tight text-white">Orbit Operations Center</h2>
-                      <p className="text-xs text-slate-400">Operations Assistant & Role Stand-In</p>
+                      <h2 className="text-sm font-bold tracking-tight text-white">Orbit Operations</h2>
+                      <p className="text-xs text-slate-400">Operations Assistant & Stand-In</p>
                     </div>
                   </div>
                   <button
@@ -277,7 +427,7 @@ export default function AiCopilotDrawer() {
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    Assistant Chat
+                    Assistant
                   </button>
                   <button
                     type="button"
@@ -288,15 +438,15 @@ export default function AiCopilotDrawer() {
                         : 'text-slate-400 hover:text-white'
                     }`}
                   >
-                    Role Delegate (Stand-In)
+                    Stand-In
                   </button>
                 </div>
 
-                {/* Sub-Header for Autonomous Delegate Tab */}
+                {/* Sub-Header for Stand-In Tab */}
                 {activeTab === 'delegate' && (
                   <div className="mt-3 pt-3 border-t border-slate-800 flex flex-col gap-2.5">
                     <div className="flex items-center justify-between gap-2">
-                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Role Persona:</label>
+                      <label className="text-[11px] font-bold uppercase tracking-wider text-slate-400">Role:</label>
                       <select
                         value={selectedPersona}
                         onChange={(e) => setSelectedPersona(e.target.value)}
@@ -309,10 +459,13 @@ export default function AiCopilotDrawer() {
                         ))}
                         {personas.length === 0 && (
                           <>
-                            <option value="Admin">Administrator Delegate</option>
-                            <option value="Manager">Project Manager Delegate</option>
-                            <option value="FinanceOfficer">Finance Officer Delegate</option>
-                            <option value="Coordinator">Program Coordinator Delegate</option>
+                            <option value="Owner">Owner</option>
+                            <option value="Admin">Admin</option>
+                            <option value="Manager">Manager</option>
+                            <option value="FinanceOfficer">Finance</option>
+                            <option value="Coordinator">Coordinator</option>
+                            <option value="Member">Member</option>
+                            <option value="Viewer">Viewer</option>
                           </>
                         )}
                       </select>
@@ -322,7 +475,7 @@ export default function AiCopilotDrawer() {
                     <div className="flex items-center justify-between bg-slate-800/80 p-2.5 rounded-lg border border-slate-700">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-medium text-slate-200">
-                          {isAgentMode ? 'Autonomous Stand-In Active' : 'Direct Control Mode'}
+                          {isAgentMode ? 'Stand-In Active' : 'Manual Mode'}
                         </span>
                       </div>
                       <button
@@ -339,12 +492,119 @@ export default function AiCopilotDrawer() {
                         />
                       </button>
                     </div>
+
+                    {/* Policy Configuration Toggle */}
+                    <div className="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800">
+                      <button
+                        type="button"
+                        onClick={() => setShowPolicySettings(!showPolicySettings)}
+                        className="text-indigo-400 hover:text-indigo-300 font-medium transition cursor-pointer flex items-center gap-1"
+                      >
+                        ⚙️ {showPolicySettings ? 'Hide Rules' : 'Stand-In Rules'}
+                      </button>
+                      <span className="text-slate-400 text-[10px]">
+                        Cap: ${maxAutoApprovalAmount}
+                      </span>
+                    </div>
+
+                    {showPolicySettings && (
+                      <div className="bg-slate-950 p-3 rounded-lg border border-slate-800 space-y-2 text-xs text-slate-300">
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                            Max Auto-Approval Limit ($):
+                          </label>
+                          <input
+                            type="number"
+                            value={maxAutoApprovalAmount}
+                            onChange={(e) => setMaxAutoApprovalAmount(e.target.value)}
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-white text-xs focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="autoApproveReceiptsCheck"
+                            checked={autoApproveReceipts}
+                            onChange={(e) => setAutoApproveReceipts(e.target.checked)}
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <label htmlFor="autoApproveReceiptsCheck" className="text-[11px] text-slate-300 cursor-pointer">
+                            Auto-approve verified expenses under limit
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            id="autoTriageCheck"
+                            checked={autoTriage}
+                            onChange={(e) => setAutoTriage(e.target.checked)}
+                            className="rounded border-slate-700 text-indigo-600 focus:ring-indigo-500"
+                          />
+                          <label htmlFor="autoTriageCheck" className="text-[11px] text-slate-300 cursor-pointer">
+                            Auto-triage urgent impending tasks
+                          </label>
+                        </div>
+                        <div>
+                          <label className="block text-[10px] uppercase font-bold text-slate-400 mb-1">
+                            Away Auto-Reply Note:
+                          </label>
+                          <input
+                            type="text"
+                            value={autoReplyMessage}
+                            onChange={(e) => setAutoReplyMessage(e.target.value)}
+                            placeholder="e.g. In field operations; AI delegate active."
+                            className="w-full bg-slate-900 border border-slate-700 rounded px-2.5 py-1 text-white text-xs focus:ring-1 focus:ring-indigo-500"
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleSavePolicy}
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs py-1.5 rounded font-semibold transition cursor-pointer"
+                        >
+                          Save Policy
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Message Feed */}
               <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+                {/* While You Were Away Handoff Card */}
+                {showHandoffBanner && handoffData && handoffData.totalUnacknowledged > 0 && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-slate-900 shadow-xs mb-2">
+                    <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-indigo-100">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">📋</span>
+                        <div>
+                          <p className="text-xs font-bold text-indigo-950">While Away (Summary)</p>
+                          <p className="text-[10px] text-indigo-700">
+                            Stand-in completed {handoffData.totalUnacknowledged} item(s)
+                          </p>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAcknowledgeHandoff}
+                        className="text-[10px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white px-2 py-0.5 rounded-md transition cursor-pointer"
+                      >
+                        Acknowledge All
+                      </button>
+                    </div>
+
+                    <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+                      {handoffData.actions.map((act) => (
+                        <div key={act.id} className="bg-white p-1.5 rounded border border-indigo-100 text-[11px]">
+                          <p className="font-semibold text-slate-800">{act.summary}</p>
+                          <span className="text-[9px] text-slate-400">
+                            {new Date(act.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} • {act.actionType}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {activeMessages.map((msg) => (
                   <div
                     key={msg.id}
@@ -359,7 +619,7 @@ export default function AiCopilotDrawer() {
                     >
                       {msg.role === 'assistant' && (
                         <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100 text-[10px] font-bold text-slate-600">
-                          <span>{activeTab === 'chat' ? 'Orbit Assistant' : `${msg.persona || selectedPersona} Delegate`}</span>
+                          <span>{activeTab === 'chat' ? 'Assistant' : (msg.persona === 'FinanceOfficer' ? 'Finance' : (msg.persona || (selectedPersona === 'FinanceOfficer' ? 'Finance' : selectedPersona)))}</span>
                         </div>
                       )}
                       <div className="whitespace-pre-wrap font-sans">{msg.text}</div>

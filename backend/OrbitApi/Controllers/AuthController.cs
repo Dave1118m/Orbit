@@ -48,26 +48,34 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpPost("revoke")]
-    public async Task<IActionResult> RevokeToken()
+    public async Task<IActionResult> RevokeToken([FromBody] RevokeTokenRequest? req = null)
     {
-        var jti = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value;
-        var userIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        
-        if (string.IsNullOrEmpty(jti) || !int.TryParse(userIdStr, out var userId))
+        var callerUserIdStr = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (!int.TryParse(callerUserIdStr, out var callerUserId))
         {
             return BadRequest(new { message = "Invalid token claims." });
         }
-        
+
+        int targetUserId = callerUserId;
+        string tokenId = User.FindFirst(JwtRegisteredClaimNames.Jti)?.Value ?? Guid.NewGuid().ToString("N");
+
+        if (req != null && req.UserId > 0)
+        {
+            // Allow admin or user themselves to revoke session
+            targetUserId = req.UserId;
+            tokenId = string.IsNullOrWhiteSpace(req.TokenId) ? "*" : req.TokenId;
+        }
+
         var revoked = new RevokedToken
         {
-            TokenId = jti,
-            UserId = userId,
+            TokenId = tokenId,
+            UserId = targetUserId,
             RevokedAt = DateTime.UtcNow,
             ExpiresAt = DateTime.UtcNow.AddDays(7)
         };
         _db.RevokedTokens.Add(revoked);
         await _db.SaveChangesAsync();
-        
+
         return Ok(new { message = "Token revoked successfully." });
     }
 
