@@ -19,12 +19,21 @@ const UserContext = createContext();
  *   refreshUser: () => Promise<void>
  * }}
  */
+const defaultUserContext = {
+  user: null,
+  loading: false,
+  currentOrganization: null,
+  hasPermission: () => false,
+  hasRole: () => false,
+  getPrimaryRole: () => null,
+  setUser: () => {},
+  switchPersona: async () => ({ success: false }),
+  refreshUser: async () => {}
+};
+
 export const useUser = () => {
   const context = useContext(UserContext);
-  if (!context) {
-    throw new Error('useUser must be used within a UserProvider');
-  }
-  return context;
+  return context || defaultUserContext;
 };
 
 /**
@@ -153,9 +162,19 @@ export const UserProvider = ({ children }) => {
     return user.permissions.includes(permission);
   };
 
+  const getCurrentOrganization = () => {
+    try {
+      const stored = localStorage.getItem('selectedOrganization');
+      if (stored) return JSON.parse(stored);
+    } catch { }
+    const orgId = localStorage.getItem('selectedOrganizationId');
+    return orgId ? { id: parseInt(orgId, 10) } : null;
+  };
+
   const value = {
     user,
     loading,
+    currentOrganization: getCurrentOrganization(),
     hasPermission,
     hasRole,
     getPrimaryRole,
