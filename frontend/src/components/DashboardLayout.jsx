@@ -34,9 +34,12 @@ export default function DashboardLayout({ children }) {
     async function loadUser() {
       const token = localStorage.getItem('token');
       if (!token) return;
+      const activePersona = localStorage.getItem('activePersona');
+      const headers = { Authorization: `Bearer ${token}` };
+      if (activePersona) headers['X-Active-Role'] = activePersona;
       try {
         const resp = await fetch(`${import.meta.env.VITE_API_URL}/users/me`, {
-          headers: { Authorization: `Bearer ${token}` }
+          headers
         });
         if (!resp.ok) return;
         const data = await resp.json();
@@ -123,6 +126,7 @@ export default function DashboardLayout({ children }) {
       }
     }
     localStorage.removeItem('token');
+    localStorage.removeItem('activePersona');
     window.location.href = '/login';
   };
 

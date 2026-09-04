@@ -214,6 +214,50 @@ namespace OrbitApi.Controllers
             }
 
             var user = await EnsureAppUserExistsAsync(currentUserId.Value);
+
+            // Check if an active/switched role is specified in claims or request header
+            var activeRoleStr = User.FindFirst("active_role")?.Value;
+            if (string.IsNullOrWhiteSpace(activeRoleStr) && Request.Headers.TryGetValue("X-Active-Role", out var activeHdr) && !string.IsNullOrWhiteSpace(activeHdr))
+            {
+                activeRoleStr = activeHdr.ToString();
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoleStr) && Enum.TryParse<RoleName>(activeRoleStr, true, out var activeRole))
+            {
+                var orgMember = await _db.OrganizationMembers
+                    .FirstOrDefaultAsync(m => m.UserId == currentUserId.Value && m.Status == OrgMemberStatus.Active);
+                var targetOrg = orgMember?.OrganizationId
+                    ?? (await _db.Organizations.Where(o => o.OwnerId == currentUserId.Value && !o.IsDeleted).Select(o => (int?)o.Id).FirstOrDefaultAsync())
+                    ?? 1;
+
+                var personaRoles = new List<RoleInfoDto>
+                {
+                    new RoleInfoDto
+                    {
+                        Name = activeRole.ToString(),
+                        ScopeType = ScopeType.Organization.ToString(),
+                        ScopeId = targetOrg
+                    }
+                };
+
+                var personaPermissions = activeRole == RoleName.Owner
+                    ? Enum.GetValues<Permission>().Select(p => p.ToString()).OrderBy(p => p).ToList()
+                    : (await _permissionService.GetPermissionsForRoleAsync(activeRole)).Distinct().OrderBy(p => p).ToList();
+
+                return Ok(new UserDto
+                {
+                    Id = user.Id,
+                    Name = user.Name,
+                    Email = user.Email,
+                    PhotoUrl = user.PhotoUrl,
+                    MFAEnabled = user.MFAEnabled,
+                    PreferredLanguage = user.PreferredLanguage,
+                    PhoneNumber = user.PhoneNumber,
+                    Roles = personaRoles,
+                    Permissions = personaPermissions
+                });
+            }
+
             var roles = await GetUserRolesAsync(currentUserId.Value);
 
             // Build permissions from DB via IPermissionService

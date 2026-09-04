@@ -61,6 +61,7 @@ export default function Login() {
       const data = await res.json();
       const token = data.token;
       if (token) {
+        localStorage.removeItem('activePersona');
         localStorage.setItem('token', token);
         setMessage('Login successful. Redirecting...');
         setStatus('success');

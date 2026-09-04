@@ -43,6 +43,28 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             return;
         }
 
+        // If an explicit active persona role is specified in claims, evaluate strictly for that role
+        var activeRoleClaim = context.User.FindFirst("active_role")?.Value;
+        if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
+        {
+            if (switchedRole == RoleName.Owner)
+            {
+                context.Succeed(requirement);
+                return;
+            }
+
+            bool hasSwitchedPermission = await _permissionService.RoleHasPermissionAsync(switchedRole, requirement.Permission);
+            if (hasSwitchedPermission)
+            {
+                context.Succeed(requirement);
+            }
+            else
+            {
+                context.Fail();
+            }
+            return;
+        }
+
         // 1. Direct Organization Owner bypass: Owners have absolute full permission
         var isDirectOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId.Value && !o.IsDeleted);
         if (isDirectOrgOwner)

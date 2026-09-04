@@ -137,12 +137,18 @@ export default function Sidebar({ isMobileMenuOpen, setIsMobileMenuOpen }) {
     loadOrganizations();
     loadNavigation();
 
-    window.addEventListener('personaChanged', loadOrganizations);
-    return () => window.removeEventListener('personaChanged', loadOrganizations);
+    const handlePersonaChange = () => {
+      loadOrganizations();
+      loadNavigation();
+    };
+
+    window.addEventListener('personaChanged', handlePersonaChange);
+    return () => window.removeEventListener('personaChanged', handlePersonaChange);
   }, []);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('activePersona');
     navigate('/login');
   };
 

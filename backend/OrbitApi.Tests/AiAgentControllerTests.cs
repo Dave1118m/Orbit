@@ -49,7 +49,7 @@ public class AiAgentControllerTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(1)
         };
@@ -70,7 +70,7 @@ public class AiAgentControllerTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(1)
         };
@@ -92,7 +92,7 @@ public class AiAgentControllerTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(1)
         };
@@ -117,7 +117,7 @@ public class AiAgentControllerTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(1)
         };

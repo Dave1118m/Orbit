@@ -48,7 +48,7 @@ public class AiDelegatePersistenceTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(7)
         };
@@ -103,7 +103,7 @@ public class AiDelegatePersistenceTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(5)
         };
@@ -152,7 +152,7 @@ public class AiDelegatePersistenceTests
         var config = new ConfigurationBuilder().Build();
         var aiService = new AiAgentService(db, toolsService, config, new DummyHttpClientFactory(), NullLogger<AiAgentService>.Instance);
 
-        var controller = new AiAgentController(aiService, db)
+        var controller = new AiAgentController(aiService, db, toolsService)
         {
             ControllerContext = CreateContextWithUser(3)
         };

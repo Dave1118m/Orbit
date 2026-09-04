@@ -46,10 +46,16 @@ export const UserProvider = ({ children }) => {
         return;
       }
 
+      const activePersona = localStorage.getItem('activePersona');
+      const headers = {
+        'Authorization': `Bearer ${token}`
+      };
+      if (activePersona) {
+        headers['X-Active-Role'] = activePersona;
+      }
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/users/me`, {
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
+        headers
       });
 
       if (response.ok) {
@@ -74,12 +80,19 @@ export const UserProvider = ({ children }) => {
    */
   const switchPersona = async (roleName) => {
     try {
+      const token = localStorage.getItem('token');
       const selectedOrgId = localStorage.getItem('selectedOrganizationId');
+      const headers = {
+        'Content-Type': 'application/json'
+      };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      headers['X-Active-Role'] = roleName;
+
       const response = await fetch(`${import.meta.env.VITE_API_URL}/auth/switch-persona`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
+        headers,
         body: JSON.stringify({
           roleName,
           organizationId: selectedOrgId ? parseInt(selectedOrgId, 10) : null
@@ -89,6 +102,7 @@ export const UserProvider = ({ children }) => {
       if (response.ok) {
         const data = await response.json();
         localStorage.setItem('token', data.token);
+        localStorage.setItem('activePersona', roleName);
         setUser(data.user);
         window.dispatchEvent(new Event('personaChanged'));
         return { success: true, user: data.user };
@@ -104,35 +118,39 @@ export const UserProvider = ({ children }) => {
   };
 
   /**
+   * Returns the primary or currently active persona role name.
+   * @returns {string|null}
+   */
+  const getPrimaryRole = () => {
+    const storedPersona = localStorage.getItem('activePersona');
+    if (storedPersona) return storedPersona;
+    if (!user || !user.roles || user.roles.length === 0) return null;
+    return user.roles[0].name;
+  };
+
+  /**
+   * Evaluates if the active user holds a specific role name.
+   * Strictly matches against the active persona role.
+   * @param {string} role - The role name (e.g. 'Admin', 'Manager').
+   * @returns {boolean}
+   */
+  const hasRole = (role) => {
+    return getPrimaryRole() === role;
+  };
+
+  /**
    * Evaluates if the active user possesses a given permission string.
-   * Organization Owners automatically bypass and return true.
+   * Organization Owners automatically bypass and return true when in Owner role.
+   * Other roles strictly evaluate against their specific permissions.
    * @param {string} permission - The permission name (e.g. 'ProjectCreate', 'ExpenseApprove').
    * @returns {boolean}
    */
   const hasPermission = (permission) => {
     if (!user) return false;
-    if (user.roles && user.roles.some(r => r.name === 'Owner')) return true;
+    const active = getPrimaryRole();
+    if (active === 'Owner') return true;
     if (!user.permissions) return false;
     return user.permissions.includes(permission);
-  };
-
-  /**
-   * Evaluates if the active user holds a specific role name.
-   * @param {string} role - The role name (e.g. 'Admin', 'Manager').
-   * @returns {boolean}
-   */
-  const hasRole = (role) => {
-    if (!user || !user.roles) return false;
-    return user.roles.some(r => r.name === role);
-  };
-
-  /**
-   * Returns the primary role name assigned to the user in their active organization context.
-   * @returns {string|null}
-   */
-  const getPrimaryRole = () => {
-    if (!user || !user.roles || user.roles.length === 0) return null;
-    return user.roles[0].name;
   };
 
   const value = {

@@ -170,7 +170,7 @@ public class AuthController : ControllerBase
         return Ok(new { token });
     }
 
-    private string GenerateToken(ApplicationUser user)
+    private string GenerateToken(ApplicationUser user, string? activeRole = null)
     {
         var jwtKey = _config["Jwt:Key"] ?? "ReplaceThisDevKeyWithAStrongSecretInProduction!";
         var jwtIssuer = _config["Jwt:Issuer"] ?? "OrbitApi";
@@ -184,6 +184,12 @@ public class AuthController : ControllerBase
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
         };
+
+        if (!string.IsNullOrWhiteSpace(activeRole))
+        {
+            claims.Add(new Claim(ClaimTypes.Role, activeRole));
+            claims.Add(new Claim("active_role", activeRole));
+        }
 
         var token = new JwtSecurityToken(
             issuer: jwtIssuer,
@@ -712,7 +718,7 @@ public class AuthController : ControllerBase
             return BadRequest(new { message = "Identity account for user could not be found." });
         }
 
-        // Ensure role exists
+        // Ensure role exists in the database
         var dbRole = await _db.Roles.FirstOrDefaultAsync(r => r.Name == roleName && r.IsSystemRole);
         if (dbRole == null)
         {
@@ -721,56 +727,10 @@ public class AuthController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        // Update or assign role to realUser
-        var existingAssignment = await _db.RoleAssignments
-            .FirstOrDefaultAsync(a => a.UserId == realUser.Id && a.ScopeType == ScopeType.Organization && a.ScopeId == targetOrg.Id);
-        if (existingAssignment == null)
-        {
-            _db.RoleAssignments.Add(new RoleAssignment
-            {
-                UserId = realUser.Id,
-                RoleId = dbRole.Id,
-                ScopeType = ScopeType.Organization,
-                ScopeId = targetOrg.Id
-            });
-        }
-        else
-        {
-            existingAssignment.RoleId = dbRole.Id;
-        }
+        // Generate switched session token containing the active_role claim
+        var token = GenerateToken(appUser, roleName.ToString());
 
-        var existingOrgMember = await _db.OrganizationMembers
-            .FirstOrDefaultAsync(m => m.UserId == realUser.Id && m.OrganizationId == targetOrg.Id);
-        if (existingOrgMember == null)
-        {
-            _db.OrganizationMembers.Add(new OrganizationMember
-            {
-                UserId = realUser.Id,
-                OrganizationId = targetOrg.Id,
-                RoleId = dbRole.Id,
-                Status = OrgMemberStatus.Active,
-                JoinedAt = DateTime.UtcNow
-            });
-        }
-        else
-        {
-            existingOrgMember.RoleId = dbRole.Id;
-            existingOrgMember.Status = OrgMemberStatus.Active;
-        }
-        await _db.SaveChangesAsync();
-
-        // Invalidate permission cache for the target role
-        await _permissionService.InvalidateCacheAsync(roleName);
-
-        if (roleName == RoleName.Owner && targetOrg.OwnerId != realUser.Id)
-        {
-            targetOrg.OwnerId = realUser.Id;
-            await _db.SaveChangesAsync();
-        }
-
-        var token = GenerateToken(appUser);
-
-        // Read permissions from DB via IPermissionService (single source of truth)
+        // Read permissions for this persona role from DB via IPermissionService (single source of truth)
         var permissions = roleName == RoleName.Owner
             ? Enum.GetNames<Permission>().OrderBy(n => n).ToList()
             : await _permissionService.GetPermissionsForRoleAsync(roleName);
