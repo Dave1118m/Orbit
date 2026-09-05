@@ -8,6 +8,8 @@ using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
 
+using Microsoft.AspNetCore.Http;
+using OrbitApi.Authorization;
 using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
@@ -23,11 +25,31 @@ namespace OrbitApi.Controllers
     {
         private readonly OrbitDbContext _db;
         private readonly ICurrencyService _currencyService;
+        private readonly IAuthorizationService _authorizationService;
 
-        public DonorsController(OrbitDbContext db, ICurrencyService currencyService)
+        public DonorsController(OrbitDbContext db, ICurrencyService currencyService, IAuthorizationService authorizationService)
         {
             _db = db;
             _currencyService = currencyService;
+            _authorizationService = authorizationService;
+        }
+
+        private async Task<bool> CanManageDonorsAsync(int orgId)
+        {
+            var activeRoleClaim = User.FindFirst("active_role")?.Value;
+            if (string.IsNullOrWhiteSpace(activeRoleClaim) && Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+            {
+                activeRoleClaim = headerVal.FirstOrDefault();
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
+            {
+                return switchedRole == RoleName.Owner || switchedRole == RoleName.Admin || switchedRole == RoleName.FinanceOfficer;
+            }
+
+            var orgResource = new ScopedResource(ScopeType.Organization, orgId);
+            var authResult = await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.BudgetEdit));
+            return authResult.Succeeded;
         }
 
         private int? GetActiveOrganizationId()
@@ -140,6 +162,11 @@ namespace OrbitApi.Controllers
 
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest(new { message = "Organization context is required." });
+
+            if (!await CanManageDonorsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can create donors." });
+            }
 
             var donorName = dto.Name.Trim();
 
@@ -288,6 +315,11 @@ namespace OrbitApi.Controllers
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
 
+            if (!await CanManageDonorsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can update donors." });
+            }
+
             var donor = await _db.Donors
                 .Where(d => d.OrganizationId == orgId.Value)
                 .FirstOrDefaultAsync(d => d.Id == id);
@@ -318,6 +350,11 @@ namespace OrbitApi.Controllers
             {
                 var orgId = GetActiveOrganizationId();
                 if (orgId == null) return BadRequest("Organization context is required.");
+
+                if (!await CanManageDonorsAsync(orgId.Value))
+                {
+                    return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can delete donors." });
+                }
 
                 var donor = await _db.Donors
                     .Where(d => d.OrganizationId == orgId.Value)
@@ -364,6 +401,11 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+
+            if (!await CanManageDonorsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can record grant contributions." });
+            }
 
             if (dto.Amount <= 0)
             {
@@ -606,6 +648,11 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+
+            if (!await CanManageDonorsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can link donor funds to projects." });
+            }
 
             // Verify donor belongs to active org
             var donor = await _db.Donors

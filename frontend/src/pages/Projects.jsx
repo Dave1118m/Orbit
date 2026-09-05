@@ -8,6 +8,7 @@ import AttachmentList from '../components/AttachmentList';
 import RiskRegister from '../components/RiskRegister';
 import GanttTimelineView from '../components/GanttTimelineView';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../utils/toastHelper';
+import { useUser } from '../contexts/UserContext';
 
 const API_URL = `${import.meta.env.VITE_API_URL}/projects`;
 const TEAMS_URL = `${import.meta.env.VITE_API_URL}/teams`;
@@ -254,8 +255,18 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
   const [isPostponing, setIsPostponing] = useState(false);
   const [postponeData, setPostponeData] = useState({ newEndDate: '', reason: '' });
 
+  const { hasRole, hasPermission } = useUser();
   const API_BASE = import.meta.env.VITE_API_URL;
-  const headers = { Authorization: `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' };
+  const authHeaders = () => {
+    const token = localStorage.getItem('token');
+    const h = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+    const orgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
+    if (orgId) h['X-Organization-Id'] = String(orgId);
+    const activePersona = localStorage.getItem('activePersona');
+    if (activePersona) h['X-Active-Role'] = activePersona;
+    return h;
+  };
+  const headers = authHeaders();
 
   useEffect(() => {
     if (project?.id) {
@@ -384,9 +395,11 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
               <div className="bg-white rounded-2xl border border-slate-200 p-4 space-y-3">
                 <div className="flex items-center justify-between">
                   <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Leadership Tenure History</p>
-                  <button onClick={() => setIsAssigningLead(true)} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
-                    + Assign New Lead
-                  </button>
+                  {(hasRole('Owner') || hasRole('Admin') || hasRole('Manager')) && (
+                    <button onClick={() => setIsAssigningLead(true)} className="text-xs font-semibold text-brand-600 hover:text-brand-700">
+                      + Assign New Lead
+                    </button>
+                  )}
                 </div>
                 {leadHistory.length === 0 ? (
                   <p className="text-xs text-slate-500 italic">No lead tenure records logged.</p>
@@ -501,33 +514,41 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
 
               {/* Actions */}
               <div className="flex gap-3 pt-2 flex-wrap">
-                <button
-                  onClick={() => onEdit(project)}
-                  className="flex-1 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center justify-center gap-1.5"
-                >
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                  </svg>
-                  Edit
-                </button>
-                <button
-                  onClick={() => onAssignTeam(project)}
-                  className="flex-1 rounded-xl border border-brand-500 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-50 transition"
-                >
-                  + Assign Team
-                </button>
-                <button
-                  onClick={() => setIsPostponing(true)}
-                  className="flex-1 rounded-xl border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-600 hover:bg-amber-50 transition"
-                >
-                  Postpone
-                </button>
-                <button
-                  onClick={() => { if (window.confirm('Delete this project?')) onDelete(project.id); }}
-                  className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-500 hover:bg-red-50 transition"
-                >
-                  Delete
-                </button>
+                {hasPermission('ProjectEdit') && (
+                  <button
+                    onClick={() => onEdit(project)}
+                    className="flex-1 rounded-xl border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 transition flex items-center justify-center gap-1.5"
+                  >
+                    <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                    </svg>
+                    Edit
+                  </button>
+                )}
+                {(hasRole('Owner') || hasRole('Admin') || hasRole('Manager')) && (
+                  <button
+                    onClick={() => onAssignTeam(project)}
+                    className="flex-1 rounded-xl border border-brand-500 px-4 py-2 text-sm font-semibold text-brand-600 hover:bg-brand-50 transition"
+                  >
+                    + Assign Team
+                  </button>
+                )}
+                {hasPermission('ProjectPostpone') && (
+                  <button
+                    onClick={() => setIsPostponing(true)}
+                    className="flex-1 rounded-xl border border-amber-400 px-4 py-2 text-sm font-semibold text-amber-600 hover:bg-amber-50 transition"
+                  >
+                    Postpone
+                  </button>
+                )}
+                {hasPermission('ProjectDelete') && (
+                  <button
+                    onClick={() => { if (window.confirm('Delete this project?')) onDelete(project.id); }}
+                    className="rounded-xl border border-red-200 px-4 py-2 text-sm font-semibold text-red-500 hover:bg-red-50 transition"
+                  >
+                    Delete
+                  </button>
+                )}
               </div>
             </div>
           )}
@@ -602,6 +623,7 @@ function ProjectDetailPanel({ project, donors, users, onClose, onDelete, onAssig
 
 // ─── Main Page ─────────────────────────────────────────────────────────────────
 export default function Projects() {
+  const { hasRole, hasPermission } = useUser();
   const [projects, setProjects] = useState([]);
   const [workspaces, setWorkspaces] = useState([]);
   const [donors, setDonors] = useState([]);
@@ -645,6 +667,8 @@ export default function Projects() {
     const headers = {};
     if (token) headers['Authorization'] = `Bearer ${token}`;
     if (orgId) headers['X-Organization-Id'] = String(orgId);
+    const activePersona = localStorage.getItem('activePersona');
+    if (activePersona) headers['X-Active-Role'] = activePersona;
     return headers;
   };
 
@@ -981,15 +1005,17 @@ export default function Projects() {
               <option key={ws.id} value={ws.id}>{ws.name}</option>
             ))}
           </select>
-          <button
-            onClick={() => setIsCreateModalOpen(true)}
-            className="flex items-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 transition"
-          >
-            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            New
-          </button>
+          {hasPermission('ProjectCreate') && (
+            <button
+              onClick={() => setIsCreateModalOpen(true)}
+              className="flex items-center gap-2 rounded-full bg-brand-500 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-brand-600 transition"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              New
+            </button>
+          )}
         </div>
       </div>
 
@@ -1064,7 +1090,7 @@ export default function Projects() {
           <p className="text-sm text-slate-400 mb-6">
             {searchQuery ? `No results for "${searchQuery}"` : 'Create your first project to get started'}
           </p>
-          {!searchQuery && (
+          {!searchQuery && hasPermission('ProjectCreate') && (
             <button
               onClick={() => setIsCreateModalOpen(true)}
               className="rounded-full bg-brand-500 px-6 py-2.5 text-sm font-semibold text-white hover:bg-brand-600 transition"

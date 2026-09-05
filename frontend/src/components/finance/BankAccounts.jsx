@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import { AutoText } from '../../contexts/TranslationContext';
+import { useUser } from '../../contexts/UserContext';
 import { ETHIOPIAN_BANKS, getShortBankName, getBankValidationRule } from '../../lib/ethiopianBanks';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 
@@ -16,9 +17,11 @@ function authHeaders() {
     }
   }
   if (!orgId) orgId = localStorage.getItem('selectedOrgId');
+  const activePersona = localStorage.getItem('activePersona');
   const headers = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (orgId) headers['X-Organization-Id'] = String(orgId);
+  if (activePersona) headers['X-Active-Role'] = activePersona;
   return headers;
 }
 
@@ -37,6 +40,9 @@ function formatCurrency(value, currency = 'USD') {
 }
 
 export default function BankAccounts() {
+  const { hasRole, hasPermission } = useUser();
+  const canManageBanks = hasRole('Owner') || hasRole('Admin') || hasRole('FinanceOfficer') || hasPermission('BudgetEdit');
+
   const [accounts, setAccounts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -123,6 +129,7 @@ export default function BankAccounts() {
   };
 
   const openAddModal = () => {
+    if (!canManageBanks) return;
     setIsEditMode(false);
     setEditingAccountId(null);
     setAccountNumberError('');
@@ -131,6 +138,7 @@ export default function BankAccounts() {
   };
 
   const openEditModal = (account) => {
+    if (!canManageBanks) return;
     setIsEditMode(true);
     setEditingAccountId(account.id);
     setAccountNumberError('');
@@ -198,6 +206,7 @@ export default function BankAccounts() {
   };
 
   const openTransferModal = () => {
+    if (!canManageBanks) return;
     if (accounts.length < 2) {
       showErrorToast('You need at least 2 bank accounts to perform an inter-account transfer.');
       return;
@@ -294,6 +303,7 @@ export default function BankAccounts() {
   };
 
   const handleDelete = async (id) => {
+    if (!canManageBanks) return;
     if (!confirm('Are you sure you want to delete this bank account? This cannot be undone.')) return;
     try {
       const response = await fetch(`${API_BASE}/bankaccounts/${id}`, {
@@ -335,20 +345,22 @@ export default function BankAccounts() {
           <h2 className="text-2xl font-bold text-slate-900 tracking-tight"><AutoText text="Bank Accounts" /></h2>
           <p className="text-sm text-slate-500 mt-1"><AutoText text="Manage real account balances, inter-account transfers, and dual transaction ledgers." /></p>
         </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={openTransferModal}
-            className="bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 font-semibold py-2.5 px-4 rounded-xl shadow-sm transition flex items-center gap-2 text-sm"
-          >
-            🔄 <AutoText text="Inter-Account Transfer" />
-          </button>
-          <button
-            onClick={openAddModal}
-            className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm"
-          >
-            + <AutoText text="Add Bank Account" />
-          </button>
-        </div>
+        {canManageBanks && (
+          <div className="flex items-center gap-3">
+            <button
+              onClick={openTransferModal}
+              className="bg-white hover:bg-slate-100 text-slate-900 border border-slate-300 font-semibold py-2.5 px-4 rounded-xl shadow-sm transition flex items-center gap-2 text-sm"
+            >
+              🔄 <AutoText text="Inter-Account Transfer" />
+            </button>
+            <button
+              onClick={openAddModal}
+              className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm"
+            >
+              + <AutoText text="Add Bank Account" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* KPI Cards */}
@@ -386,12 +398,14 @@ export default function BankAccounts() {
             <p className="text-sm text-slate-500 mt-1 max-w-sm mb-6">
               Add your organization's bank accounts to track deposit allocations, balance updates, and currency holdings.
             </p>
-            <button
-              onClick={openAddModal}
-              className="bg-[#5A45FF] text-white font-semibold py-2.5 px-6 rounded-full hover:bg-indigo-600 transition"
-            >
-              Add First Bank Account
-            </button>
+            {canManageBanks && (
+              <button
+                onClick={openAddModal}
+                className="bg-[#5A45FF] text-white font-semibold py-2.5 px-6 rounded-full hover:bg-indigo-600 transition"
+              >
+                Add First Bank Account
+              </button>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -446,18 +460,22 @@ export default function BankAccounts() {
                         >
                           {expandedAccountId === acc.id ? 'Hide Ledger' : 'View Ledger'}
                         </button>
-                        <button
-                          onClick={() => openEditModal(acc)}
-                          className="text-slate-600 hover:underline"
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => handleDelete(acc.id)}
-                          className="text-rose-600 hover:underline"
-                        >
-                          Delete
-                        </button>
+                        {canManageBanks && (
+                          <>
+                            <button
+                              onClick={() => openEditModal(acc)}
+                              className="text-slate-600 hover:underline"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => handleDelete(acc.id)}
+                              className="text-rose-600 hover:underline"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
                       </td>
                     </tr>
                     {expandedAccountId === acc.id && (

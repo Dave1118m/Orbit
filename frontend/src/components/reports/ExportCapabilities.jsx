@@ -5,7 +5,7 @@ import {
   Download, FileSpreadsheet, FileText, Printer, CheckCircle2,
   Calendar, ShieldCheck, Filter, Eye, RefreshCw, Layers, Sparkles,
   PieChart, BarChart2, DollarSign, Check, Briefcase, FileCheck,
-  AlertTriangle, Users
+  AlertTriangle, Users, Globe, Folder
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://localhost:7065/api/v1';
@@ -40,7 +40,8 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
 
-  const [reportType, setReportType] = useState('unified_master_report');
+  const [reportScope, setReportScope] = useState('general'); // 'general' | 'project'
+  const reportType = 'unified_master_report';
   const [fileFormat, setFileFormat] = useState('csv');
   const [dateRange, setDateRange] = useState('ytd');
   const [includeAuditHeader, setIncludeAuditHeader] = useState(true);
@@ -224,52 +225,12 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
       }, 0);
     return Math.max(catIncomeFromEntity, catIncomeFromTxns);
   }
-
-  const reportTypes = [
-    {
-      id: 'unified_master_report',
-      title: 'Institutional Audit & Programmatic Impact Master Report',
-      subtitle: 'Unified All-in-One Donor Report: Total budget, money spent, remaining cash, % complete, expense category breakdown (Operations, Logistics, Personnel, Equipment), donor allocations, transaction ledger, logframe KPIs, risks & workforce.',
-      tag: '100% Unified Master Report (All-in-One)',
-      icon: ShieldCheck,
-      color: 'from-slate-900 via-indigo-950 to-indigo-600'
-    }
-  ];
-
   const handleExport = async () => {
     setExporting(true);
-
-    if (reportType === 'audit_support_package') {
-      try {
-        const projectId = selectedProjectId || (projectsList.length > 0 ? projectsList[0].id : 1);
-        const res = await fetch(`${API_BASE}/projects/${projectId}/export-audit-package`, {
-          headers: authHeaders()
-        });
-
-        if (!res.ok) {
-          const errText = await parseApiResponse(res);
-          showErrorToast(`Audit export failed: ${errText || 'Server error'}`);
-          setExporting(false);
-          return;
-        }
-
-        const blob = await res.blob();
-        const url = URL.createObjectURL(new Blob([blob], { type: 'application/zip' }));
-        const link = document.createElement('a');
-        link.href = url;
-        link.setAttribute('download', `OrbitDesk_Audit_Package_Project_${projectId}_${new Date().toISOString().slice(0, 10)}.zip`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        console.error('Audit package export error:', err);
-        showErrorToast('Failed to download audit package.');
-      } finally {
-        setExporting(false);
-      }
-      return;
-    }
+    const isProjectScope = reportScope === 'project' && selectedProjectId !== 'all';
+    const selectedProj = isProjectScope ? projectsList.find(p => p.id === Number(selectedProjectId)) : null;
+    const cleanProjTitle = selectedProj ? (selectedProj.title || 'Project').replace(/[^a-zA-Z0-9_-]/g, '_') : 'General';
+    const dateStamp = new Date().toISOString().slice(0, 10);
 
     // ── Excel & PDF: delegate to backend document engine ──────────────────────
     if (fileFormat === 'excel' || fileFormat === 'pdf') {
@@ -279,10 +240,10 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
           method: 'POST',
           headers: { ...authHeaders(), 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            reportType,
+            reportType: 'unified_master_report',
             dateRange,
             includeAuditHeader,
-            projectId: selectedProjectId !== 'all' ? Number(selectedProjectId) : null
+            projectId: isProjectScope ? Number(selectedProjectId) : null
           })
         });
 
@@ -301,8 +262,10 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
         const url = URL.createObjectURL(new Blob([blob], { type: mime }));
         const link = document.createElement('a');
         link.href = url;
-        link.setAttribute('download',
-          `Orbit_${reportType}_${new Date().toISOString().slice(0, 10)}.${ext}`);
+        const filename = isProjectScope
+          ? `Orbit_Project_${cleanProjTitle}_Report_${dateStamp}.${ext}`
+          : `Orbit_General_Organization_Report_${dateStamp}.${ext}`;
+        link.setAttribute('download', filename);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -316,14 +279,14 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
       return;
     }
 
-    // ── CSV / Excel: Build Unified Master Report ─────────────────────────────
+    // ── CSV: Comprehensive Master Report (General or Project-Based) ───────────
     setTimeout(() => {
       let csv = '';
-      const selectedProj = selectedProjectId !== 'all' ? projectsList.find(p => p.id === Number(selectedProjectId)) : null;
-      const scopeTag = selectedProj ? `Project_${selectedProj.id}` : 'General_System';
-      let filename = `Orbit_Institutional_Master_Report_${scopeTag}_${new Date().toISOString().slice(0, 10)}.csv`;
+      const filename = isProjectScope
+        ? `Orbit_Project_${cleanProjTitle}_Report_${dateStamp}.csv`
+        : `Orbit_General_Organization_Report_${dateStamp}.csv`;
 
-      // Robust CSV Cell Sanitizer: Removes internal newlines, escapes quotes, and wraps in quotes to prevent column leaks
+      // Robust CSV Cell Sanitizer: Removes internal newlines, escapes quotes, and wraps in quotes
       const cleanCell = (val) => {
         if (val === null || val === undefined) return '""';
         let str = String(val).replace(/[\r\n]+/g, ' ').replace(/"/g, '""').trim();
@@ -355,191 +318,147 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
         .filter(t => t.type === 0 || t.type === 'Expense' || t.type === 'expense')
         .reduce((sum, t) => sum + (t.baseCurrencyAmount || t.amount || 0), 0);
 
-      // 1. EXECUTIVE OVERVIEW & METRICS
+      // Section 1: Executive Overview
+      csv += `"=== SECTION 1: EXECUTIVE FINANCIAL SUMMARY (${selectedProj ? selectedProj.title.toUpperCase() : 'ORGANIZATION WIDE'}) ===="\n`;
+      csv += 'Metric / Indicator,Value,Notes & Status\n';
       if (selectedProj) {
-        const projBudget = projectDetails?.budget || selectedProj.budget || projSpentFromTxns;
-        const projSpent = projSpentFromTxns;
+        const projBudget = (projectDetails?.budget || selectedProj.budget || projSpentFromTxns) * rate;
+        const projSpent = projSpentFromTxns * rate;
         const projRemaining = Math.max(0, projBudget - projSpent);
-
-        // Dynamic Calculations from real-time data
         const completedTasksCount = filteredTasks.filter(isTaskDone).length;
-        const taskCompletionRate = filteredTasks.length > 0 
-          ? Math.round((completedTasksCount / filteredTasks.length) * 100)
-          : 0;
-
-        let logframeKpiRate = null;
-        if (activeIndicators && activeIndicators.length > 0) {
-          const kpiScores = activeIndicators.map(ind => {
-            const act = parseFloat(ind.actual) || 0;
-            const tgt = parseFloat(ind.target) || 0;
-            return tgt > 0 ? Math.min(Math.max((act / tgt) * 100, 0), 100) : 0;
-          });
-          logframeKpiRate = Math.round(kpiScores.reduce((a, b) => a + b, 0) / kpiScores.length);
-        }
-
-        const dynamicOverallProgress = selectedProj.progressPercentage !== undefined && selectedProj.progressPercentage !== null
-          ? selectedProj.progressPercentage
-          : (logframeKpiRate !== null ? logframeKpiRate : taskCompletionRate);
-
-        csv += '"SECTION 1: EXECUTIVE FINANCIAL & PROGRESS OVERVIEW"\n';
-        csv += 'Metric / Indicator,Value,Notes & Status\n';
-        csv += `${cleanCell('Target Project Title')},${cleanCell(selectedProj.title)},${cleanCell('Backend Database Record')}\n`;
-        csv += `${cleanCell('Total Allocated Project Budget')},${cleanCell('$' + projBudget.toLocaleString())},${cleanCell('Approved budget limit in database')}\n`;
-        csv += `${cleanCell('Total Expended / Money Spent')},${cleanCell('$' + projSpent.toLocaleString())},${cleanCell('Direct transaction expenditures to date')}\n`;
-        csv += `${cleanCell('Remaining Unspent Budget')},${cleanCell('$' + projRemaining.toLocaleString())},${cleanCell('Unspent project cash balance')}\n`;
-        csv += `${cleanCell('Task Execution Progress')},${cleanCell(taskCompletionRate + '%')},${cleanCell(completedTasksCount + ' of ' + filteredTasks.length + ' project tasks completed')}\n`;
-        csv += `${cleanCell('Logframe KPI Achievement Rate')},${cleanCell(logframeKpiRate !== null ? logframeKpiRate + '%' : 'N/A')},${cleanCell('Average achievement across ' + (activeIndicators ? activeIndicators.length : 0) + ' programmatic indicators')}\n`;
-        csv += `${cleanCell('Overall Project Reach & Progress')},${cleanCell(dynamicOverallProgress + '%')},${cleanCell('Real-time dynamic progress calculation')}\n`;
-        csv += `${cleanCell('Primary Funding Donor')},${cleanCell(projectDonors.length > 0 ? projectDonors[0].donorName : (selectedProj.donorName || 'Institutional Partner'))},${cleanCell('Linked Donor in DB')}\n\n`;
+        const taskCompletionRate = filteredTasks.length > 0 ? Math.round((completedTasksCount / filteredTasks.length) * 100) : 0;
+        csv += `${cleanCell('Target Project Title')},${cleanCell(selectedProj.title)},${cleanCell('Active Project Scope')}\n`;
+        csv += `${cleanCell('Total Allocated Project Budget')},${cleanCell(currSymbol + projBudget.toLocaleString(undefined, {minimumFractionDigits: 2}))},${cleanCell('Approved budget limit in database')}\n`;
+        csv += `${cleanCell('Total Expended / Money Spent')},${cleanCell(currSymbol + projSpent.toLocaleString(undefined, {minimumFractionDigits: 2}))},${cleanCell('Direct transaction expenditures to date')}\n`;
+        csv += `${cleanCell('Remaining Unspent Budget')},${cleanCell(currSymbol + projRemaining.toLocaleString(undefined, {minimumFractionDigits: 2}))},${cleanCell('Unspent project cash balance')}\n`;
+        csv += `${cleanCell('Task Execution Progress')},${cleanCell(taskCompletionRate + '%')},${cleanCell(completedTasksCount + ' of ' + filteredTasks.length + ' tasks completed')}\n`;
+        csv += `${cleanCell('Primary Funding Donor')},${cleanCell(projectDonors.length > 0 ? projectDonors[0].donorName : (selectedProj.donorName || 'Institutional Partner'))},${cleanCell('Linked Funding Donor')}\n\n`;
       } else {
-        csv += '"SECTION 1: GENERAL SYSTEM-WIDE EXECUTIVE FINANCIAL OVERVIEW"\n';
-        csv += 'Metric / Indicator,Value ($),Notes & Status\n';
-        csv += `${cleanCell('Total Confirmed Grant Revenue')},${cleanCell(summary?.totalIncome || 0)},${cleanCell('Donor contributions & grants')}\n`;
-        csv += `${cleanCell('Total Program Expenditures')},${cleanCell(summary?.totalExpenses || 0)},${cleanCell('Direct field & overhead costs')}\n`;
-        csv += `${cleanCell('Net Surplus / Operating Cash Flow')},${cleanCell(summary?.netCashFlow || 0)},${cleanCell('Net fund position')}\n`;
+        csv += `${cleanCell('Total Confirmed Grant Revenue')},${cleanCell(currSymbol + ((summary?.totalIncome || 0) * rate).toLocaleString(undefined, {minimumFractionDigits: 2}))},${cleanCell('Donor contributions & grants')}\n`;
+        csv += `${cleanCell('Total Program Expenditures')},${cleanCell(currSymbol + ((summary?.totalExpenses || 0) * rate).toLocaleString(undefined, {minimumFractionDigits: 2}))},${cleanCell('Direct field & overhead costs')}\n`;
+        csv += `${cleanCell('Net Surplus / Operating Cash Flow')},${cleanCell(currSymbol + ((summary?.netCashFlow || 0) * rate).toLocaleString(undefined, {minimumFractionDigits: 2}))},${cleanCell('Net fund position')}\n`;
         csv += `${cleanCell('Total Registered Donors')},${cleanCell(donorsList.length)},${cleanCell('Institutional partners')}\n\n`;
       }
 
+      // Section 2: Category BVA
+      csv += `"=== SECTION 2: CATEGORY BUDGET VS ACTUALS (BVA)${selectedProj ? ' — ' + selectedProj.title.toUpperCase() : ' — ORGANIZATION WIDE'} ===="\n`;
+      csv += 'Category Code,Category Name,Classification,Account Type,USAID Allowable,Approved Budget (' + currLabel + '),Actual Expense (' + currLabel + '),Remaining Balance (' + currLabel + '),Burn Rate (%),Status\n';
+      if (categoryRollups.length > 0) {
+        categoryRollups.forEach(cat => {
+          const isOver = cat.budgetAmount > 0 && cat.incurredSpent > cat.budgetAmount;
+          const status = cat.budgetAmount === 0 ? 'No Budget Set' : (isOver ? 'OVER BUDGET' : (cat.burnRatePercentage >= 90 ? 'Critical' : (cat.burnRatePercentage >= 75 ? 'Warning' : 'On Track')));
+          const bAmt = (cat.budgetAmount || 0) * rate;
+          const sAmt = (cat.incurredSpent || 0) * rate;
+          const rAmt = (cat.remainingBalance || 0) * rate;
+          csv += `${cleanCell(cat.code || '—')},${cleanCell(cat.name)},${cleanCell(cat.classification || 'Program Expense')},${cleanCell(cat.accountType || 'Direct Cost')},${cleanCell(cat.isUSAIDAllowable ? 'Yes' : 'No')},${bAmt.toFixed(2)},${sAmt.toFixed(2)},${rAmt.toFixed(2)},${cat.burnRatePercentage || 0}%,${cleanCell(status)}\n`;
+        });
+      } else {
+        categories.forEach(cat => {
+          const isExpense = cat.type === 0 || cat.type === 2;
+          const rawSpent = isExpense ? getCatSpent(cat) : getCatIncome(cat);
+          const spent = rawSpent * rate;
+          const limit = (cat.targetBudgetLimit || 0) * rate;
+          const variance = limit > 0 ? limit - spent : 0;
+          const burnRate = limit > 0 ? ((spent / limit) * 100).toFixed(1) : 'N/A';
+          const isOver = limit > 0 && spent > limit;
+          const status = limit === 0 ? 'Uncapped' : (isOver ? 'OVER BUDGET' : (parseFloat(burnRate) >= 90 ? 'Critical' : (parseFloat(burnRate) >= 75 ? 'Warning' : 'On Track')));
+          csv += `${cleanCell(cat.code || '—')},${cleanCell(cat.name)},${cleanCell(cat.type === 0 ? 'Program Expense' : (cat.type === 1 ? 'Grant Revenue' : 'General'))},${cleanCell(cat.accountType || 'Direct Cost')},${cleanCell(cat.isUSAIDAllowable ? 'Yes' : 'No')},${limit.toFixed(2)},${spent.toFixed(2)},${variance.toFixed(2)},${burnRate}${burnRate !== 'N/A' ? '%' : ''},${cleanCell(status)}\n`;
+        });
+      }
+      csv += '\n';
 
-      // 2. PROGRAMMATIC LOGFRAME & KPI TARGET VS ACTUAL
-      csv += `"SECTION 2: PROGRAMMATIC LOGFRAME KPI METRICS (${selectedProj ? selectedProj.title.toUpperCase() : 'ORGANIZATION WIDE'})"\n`;
-      csv += 'Metric Title,Baseline Value,Target Value,Actual Achieved,Unit,Achievement (%),Status\n';
+      // Section 3: Financial Transactions Ledger
+      csv += `"=== SECTION 3: FINANCIAL TRANSACTION AUDIT LEDGER (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL TRANSACTIONS'}) ===="\n`;
+      csv += 'Transaction ID,Date,Type,Project Name,Financial Category,Amount,Currency,Base Amount (' + currLabel + '),Bank Account,Payee / Payer,Status,Description\n';
+      if (activeTxns.length > 0) {
+        activeTxns.forEach((t) => {
+          const tTypeStr = t.type === 0 ? 'Expense' : (t.type === 1 ? 'Income' : (t.type === 2 ? 'Transfer' : String(t.type)));
+          const baseAmt = (t.baseCurrencyAmount || t.amount || 0) * rate;
+          const projTitle = t.projectName || (selectedProj ? selectedProj.title : 'General Operational');
+          const catTitle = t.categoryName || t.category || 'General Expense';
+          const bankTitle = t.bankAccountName || 'Operating Account';
+          const status = t.approvalStatus || 'Posted / Cleared';
+          csv += `${cleanCell(t.transactionNumber || 'TXN-' + t.id)},${cleanCell(t.transactionDate ? t.transactionDate.slice(0, 10) : '')},${cleanCell(tTypeStr)},${cleanCell(projTitle)},${cleanCell(catTitle)},${t.amount || 0},${cleanCell(t.currency || 'USD')},${baseAmt.toFixed(2)},${cleanCell(bankTitle)},${cleanCell(t.payeeOrPayer || '—')},${cleanCell(status)},${cleanCell(t.description || '')}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No transactions recorded')},—,—,—,—,0,—,0.00,—,—,—,—\n`;
+      }
+      csv += '\n';
+
+      // Section 4: Donors
+      csv += `"=== SECTION 4: GRANT & DONOR ALLOCATIONS MATRIX (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL DONORS'}) ===="\n`;
+      csv += 'Donor Name,Donor Type,Country,Primary Contact,Email,Total Pledged (' + currLabel + '),Total Received (' + currLabel + '),Active Grants\n';
+      if (activeDonors.length > 0) {
+        activeDonors.forEach(d => {
+          const pledged = (d.totalPledged || 0) * rate;
+          const rec = (d.totalReceived || 0) * rate;
+          csv += `${cleanCell(d.name || d.donorName)},${cleanCell(d.donorType || 'Institutional')},${cleanCell(d.country || 'Global')},${cleanCell(d.primaryContact || '—')},${cleanCell(d.emailAddress || '—')},${pledged.toFixed(2)},${rec.toFixed(2)},${d.activeGrantsCount || 0}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No donors registered')},—,—,—,—,0.00,0.00,0\n`;
+      }
+      csv += '\n';
+
+      // Section 5: Logframe KPIs
+      csv += `"=== SECTION 5: PROGRAMMATIC LOGFRAME KPI METRICS (${selectedProj ? selectedProj.title.toUpperCase() : 'ORGANIZATION WIDE'}) ===="\n`;
+      csv += 'Project Scope,Indicator Code,Indicator Title,Baseline Value,Target Value,Actual Achieved,Unit,Achievement Rate (%),Status\n';
       if (activeIndicators && activeIndicators.length > 0) {
         activeIndicators.forEach((ind) => {
           const act = parseFloat(ind.actual) || 0;
           const tgt = parseFloat(ind.target) || 0;
           const base = parseFloat(ind.baseline) || 0;
-          let computedPct = 0;
-          if (tgt > 0) {
-            computedPct = Math.min(Math.max(Math.round((act / tgt) * 100), 0), 100);
-          }
+          let computedPct = tgt > 0 ? Math.min(Math.max(Math.round((act / tgt) * 100), 0), 100) : 0;
           const pct = ind.progressPercentage !== undefined ? ind.progressPercentage : computedPct;
           const status = act >= tgt && tgt > 0 ? 'Completed' : (act > base ? 'In Progress' : 'Active');
-          csv += `${cleanCell(ind.name || 'Indicator')},${cleanCell(ind.baseline || 0)},${cleanCell(ind.target || 100)},${cleanCell(ind.actual || 0)},${cleanCell(ind.unit || 'Count')},${cleanCell(pct + '%')},${cleanCell(ind.status || status)}\n`;
+          csv += `${cleanCell(selectedProj ? selectedProj.title : 'Organization Scope')},${cleanCell(ind.code || 'KPI-' + ind.id)},${cleanCell(ind.name || 'Indicator')},${cleanCell(ind.baseline || 0)},${cleanCell(ind.target || 100)},${cleanCell(ind.actual || 0)},${cleanCell(ind.unit || 'Count')},${cleanCell(pct + '%')},${cleanCell(ind.status || status)}\n`;
         });
       } else {
-        csv += `${cleanCell('No Logframe indicators created for this project')},${cleanCell(0)},${cleanCell(0)},${cleanCell(0)},${cleanCell('Count')},${cleanCell('0%')},${cleanCell('Pending')}\n`;
+        csv += `${cleanCell(selectedProj ? selectedProj.title : 'Project Scope')},—,${cleanCell('No Logframe indicators configured')},0,0,0,Count,0%,Pending\n`;
       }
       csv += '\n';
 
-      // 3. GRANT & DONOR ALLOCATIONS MATRIX
-      csv += '"SECTION 3: GRANT & DONOR ALLOCATIONS MATRIX"\n';
-      csv += 'Donor Name,Type / Allocation,Total Pledged / Allocated ($),Total Received ($),Active Grants Count\n';
-      if (selectedProj) {
-        if (projectDonors.length > 0) {
-          projectDonors.forEach((pd) => {
-            const allocLabel = projectDonors.length === 1 ? 'Sole Funder (100%)' : `Co-Funding: ${pd.coFundingPercentage || 100}%`;
-            csv += `${cleanCell(pd.donorName || 'Institutional Donor')},${cleanCell(allocLabel)},${pd.allocatedAmount || projectDetails?.budget || 0},${pd.allocatedAmount || projectDetails?.budget || 0},1\n`;
-          });
-        } else if (selectedProj.donorName) {
-          csv += `${cleanCell(selectedProj.donorName)},${cleanCell('Sole Funder (100%)')},${projectDetails?.budget || selectedProj.budget || 0},${projectDetails?.budget || selectedProj.budget || 0},1\n`;
-        } else {
-          csv += `${cleanCell('No donors linked to this project')},${cleanCell('N/A')},0,0,0\n`;
-        }
-      } else if (donorsList.length > 0) {
-        donorsList.forEach((d) => {
-          csv += `${cleanCell(d.name)},${cleanCell(d.donorType || 'Institutional')},${d.totalPledged || 0},${d.totalReceived || 0},${d.activeGrantsCount || 0}\n`;
-        });
-      } else {
-        csv += `${cleanCell('No registered donors found')},${cleanCell('N/A')},0,0,0\n`;
-      }
-      csv += '\n';
-
-      // 4. CATEGORY BUDGET VS ACTUALS (BVA) — FEDERAL STANDARD REPORT
-      csv += `"SECTION 4: CATEGORY BUDGET VS ACTUALS (BVA) — FEDERAL STANDARD FINANCIAL REPORT${selectedProj ? ' — ' + selectedProj.title.toUpperCase() : ''}"\n`;
-      csv += 'Category Name,Category Code,Approved Budget ($),Actual Expense ($),Remaining Balance ($),Burn Rate (%),Status\n';
-      if (categoryRollups.length > 0) {
-        categoryRollups.forEach(cat => {
-          const isOver = cat.budgetAmount > 0 && cat.incurredSpent > cat.budgetAmount;
-          const status = cat.budgetAmount === 0 ? 'No Budget Set' : (isOver ? 'OVER BUDGET' : (cat.burnRatePercentage >= 90 ? 'Critical' : (cat.burnRatePercentage >= 75 ? 'Warning' : 'On Track')));
-          csv += `${cleanCell(cat.name)},${cleanCell(cat.code || 'N/A')},${cat.budgetAmount || 0},${cat.incurredSpent || 0},${cat.remainingBalance || 0},${cat.burnRatePercentage || 0}%,${cleanCell(status)}\n`;
-        });
-        // Totals row
-        const totalBudget = categoryRollups.reduce((s, c) => s + (c.budgetAmount || 0), 0);
-        const totalSpent = categoryRollups.reduce((s, c) => s + (c.incurredSpent || 0), 0);
-        const totalRemaining = categoryRollups.reduce((s, c) => s + (c.remainingBalance || 0), 0);
-        const overallBurnRate = totalBudget > 0 ? ((totalSpent / totalBudget) * 100).toFixed(1) : 0;
-        csv += `${cleanCell('TOTAL')},—,${totalBudget},${totalSpent},${totalRemaining},${overallBurnRate}%,—\n`;
-      } else {
-        csv += `${cleanCell(selectedProj ? 'No approved budget line items found for this project' : 'Select a specific project to view Category BVA')},N/A,0,0,0,0%,N/A\n`;
-      }
-      csv += '\n';
-
-      // 5. 2D ACTIVITY-BASED COSTING MATRIX (Task x Category)
-      csv += `"SECTION 5: 2D ACTIVITY-BASED COSTING MATRIX (TASKS x CHART OF ACCOUNTS)${selectedProj ? ' — ' + selectedProj.title.toUpperCase() : ''}"\n`;
-      if (activityMatrix && activityMatrix.tasks && activityMatrix.categories) {
-        const matrixCats = activityMatrix.categories;
-        const matrixTasks = activityMatrix.tasks;
-        const matrixData = activityMatrix.matrix || {};
-        // Header row: Task | Status | [each category] | Total
-        csv += `Task / Activity,Status,${matrixCats.map(c => cleanCell(c.name)).join(',')},Total Incurred ($)\n`;
-        matrixTasks.forEach(task => {
-          // Backend matrix keys are "taskId_categoryId" strings
-          const getCellValue = (catId) => matrixData[`${task.id}_${catId}`] || 0;
-          const rowTotal = matrixCats.reduce((sum, cat) => sum + getCellValue(cat.id), 0);
-          csv += `${cleanCell(task.title)},${cleanCell(task.status)},${matrixCats.map(cat => getCellValue(cat.id)).join(',')},${rowTotal}\n`;
-        });
-        // Totals row
-        const colTotals = matrixCats.map(cat =>
-          matrixTasks.reduce((sum, task) => sum + (matrixData[`${task.id}_${cat.id}`] || 0), 0)
-        );
-        const grandTotal = colTotals.reduce((a, b) => a + b, 0);
-        csv += `${cleanCell('TOTAL')},—,${colTotals.join(',')},${grandTotal}\n`;
-      } else {
-        csv += `${cleanCell(selectedProj ? 'Select a specific project above to generate the 2D Activity Matrix' : 'No matrix data available — select a project')}\n`;
-      }
-      csv += '\n';
-
-      // 6. FINANCIAL TRANSACTION AUDIT LEDGER
-      csv += `"SECTION 6: FINANCIAL TRANSACTION AUDIT LEDGER (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL TRANSACTIONS'})"\n`;
-      csv += 'Transaction Code,Date,Type,Amount ($),Currency,Bank Account,Payee/Payer,Description,Reference Code\n';
-      if (activeTxns.length > 0) {
-        activeTxns.forEach((t) => {
-          const tTypeStr = t.type === 0 ? 'Expense' : (t.type === 1 ? 'Income' : (t.type === 2 ? 'Transfer' : String(t.type)));
-          csv += `${cleanCell(t.transactionNumber || 'TXN-' + t.id)},${cleanCell(t.transactionDate ? t.transactionDate.slice(0, 10) : '')},${cleanCell(tTypeStr)},${t.baseCurrencyAmount || t.amount || 0},${cleanCell(t.currency || 'USD')},${cleanCell(t.bankAccountName || 'Operating Account')},${cleanCell(t.payeeOrPayer || 'Supplier')},${cleanCell(t.description || '')},${cleanCell(t.referenceNumber || '')}\n`;
-        });
-      } else {
-        csv += `${cleanCell('No transactions recorded')},${cleanCell('N/A')},${cleanCell('N/A')},0,${cleanCell('USD')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('No active transactions logged')},${cleanCell('N/A')}\n`;
-      }
-      csv += '\n';
-
-      // 7. PROJECT RISK & MITIGATION MATRIX
-      csv += '"SECTION 7: PROJECT RISK & MITIGATION MATRIX"\n';
-      csv += 'Project Title,Risk Description,Severity Rating,Category,Impact Level,Likelihood,Mitigation Action\n';
+      // Section 6: Risks
+      csv += `"=== SECTION 6: PROJECT RISK & MITIGATION MATRIX (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL RISKS'}) ===="\n`;
+      csv += 'Project Title,Risk Description,Category,Severity Rating,Likelihood,Impact Level,Status,Mitigation Action\n';
       if (activeRisks.length > 0) {
         activeRisks.forEach((r) => {
-          csv += `${cleanCell(r.projectTitle || (selectedProj ? selectedProj.title : 'General'))},${cleanCell(r.description || r.title || '')},${cleanCell(r.severity || 'Medium')},${cleanCell(r.category || 'Operational')},${cleanCell(r.impact || 'Moderate')},${cleanCell(r.likelihood || 'Possible')},${cleanCell(r.mitigationStrategy || r.mitigationPlan || '')}\n`;
+          csv += `${cleanCell(r.projectTitle || (selectedProj ? selectedProj.title : 'General'))},${cleanCell(r.description || r.title || '')},${cleanCell(r.category || 'Operational')},${cleanCell(r.severity || 'Medium')},${cleanCell(r.likelihood || 'Possible')},${cleanCell(r.impact || 'Moderate')},${cleanCell(r.status || 'Open')},${cleanCell(r.mitigationStrategy || r.mitigationPlan || 'Standard monitoring')}\n`;
         });
       } else {
-        csv += `${cleanCell(selectedProj ? selectedProj.title : 'Target Project')},${cleanCell('No risks recorded for this project')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('No active risks logged')}\n`;
+        csv += `${cleanCell(selectedProj ? selectedProj.title : 'Target Project')},${cleanCell('No risks logged')},—,—,—,—,—,—\n`;
       }
       csv += '\n';
 
-      // 8. VOLUNTEER & FIELD WORKFORCE ROSTER
-      csv += `"SECTION 8: VOLUNTEER & FIELD WORKFORCE IMPACT ROSTER (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL WORKFORCE'})"\n`;
-      csv += 'Volunteer Name,Contact Email,Phone,Skills & Specialty,Availability,Vetting Status\n';
+      // Section 7: Volunteers
+      csv += `"=== SECTION 7: VOLUNTEER & FIELD WORKFORCE IMPACT ROSTER (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL WORKFORCE'}) ===="\n`;
+      csv += 'Volunteer Name,Contact Email,Phone,Skills & Specialty,Availability,Vetting Status,Total Hours\n';
       const projTaskIds = filteredTasks.map(t => t.id);
       const activeVolunteers = selectedProj 
         ? volunteersList.filter(v => v.projectId === selectedProj.id || (v.taskVolunteers && v.taskVolunteers.some(tv => projTaskIds.includes(tv.taskId))))
         : volunteersList;
-
       if (activeVolunteers.length > 0) {
         activeVolunteers.forEach((v) => {
-          csv += `${cleanCell(v.name)},${cleanCell(v.email || '')},${cleanCell(v.phoneNumber || '')},${cleanCell(v.skills || '')},${cleanCell(v.availability || '')},${cleanCell(v.backgroundCheckStatus || 'Passed')}\n`;
+          const hours = v.volunteerHours ? v.volunteerHours.reduce((s, h) => s + (h.hours || 0), 0) : 0;
+          csv += `${cleanCell(v.name)},${cleanCell(v.email || '—')},${cleanCell(v.phoneNumber || '—')},${cleanCell(v.skills || 'General')},${cleanCell(v.availability || 'Flexible')},${cleanCell(v.backgroundCheckStatus || 'Passed')},${hours}\n`;
         });
       } else {
-        csv += `${cleanCell('No volunteers assigned')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')},${cleanCell('N/A')}\n`;
+        csv += `${cleanCell('No volunteers assigned')},—,—,—,—,—,0\n`;
       }
       csv += '\n';
 
-      // 9. OPERATIONAL TASK EXECUTION & TEAM VELOCITY
-      csv += `"SECTION 9: OPERATIONAL TASK EXECUTION & TEAM VELOCITY (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL TASKS'})"\n`;
-      csv += 'Metric / Task Title,Value / Status,Notes & Deadline\n';
-      const completedFilteredTasks = filteredTasks.filter(isTaskDone);
-      const filteredCompletionRate = filteredTasks.length > 0 ? Math.round((completedFilteredTasks.length / filteredTasks.length) * 100) : 0;
-      csv += `${cleanCell('Task Completion Rate')},${cleanCell(filteredCompletionRate + '%')},${cleanCell(completedFilteredTasks.length + ' of ' + filteredTasks.length + ' project tasks completed')}\n`;
-      csv += `${cleanCell('Tasks Overdue')},${cleanCell(filteredTasks.filter(t => !isTaskDone(t) && t.deadline && new Date(t.deadline) < new Date()).length)},${cleanCell('Past planned deadline')}\n`;
-      csv += `${cleanCell('Total Active Project Tasks')},${cleanCell(filteredTasks.length)},${cleanCell('Registered in project scope')}\n`;
+      // Section 8: Tasks
+      csv += `"=== SECTION 8: OPERATIONAL TASK REGISTRY & EXECUTION (${selectedProj ? selectedProj.title.toUpperCase() : 'ALL TASKS'}) ===="\n`;
+      csv += 'Task Title,Project Scope,Assigned Personnel,Priority,Status,Deadline,Completed Date\n';
+      if (filteredTasks.length > 0) {
+        filteredTasks.forEach(t => {
+          const pTitle = t.projectTitle || t.projectName || (selectedProj ? selectedProj.title : 'General');
+          const deadline = t.deadline ? t.deadline.slice(0, 10) : 'None';
+          const compDate = t.completedDate ? t.completedDate.slice(0, 10) : 'Pending';
+          csv += `${cleanCell(t.title || 'Task')},${cleanCell(pTitle)},${cleanCell(t.assigneeName || 'Team')},${cleanCell(t.priority || 'Medium')},${cleanCell(t.status || 'Active')},${cleanCell(deadline)},${cleanCell(compDate)}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No tasks recorded')},—,—,—,—,—,—\n`;
+      }
 
       const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
@@ -587,44 +506,96 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Column: Template & Options (4 cols) */}
+        {/* Left Column: Scope & Options (4 cols) */}
         <div className="lg:col-span-4 space-y-5 no-print export-sidebar-container">
-          {/* Template Selection */}
-          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs">
-            <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3.5">
-              Select Template
-            </h3>
-            <div className="space-y-2">
-              {reportTypes.map((rt) => {
-                const Icon = rt.icon;
-                const isSelected = reportType === rt.id;
-                return (
-                  <button
-                    key={rt.id}
-                    onClick={() => setReportType(rt.id)}
-                    className={`w-full p-3 rounded-xl border text-left transition-all duration-200 flex items-center justify-between ${
-                      isSelected
-                        ? 'border-indigo-600 bg-indigo-50/50 shadow-xs ring-1 ring-indigo-500/30'
-                        : 'border-slate-200/80 bg-white hover:border-slate-300 hover:bg-slate-50/50'
-                    }`}
+          {/* Report Scope Selection */}
+          <div className="bg-white rounded-2xl border border-slate-200/80 p-5 shadow-xs space-y-3">
+            <div>
+              <h3 className="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-1">
+                Select Report Scope
+              </h3>
+              <p className="text-[11px] text-slate-500">Choose between an organization-wide report or a targeted project report</p>
+            </div>
+            <div className="space-y-2.5">
+              {/* General Organization Report */}
+              <button
+                type="button"
+                onClick={() => {
+                  setReportScope('general');
+                  setSelectedProjectId('all');
+                }}
+                className={`w-full p-3.5 rounded-xl border text-left transition-all duration-200 flex items-center justify-between ${
+                  reportScope === 'general'
+                    ? 'border-indigo-600 bg-indigo-50/60 shadow-xs ring-1 ring-indigo-500/30'
+                    : 'border-slate-200/80 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white bg-gradient-to-br from-slate-900 via-indigo-950 to-indigo-600 shadow-xs shrink-0">
+                    <Globe className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900">General Organization Report</h4>
+                    <span className="text-[10px] font-semibold text-indigo-600">All Projects & Operations</span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Comprehensive audit across all institutional activities</p>
+                  </div>
+                </div>
+                {reportScope === 'general' && (
+                  <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  </div>
+                )}
+              </button>
+
+              {/* Project-Based Report */}
+              <button
+                type="button"
+                onClick={() => {
+                  setReportScope('project');
+                  if (selectedProjectId === 'all' && projectsList.length > 0) {
+                    setSelectedProjectId(projectsList[0].id);
+                  }
+                }}
+                className={`w-full p-3.5 rounded-xl border text-left transition-all duration-200 flex items-center justify-between ${
+                  reportScope === 'project'
+                    ? 'border-emerald-600 bg-emerald-50/60 shadow-xs ring-1 ring-emerald-500/30'
+                    : 'border-slate-200/80 bg-white hover:border-slate-300 hover:bg-slate-50/50'
+                }`}
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center text-white bg-gradient-to-br from-emerald-900 via-teal-900 to-emerald-600 shadow-xs shrink-0">
+                    <Folder className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-bold text-slate-900">Project-Based Report</h4>
+                    <span className="text-[10px] font-semibold text-emerald-600">Targeted Project Audit</span>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Focused specifically on a single project and deliverables</p>
+                  </div>
+                </div>
+                {reportScope === 'project' && (
+                  <div className="w-5 h-5 rounded-full bg-emerald-600 text-white flex items-center justify-center shrink-0">
+                    <Check className="w-3 h-3 stroke-[3]" />
+                  </div>
+                )}
+              </button>
+
+              {/* Target Project Dropdown if project scope active */}
+              {reportScope === 'project' && (
+                <div className="pt-2 border-t border-emerald-100">
+                  <label className="text-xs font-bold text-slate-700 block mb-1.5">Target Project *</label>
+                  <select
+                    value={selectedProjectId !== 'all' ? selectedProjectId : (projectsList[0]?.id || '')}
+                    onChange={(e) => setSelectedProjectId(Number(e.target.value))}
+                    className="w-full text-xs font-semibold bg-white border border-emerald-300 rounded-xl px-3 py-2.5 text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-2xs"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className={`w-9 h-9 rounded-lg flex items-center justify-center text-white bg-gradient-to-br ${rt.color} shadow-xs`}>
-                        <Icon className="w-4 h-4" />
-                      </div>
-                      <div>
-                        <h4 className="text-xs font-bold text-slate-900">{rt.title}</h4>
-                        <span className="text-[10px] font-semibold text-slate-500">{rt.tag}</span>
-                      </div>
-                    </div>
-                    {isSelected && (
-                      <div className="w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center shrink-0">
-                        <Check className="w-3 h-3 stroke-[3]" />
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
+                    {projectsList.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        📌 {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
           </div>
 
@@ -645,7 +616,7 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
                   <button
                     key={fmt.id}
                     onClick={() => setFileFormat(fmt.id)}
-                    className={`py-2 px-2 rounded-xl text-xs font-bold flex flex-col items-center gap-1 border transition-all ${
+                    className={`py-2.5 px-2 rounded-xl text-xs font-bold flex flex-col items-center gap-1.5 border transition-all ${
                       fileFormat === fmt.id
                         ? 'border-indigo-600 bg-indigo-600 text-white shadow-xs'
                         : 'border-slate-200 bg-slate-50/80 text-slate-700 hover:bg-slate-100'
@@ -656,22 +627,6 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
                   </button>
                 ))}
               </div>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-700 block mb-1.5">Report Scope / Target Project</label>
-              <select
-                value={selectedProjectId || 'all'}
-                onChange={(e) => setSelectedProjectId(e.target.value === 'all' ? 'all' : Number(e.target.value))}
-                className="w-full text-xs font-semibold bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-500"
-              >
-                <option value="all">🌐 General System-Wide (All Organization Projects)</option>
-                {projectsList.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    📌 Project: {p.title}
-                  </option>
-                ))}
-              </select>
             </div>
 
             <div>
@@ -728,21 +683,27 @@ export default function ExportCapabilities({ selectedCurrency = 'USD' }) {
             )}
             <div className="bg-slate-900 text-white rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-md">
               <div className="flex items-center gap-3">
-                <div className="p-2.5 rounded-lg bg-indigo-600 text-white shrink-0">
-                  {React.createElement(reportTypes.find((r) => r.id === reportType)?.icon || Briefcase, { className: 'w-5 h-5' })}
+                <div className={`p-2.5 rounded-lg text-white shrink-0 ${reportScope === 'project' ? 'bg-emerald-600' : 'bg-indigo-600'}`}>
+                  {reportScope === 'project' ? <Folder className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
                 </div>
                 <div>
                   <h3 className="text-sm font-black tracking-tight text-white">
-                    {reportTypes.find((r) => r.id === reportType)?.title}
+                    {reportScope === 'project'
+                      ? `Institutional Audit & Project Impact Report${selectedProjectId !== 'all' && projectsList.find(p => p.id === Number(selectedProjectId)) ? ' — ' + projectsList.find(p => p.id === Number(selectedProjectId)).title : ''}`
+                      : 'Institutional Audit & General Organization Master Report'}
                   </h3>
                   <p className="text-[11px] text-slate-300 font-medium mt-0.5">
-                    Unified All-in-One Master Donor Report: Total budget, money spent, remaining cash, % complete, expense category breakdown (Operations, Logistics, Personnel, Equipment), donor allocations, transaction audit log, logframe KPIs, risk matrix & workforce.
+                    {reportScope === 'project'
+                      ? 'Targeted project-level audit: Project budget, expenditure burn rate, unspent cash, category BVA, financial transaction log, donors, logframe KPIs, risk matrix & workforce.'
+                      : 'Unified organization-wide master report: Total budget, money spent, remaining cash, complete category BVA, financial transaction audit log, donor allocations, logframe KPIs, risk matrix & workforce.'}
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[10px] font-mono font-bold bg-white/10 text-indigo-200 px-2.5 py-1 rounded-lg border border-white/10">
-                  Organization Verified
+                <span className={`text-[10px] font-mono font-bold px-2.5 py-1 rounded-lg border ${
+                  reportScope === 'project' ? 'bg-emerald-500/20 text-emerald-200 border-emerald-500/30' : 'bg-indigo-500/20 text-indigo-200 border-indigo-500/30'
+                }`}>
+                  {reportScope === 'project' ? '📌 Project Scope' : '🌐 General Scope'}
                 </span>
               </div>
             </div>

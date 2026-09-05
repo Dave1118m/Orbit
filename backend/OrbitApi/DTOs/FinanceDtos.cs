@@ -171,6 +171,8 @@ namespace OrbitApi.DTOs
         public string? CategoryName { get; set; }
         public string Description { get; set; } = string.Empty;
         public decimal Amount { get; set; }
+        public decimal SpentAmount { get; set; }
+        public decimal RemainingAmount { get; set; }
     }
 
     public class BudgetLineItemCreateDto
@@ -192,6 +194,11 @@ namespace OrbitApi.DTOs
         public int VersionNo { get; set; }
     }
 
+    public class PayExpenseRequest
+    {
+        public int? BankAccountId { get; set; }
+    }
+
     public class ExpenseDto
     {
         public int Id { get; set; }
@@ -204,6 +211,8 @@ namespace OrbitApi.DTOs
         public int? CategoryId { get; set; }
         public string? CategoryName { get; set; }
         public string? CategoryCode { get; set; }
+        public int? BankAccountId { get; set; }
+        public string? BankAccountName { get; set; }
         public decimal Amount { get; set; }
         public decimal? GrossAmount { get; set; }
         public decimal? TaxAmount { get; set; }
@@ -229,6 +238,10 @@ namespace OrbitApi.DTOs
         public DateTime CreatedAt { get; set; }
         public bool BudgetWarning { get; set; } // True if expense pushes project over budget
         public string? ComplianceWarningMessage { get; set; }
+
+        public decimal? CategoryAllocatedBudget { get; set; }
+        public decimal? CategorySpentBudget { get; set; }
+        public decimal? CategoryRemainingBudget { get; set; }
     }
 
     public class ExpenseCreateDto

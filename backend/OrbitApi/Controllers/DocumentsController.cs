@@ -69,6 +69,10 @@ public class DocumentsController : ControllerBase
             .ToListAsync();
 
         var txnQuery = _db.FinancialTransactions
+            .Include(t => t.Category)
+            .Include(t => t.BankAccount)
+            .Include(t => t.Project)
+            .Include(t => t.Expense)
             .Where(t => t.OrganizationId == orgId);
         if (projectId.HasValue && projectId.Value > 0)
         {
@@ -541,7 +545,7 @@ public class DocumentsController : ControllerBase
     {
         var ws = wb.Worksheets.Add("Statement of Activities");
         ws.ShowGridLines = false;
-        XlHeader(ws, 1, new[] { "Code", "Category Name", "Type", "Budget ($)", "Actual ($)", "Variance ($)" }, hBg, hFg);
+        XlHeader(ws, 1, new[] { "Code", "Category Name", "Classification", "Account Type", "USAID Allowable", "Budget ($)", "Actual ($)", "Variance ($)", "Burn Rate (%)", "Status" }, hBg, hFg);
         int row = 2;
         foreach (var c in d.Categories)
         {
@@ -551,10 +555,23 @@ public class DocumentsController : ControllerBase
                     (isInc ? t.Type == FinancialTransactionType.Income : t.Type == FinancialTransactionType.Expense))
                 .Sum(t => t.BaseCurrencyAmount);
             var budget = (double)(c.TargetBudgetLimit ?? 0);
+            var act = (double)actual;
+            var variance = budget - act;
+            var burnRate = budget > 0 ? (act / budget) * 100.0 : 0;
+            var status = budget == 0 ? "Uncapped" : (act > budget ? "Over Budget" : (burnRate >= 90 ? "Critical" : (burnRate >= 75 ? "Warning" : "On Track")));
+
             XlRow(ws, row, new[]
             {
-                c.Code ?? "—", c.Name, isInc ? "Revenue" : "Expense",
-                budget.ToString("N2"), ((double)actual).ToString("N2"), (budget - (double)actual).ToString("N2")
+                c.Code ?? "—",
+                c.Name,
+                isInc ? "Revenue" : (c.Type == FinancialCategoryType.Expense ? "Program Expense" : "General"),
+                c.AccountType ?? "Direct Program",
+                c.IsUSAIDAllowable ? "Yes" : "No",
+                budget > 0 ? budget.ToString("N2") : "Uncapped",
+                act.ToString("N2"),
+                budget > 0 ? variance.ToString("N2") : "—",
+                budget > 0 ? $"{burnRate:F1}%" : "—",
+                status
             }, alt, row % 2 == 0);
             row++;
         }
@@ -565,25 +582,34 @@ public class DocumentsController : ControllerBase
     {
         var ws = wb.Worksheets.Add("Transaction Ledger");
         ws.ShowGridLines = false;
-        XlHeader(ws, 1, new[] { "Txn #", "Date", "Type", "Amount ($)", "Currency", "Payee/Payer", "Description", "Reference #" }, hBg, hFg);
+        XlHeader(ws, 1, new[] { "Transaction ID", "Date", "Type", "Project", "Category", "Amount", "Currency", "Base Amount ($)", "Bank Account", "Payee / Payer", "Status", "Description" }, hBg, hFg);
         int row = 2;
         foreach (var t in d.Transactions)
         {
+            var bankName = t.BankAccount != null ? $"{t.BankAccount.BankName} ({t.BankAccount.AccountNumber})" : "Operating Account";
+            var projName = t.Project?.Title ?? "General Operational";
+            var catName = t.Category?.Name ?? "General Expense";
+            var status = t.Expense != null ? t.Expense.ApprovalStatus.ToString() : "Posted / Cleared";
+
             XlRow(ws, row, new[]
             {
                 t.TransactionNumber,
                 t.TransactionDate.ToString("yyyy-MM-dd"),
                 t.Type.ToString(),
-                t.BaseCurrencyAmount.ToString("N2"),
+                projName,
+                catName,
+                t.Amount.ToString("N2"),
                 t.Currency,
+                t.BaseCurrencyAmount.ToString("N2"),
+                bankName,
                 t.PayeeOrPayer ?? "—",
-                t.Description,
-                t.ReferenceNumber ?? "—"
+                status,
+                t.Description
             }, alt, row % 2 == 0);
             row++;
         }
         ws.Columns().AdjustToContents();
-        ws.Column(7).Width = 45;
+        ws.Column(12).Width = 45;
     }
 
     private async Task XlDonorsAsync(XLWorkbook wb, ReportData d, XLColor hBg, XLColor hFg, XLColor alt)

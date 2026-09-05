@@ -179,7 +179,8 @@ builder.Services.AddAuthentication(options =>
         };
     });
 
-// HTTP client for external token verification (Google)
+// HTTP context accessor and client for token & header verification
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddHttpClient();
 
 // Email sender (SendGrid)

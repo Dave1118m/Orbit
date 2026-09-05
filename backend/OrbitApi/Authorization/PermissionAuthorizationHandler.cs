@@ -15,16 +15,19 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
 {
     private readonly OrbitDbContext _db;
     private readonly IPermissionService _permissionService;
+    private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _httpContextAccessor;
 
     /// <summary>
     /// Initializes a new instance of <see cref="PermissionAuthorizationHandler"/>.
     /// </summary>
     /// <param name="db">The primary database context for querying roles, assignments, and entities.</param>
     /// <param name="permissionService">The cached permission service for role permission lookups.</param>
-    public PermissionAuthorizationHandler(OrbitDbContext db, IPermissionService permissionService)
+    /// <param name="httpContextAccessor">The HTTP context accessor to inspect active persona headers.</param>
+    public PermissionAuthorizationHandler(OrbitDbContext db, IPermissionService permissionService, Microsoft.AspNetCore.Http.IHttpContextAccessor httpContextAccessor)
     {
         _db = db;
         _permissionService = permissionService;
+        _httpContextAccessor = httpContextAccessor;
     }
 
     /// <summary>
@@ -43,8 +46,16 @@ public class PermissionAuthorizationHandler : AuthorizationHandler<PermissionReq
             return;
         }
 
-        // If an explicit active persona role is specified in claims, evaluate strictly for that role
+        // If an explicit active persona role is specified in claims or headers, evaluate strictly for that role
         var activeRoleClaim = context.User.FindFirst("active_role")?.Value;
+        if (string.IsNullOrWhiteSpace(activeRoleClaim) && _httpContextAccessor?.HttpContext != null)
+        {
+            if (_httpContextAccessor.HttpContext.Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+            {
+                activeRoleClaim = headerVal.FirstOrDefault();
+            }
+        }
+
         if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
         {
             if (switchedRole == RoleName.Owner)

@@ -17,9 +17,11 @@ function authHeaders() {
     }
   }
   if (!orgId) orgId = localStorage.getItem('selectedOrgId');
+  const activePersona = localStorage.getItem('activePersona');
   const headers = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (orgId) headers['X-Organization-Id'] = String(orgId);
+  if (activePersona) headers['X-Active-Role'] = activePersona;
   return headers;
 }
 
@@ -30,7 +32,9 @@ const PRESET_COLORS = [
 ];
 
 export default function CategoriesManagement() {
-  const { currentOrganization } = useUser();
+  const { currentOrganization, hasRole, hasPermission } = useUser();
+  const canManageCategories = hasRole('Owner') || hasRole('Admin') || hasRole('FinanceOfficer') || hasPermission('BudgetEdit');
+
   const storedOrgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
   const orgId = currentOrganization?.id || (storedOrgId ? parseInt(storedOrgId, 10) : 1);
 
@@ -100,21 +104,22 @@ export default function CategoriesManagement() {
     setExpandedParents(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
-  const handleOpenModal = (category = null) => {
-    if (category) {
-      setEditingCategory(category);
+  const handleOpenModal = (cat = null) => {
+    if (!canManageCategories) return;
+    if (cat) {
+      setEditingCategory(cat);
       setFormData({
-        name: category.name || '',
-        code: category.code || '',
-        description: category.description || '',
-        type: category.type ?? 'Expense',
-        parentCategoryId: category.parentCategoryId ? String(category.parentCategoryId) : '',
-        color: category.color || '#4F46E5',
-        icon: category.icon || 'Folder',
-        targetBudgetLimit: category.targetBudgetLimit ? String(category.targetBudgetLimit) : '',
-        isUSAIDAllowable: category.isUSAIDAllowable ?? true,
-        logframeLevel: category.logframeLevel ?? '',
-        logframeEntityId: category.logframeEntityId ? String(category.logframeEntityId) : ''
+        name: cat.name || '',
+        code: cat.code || '',
+        description: cat.description || '',
+        type: cat.type ?? 'Expense',
+        parentCategoryId: cat.parentCategoryId ? String(cat.parentCategoryId) : '',
+        color: cat.color || '#4F46E5',
+        icon: cat.icon || 'Folder',
+        targetBudgetLimit: cat.targetBudgetLimit ? String(cat.targetBudgetLimit) : '',
+        isUSAIDAllowable: cat.isUSAIDAllowable ?? true,
+        logframeLevel: cat.logframeLevel ?? '',
+        logframeEntityId: cat.logframeEntityId ? String(cat.logframeEntityId) : ''
       });
     } else {
       setEditingCategory(null);
@@ -143,6 +148,7 @@ export default function CategoriesManagement() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!canManageCategories) return;
     setSubmitting(true);
     setError(null);
 
@@ -204,7 +210,8 @@ export default function CategoriesManagement() {
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Are you sure you want to delete or deactivate this category?')) return;
+    if (!canManageCategories) return;
+    if (!window.confirm('Are you sure you want to delete this category? This will fail if there are active transactions linked.')) return;
     try {
       const res = await fetch(`${API_BASE}/FinancialCategories/${id}`, {
         method: 'DELETE',
@@ -266,13 +273,15 @@ export default function CategoriesManagement() {
             Manage category structures, major categories, sub-categories, and cost allowability tags.
           </p>
         </div>
-        <button
-          onClick={() => handleOpenModal()}
-          className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm transition"
-        >
-          <Plus className="w-4 h-4" />
-          Add Category
-        </button>
+        {canManageCategories && (
+          <button
+            onClick={() => handleOpenModal()}
+            className="inline-flex items-center gap-2 px-4 py-2 text-sm font-semibold text-white bg-brand-600 hover:bg-brand-700 rounded-lg shadow-sm transition"
+          >
+            <Plus className="w-4 h-4" />
+            Add Category
+          </button>
+        )}
       </div>
 
       {/* Notifications */}
@@ -389,24 +398,26 @@ export default function CategoriesManagement() {
                       </div>
 
                       {/* Actions */}
-                      <div className="flex items-center gap-1">
-                        <button
-                          onClick={() => handleOpenModal(cat)}
-                          className="p-1.5 text-slate-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition"
-                          title="Edit Category"
-                        >
-                          <Edit2 className="w-4 h-4" />
-                        </button>
-                        {!cat.isSystemDefault && (
+                      {canManageCategories && (
+                        <div className="flex items-center gap-1">
                           <button
-                            onClick={() => handleDelete(cat.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
-                            title="Delete Category"
+                            onClick={() => handleOpenModal(cat)}
+                            className="p-1.5 text-slate-400 hover:text-brand-600 rounded-lg hover:bg-brand-50 transition"
+                            title="Edit Category"
                           >
-                            <Trash2 className="w-4 h-4" />
+                            <Edit2 className="w-4 h-4" />
                           </button>
-                        )}
-                      </div>
+                          {!cat.isSystemDefault && (
+                            <button
+                              onClick={() => handleDelete(cat.id)}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg hover:bg-rose-50 transition"
+                              title="Delete Category"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -429,22 +440,24 @@ export default function CategoriesManagement() {
                             <span className="text-xs font-semibold text-slate-700">
                               ${(sub.totalExpensesAmount || 0).toLocaleString()}
                             </span>
-                            <div className="flex items-center gap-1">
-                              <button
-                                onClick={() => handleOpenModal(sub)}
-                                className="p-1 text-slate-400 hover:text-brand-600 rounded"
-                              >
-                                <Edit2 className="w-3.5 h-3.5" />
-                              </button>
-                              {!sub.isSystemDefault && (
+                            {canManageCategories && (
+                              <div className="flex items-center gap-1">
                                 <button
-                                  onClick={() => handleDelete(sub.id)}
-                                  className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                                  onClick={() => handleOpenModal(sub)}
+                                  className="p-1 text-slate-400 hover:text-brand-600 rounded"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <Edit2 className="w-3.5 h-3.5" />
                                 </button>
-                              )}
-                            </div>
+                                {!sub.isSystemDefault && (
+                                  <button
+                                    onClick={() => handleDelete(sub.id)}
+                                    className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                              </div>
+                            )}
                           </div>
                         </div>
                       ))}

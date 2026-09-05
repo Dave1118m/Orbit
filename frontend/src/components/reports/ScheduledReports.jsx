@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { useUser } from '../../contexts/UserContext';
 import { parseApiResponse, showErrorToast, showSuccessToast } from '../../utils/toastHelper';
 import {
   Calendar, Clock, Mail, CheckCircle2, Play, Pause, Trash2, Plus,
-  FileSpreadsheet, FileText, Send, ShieldCheck, AlertCircle, RefreshCw, Globe, Folder
+  FileSpreadsheet, FileText, Send, ShieldCheck, AlertCircle, RefreshCw, Globe, Folder, Lock
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://localhost:7065/api/v1';
@@ -18,6 +19,10 @@ const authHeaders = () => {
 };
 
 export default function ScheduledReports() {
+  const { user, hasRole, hasPermission, getPrimaryRole } = useUser();
+  const activeRole = getPrimaryRole() || user?.role || 'Member';
+  const canManage = hasRole('Owner') || hasRole('Admin') || hasRole('FinanceOfficer') || hasRole('Coordinator') || hasRole('Manager') || hasPermission('OrganizationManageCompliance') || hasPermission('ViewReports');
+
   const [schedules, setSchedules] = useState([]);
   const [projects, setProjects] = useState([]);
   const [allDonors, setAllDonors] = useState([]);
@@ -220,22 +225,32 @@ export default function ScheduledReports() {
       {/* Header Banner */}
       <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <ShieldCheck className="w-5 h-5 text-emerald-600" />
             <span className="text-xs font-bold uppercase tracking-wider text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded border border-emerald-100">
               Automated Compliance Cron Engine
+            </span>
+            <span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+              Active Role: <span className="text-indigo-600 font-extrabold">{activeRole}</span>
             </span>
           </div>
           <h2 className="text-xl font-bold text-slate-900 mt-1">Scheduled Reports & Automated Email Dispatch</h2>
           <p className="text-xs text-slate-500 mt-0.5">Configure recurring general or project-specific compliance reports delivered automatically to donor contacts & auditors</p>
         </div>
-        <button
-          onClick={() => { setShowModal(true); setScopeType('general'); }}
-          className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition shrink-0"
-        >
-          <Plus className="w-4 h-4" />
-          <span>Schedule New Report</span>
-        </button>
+        {canManage ? (
+          <button
+            onClick={() => { setShowModal(true); setScopeType('general'); }}
+            className="flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-md shadow-indigo-600/20 hover:bg-indigo-700 transition shrink-0"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Schedule New Report</span>
+          </button>
+        ) : (
+          <div className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 text-slate-400 rounded-xl text-xs font-semibold border border-slate-200 shrink-0 cursor-not-allowed" title="Scheduling reports requires Manager, Finance, or Admin role">
+            <Lock className="w-3.5 h-3.5" />
+            <span>Read-Only View</span>
+          </div>
+        )}
       </div>
 
       {/* Active Schedules List */}
@@ -307,20 +322,23 @@ export default function ScheduledReports() {
                   <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
                     <button
                       onClick={() => handleRunNow(sch.id, sch.projectName || 'General Report')}
-                      disabled={triggeringId === sch.id}
+                      disabled={triggeringId === sch.id || !canManage}
                       className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 rounded-lg text-xs font-bold transition disabled:opacity-50"
+                      title={!canManage ? 'Requires management or compliance permissions' : 'Run automated report now'}
                     >
                       {triggeringId === sch.id ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                       <span>{triggeringId === sch.id ? 'Dispatching...' : 'Run Now'}</span>
                     </button>
 
-                    <button
-                      onClick={() => deleteSchedule(sch.id)}
-                      className="p-1.5 rounded-lg text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100 transition"
-                      title="Delete Schedule"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {canManage && (
+                      <button
+                        onClick={() => deleteSchedule(sch.id)}
+                        className="p-1.5 rounded-lg text-rose-600 border border-rose-200 bg-rose-50 hover:bg-rose-100 transition"
+                        title="Delete Schedule"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </div>
                 </div>
               );

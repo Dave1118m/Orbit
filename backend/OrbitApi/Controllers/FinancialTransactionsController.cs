@@ -6,6 +6,9 @@ using OrbitApi.DTOs;
 using OrbitApi.Models;
 using OrbitApi.Services;
 
+using Microsoft.AspNetCore.Http;
+using OrbitApi.Authorization;
+
 namespace OrbitApi.Controllers;
 
 /// <summary>
@@ -20,11 +23,31 @@ public class FinancialTransactionsController : ControllerBase
 {
     private readonly OrbitDbContext _context;
     private readonly ICurrencyService _currencyService;
+    private readonly IAuthorizationService _authorizationService;
 
-    public FinancialTransactionsController(OrbitDbContext context, ICurrencyService currencyService)
+    public FinancialTransactionsController(OrbitDbContext context, ICurrencyService currencyService, IAuthorizationService authorizationService)
     {
         _context = context;
         _currencyService = currencyService;
+        _authorizationService = authorizationService;
+    }
+
+    private async Task<bool> CanExecuteTransferAsync(int orgId)
+    {
+        var activeRoleClaim = User.FindFirst("active_role")?.Value;
+        if (string.IsNullOrWhiteSpace(activeRoleClaim) && Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+        {
+            activeRoleClaim = headerVal.FirstOrDefault();
+        }
+
+        if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
+        {
+            return switchedRole == RoleName.Owner || switchedRole == RoleName.Admin || switchedRole == RoleName.FinanceOfficer;
+        }
+
+        var orgResource = new ScopedResource(ScopeType.Organization, orgId);
+        var authResult = await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.BudgetEdit));
+        return authResult.Succeeded;
     }
 
     /// <summary>
@@ -258,6 +281,11 @@ public class FinancialTransactionsController : ControllerBase
     {
         if (!ModelState.IsValid)
             return BadRequest(ModelState);
+
+        if (!await CanExecuteTransferAsync(dto.OrganizationId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can execute bank transfers." });
+        }
 
         if (dto.Amount <= 0)
             return BadRequest(new { message = "Transfer amount must be strictly greater than zero ($0.01 or more)." });

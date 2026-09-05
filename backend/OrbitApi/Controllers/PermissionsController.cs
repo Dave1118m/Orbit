@@ -74,6 +74,41 @@ public class PermissionsController : ControllerBase
         return null;
     }
 
+    private async Task<bool> CanManagePermissionsAsync(int orgId)
+    {
+        var userId = GetCurrentUserId();
+        if (!userId.HasValue) return false;
+
+        var activeRoleStr = User.FindFirst("active_role")?.Value;
+        if (string.IsNullOrWhiteSpace(activeRoleStr) && Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+        {
+            activeRoleStr = headerVal.FirstOrDefault();
+        }
+
+        if (!string.IsNullOrWhiteSpace(activeRoleStr) && Enum.TryParse<RoleName>(activeRoleStr, true, out var switchedRole))
+        {
+            if (switchedRole == RoleName.Owner)
+            {
+                return await _db.Organizations.AnyAsync(o => o.OwnerId == userId.Value && !o.IsDeleted && o.Id == orgId);
+            }
+            return switchedRole == RoleName.Admin;
+        }
+
+        var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId.Value && !o.IsDeleted && o.Id == orgId);
+        if (isOwner) return true;
+
+        var memberRole = await _db.OrganizationMembers
+            .Include(m => m.Role)
+            .Where(m => m.UserId == userId.Value && m.OrganizationId == orgId && m.Status == OrgMemberStatus.Active)
+            .Select(m => m.Role.Name)
+            .FirstOrDefaultAsync();
+
+        if (memberRole == RoleName.Owner || memberRole == RoleName.Admin) return true;
+
+        var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+        return userRoles.Any(r => r.Equals("Owner", StringComparison.OrdinalIgnoreCase) || r.Equals("Admin", StringComparison.OrdinalIgnoreCase));
+    }
+
     /// <summary>
     /// Returns the complete catalog of all available permissions in the system.
     /// </summary>
@@ -136,13 +171,18 @@ public class PermissionsController : ControllerBase
     [HttpPost("roles")]
     public async Task<IActionResult> CreateCustomRole([FromBody] CreateCustomRoleRequest req)
     {
+        var activeOrgId = req.OrganizationId ?? GetActiveOrganizationId();
+        if (!activeOrgId.HasValue || !await CanManagePermissionsAsync(activeOrgId.Value))
+        {
+            return StatusCode(403, new { message = "Forbidden: Only Organization Owners and Administrators can create custom roles." });
+        }
+
         if (string.IsNullOrWhiteSpace(req.Title))
         {
             return BadRequest("Custom role title is required.");
         }
 
         var cleanTitle = req.Title.Trim();
-        var activeOrgId = req.OrganizationId ?? GetActiveOrganizationId();
         var exists = await _db.Roles.AnyAsync(r => 
             (r.OrganizationId == activeOrgId && r.CustomTitle != null && r.CustomTitle.ToLower() == cleanTitle.ToLower()) ||
             (r.IsSystemRole && r.Name.ToString().ToLower() == cleanTitle.ToLower()));
@@ -219,6 +259,12 @@ public class PermissionsController : ControllerBase
         var role = await _db.Roles.FindAsync(id);
         if (role == null) return NotFound("Role not found.");
 
+        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
+        if (!activeOrgId.HasValue || !await CanManagePermissionsAsync(activeOrgId.Value))
+        {
+            return StatusCode(403, new { message = "Forbidden: Only Organization Owners and Administrators can modify custom roles." });
+        }
+
         if (role.IsSystemRole)
         {
             role.Description = req.Description?.Trim();
@@ -248,6 +294,12 @@ public class PermissionsController : ControllerBase
             .FirstOrDefaultAsync(r => r.Id == id);
         if (role == null) return NotFound("Role not found.");
 
+        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
+        if (!activeOrgId.HasValue || !await CanManagePermissionsAsync(activeOrgId.Value))
+        {
+            return StatusCode(403, new { message = "Forbidden: Only Organization Owners and Administrators can delete custom roles." });
+        }
+
         if (role.IsSystemRole)
         {
             return BadRequest("System predefined roles cannot be deleted.");
@@ -257,8 +309,6 @@ public class PermissionsController : ControllerBase
         {
             return BadRequest($"Cannot delete role '{role.CustomTitle}' because it is currently assigned to {role.RoleAssignments.Count} user(s). Please reassign users first.");
         }
-
-        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
 
         _db.RolePermissions.RemoveRange(role.RolePermissions);
         _db.Roles.Remove(role);
@@ -312,11 +362,16 @@ public class PermissionsController : ControllerBase
             return BadRequest("Owner permissions are system-protected superuser access and cannot be revoked.");
         }
 
+        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
+        if (!activeOrgId.HasValue || !await CanManagePermissionsAsync(activeOrgId.Value))
+        {
+            return StatusCode(403, new { message = "Forbidden: Only Organization Owners and Administrators can assign or revoke permissions." });
+        }
+
         var existing = await _db.RolePermissions
             .FirstOrDefaultAsync(rp => rp.RoleId == req.RoleId && rp.PermissionId == req.PermissionId);
 
         var currentUserId = GetCurrentUserId();
-        var activeOrgId = role.OrganizationId ?? GetActiveOrganizationId();
 
         if (req.IsGranted)
         {

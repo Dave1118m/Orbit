@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import FinancialOverview from '../components/finance/FinancialOverview';
 import CategoriesManagement from '../components/finance/CategoriesManagement';
 import DonorsContributions from '../components/finance/DonorsContributions';
@@ -7,6 +7,7 @@ import Budgets from '../components/finance/Budgets';
 import Expenses from '../components/finance/Expenses';
 import Compliance from '../components/finance/Compliance';
 import { AutoText } from '../contexts/TranslationContext';
+import { useUser } from '../contexts/UserContext';
 import { 
   DollarSign, Layers, HeartHandshake, CreditCard, PieChart, 
   Receipt, ShieldCheck
@@ -18,17 +19,30 @@ import {
  * budget revisions, expense approval trails, and compliance filings.
  */
 export default function Finance() {
+  const { getPrimaryRole, hasRole, hasPermission } = useUser();
+  const currentRole = getPrimaryRole() || 'Owner';
+
+  const isRestricted = currentRole === 'Member' || currentRole === 'Viewer';
+  const isFinanceOrAdmin = currentRole === 'Owner' || currentRole === 'Admin' || currentRole === 'FinanceOfficer';
+
+  const allTabs = [
+    { id: 'overview', label: 'Financial Overview', icon: DollarSign, hidden: false },
+    { id: 'expenses', label: 'Expense Approval Trail', icon: Receipt, hidden: false },
+    { id: 'budgets', label: 'Budgets & Revisions', icon: PieChart, hidden: isRestricted && !hasPermission('BudgetView') },
+    { id: 'banks', label: 'Bank Accounts', icon: CreditCard, hidden: isRestricted || (!isFinanceOrAdmin && !hasPermission('BudgetEdit')) },
+    { id: 'categories', label: 'Chart of Accounts (COA)', icon: Layers, hidden: isRestricted },
+    { id: 'donors', label: 'Donor Contributions', icon: HeartHandshake, hidden: isRestricted },
+    { id: 'compliance', label: 'Compliance', icon: ShieldCheck, hidden: isRestricted || !isFinanceOrAdmin }
+  ];
+
+  const visibleTabs = allTabs.filter(tab => !tab.hidden);
   const [activeTab, setActiveTab] = useState('overview');
 
-  const tabs = [
-    { id: 'overview', label: 'Financial Overview', icon: DollarSign },
-    { id: 'categories', label: 'Chart of Accounts (COA)', icon: Layers },
-    { id: 'donors', label: 'Donor Contributions', icon: HeartHandshake },
-    { id: 'banks', label: 'Bank Accounts', icon: CreditCard },
-    { id: 'budgets', label: 'Budgets & Revisions', icon: PieChart },
-    { id: 'expenses', label: 'Expense Approval Trail', icon: Receipt },
-    { id: 'compliance', label: 'Compliance', icon: ShieldCheck }
-  ];
+  useEffect(() => {
+    if (!visibleTabs.some(t => t.id === activeTab)) {
+      setActiveTab(visibleTabs[0]?.id || 'expenses');
+    }
+  }, [currentRole, visibleTabs, activeTab]);
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50">
@@ -45,9 +59,9 @@ export default function Finance() {
           </div>
         </div>
 
-        {/* 7-Tab Navigation Bar */}
+        {/* Navigation Bar */}
         <div className="mt-6 flex gap-2 border-b border-slate-200 overflow-x-auto pb-px">
-          {tabs.map(tab => {
+          {visibleTabs.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (

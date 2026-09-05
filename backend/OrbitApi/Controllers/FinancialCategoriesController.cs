@@ -5,6 +5,9 @@ using OrbitApi.DTOs;
 using OrbitApi.Models;
 using OrbitApi.Services;
 
+using Microsoft.AspNetCore.Http;
+using OrbitApi.Authorization;
+
 namespace OrbitApi.Controllers;
 
 /// <summary>
@@ -19,11 +22,31 @@ public class FinancialCategoriesController : ControllerBase
 {
     private readonly OrbitDbContext _context;
     private readonly ICurrencyService _currencyService;
+    private readonly IAuthorizationService _authorizationService;
 
-    public FinancialCategoriesController(OrbitDbContext context, ICurrencyService currencyService)
+    public FinancialCategoriesController(OrbitDbContext context, ICurrencyService currencyService, IAuthorizationService authorizationService)
     {
         _context = context;
         _currencyService = currencyService;
+        _authorizationService = authorizationService;
+    }
+
+    private async Task<bool> CanManageCategoriesAsync(int orgId)
+    {
+        var activeRoleClaim = User.FindFirst("active_role")?.Value;
+        if (string.IsNullOrWhiteSpace(activeRoleClaim) && Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+        {
+            activeRoleClaim = headerVal.FirstOrDefault();
+        }
+
+        if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
+        {
+            return switchedRole == RoleName.Owner || switchedRole == RoleName.Admin || switchedRole == RoleName.FinanceOfficer;
+        }
+
+        var orgResource = new ScopedResource(ScopeType.Organization, orgId);
+        var authResult = await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.BudgetEdit));
+        return authResult.Succeeded;
     }
 
     private int? GetActiveOrganizationId()
@@ -216,6 +239,11 @@ public class FinancialCategoriesController : ControllerBase
             dto.OrganizationId = activeOrg.Id;
         }
 
+        if (!await CanManageCategoriesAsync(dto.OrganizationId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can create financial categories." });
+        }
+
         var nameTrimmed = dto.Name.Trim();
         if (nameTrimmed.Length < 2)
             return BadRequest(new { message = "Category name must be at least 2 characters long." });
@@ -279,6 +307,11 @@ public class FinancialCategoriesController : ControllerBase
         if (category == null)
             return NotFound(new { message = "Category not found" });
 
+        if (!await CanManageCategoriesAsync(category.OrganizationId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can update financial categories." });
+        }
+
         var nameTrimmed = dto.Name.Trim();
         if (nameTrimmed.Length < 2)
             return BadRequest(new { message = "Category name must be at least 2 characters long." });
@@ -340,6 +373,11 @@ public class FinancialCategoriesController : ControllerBase
 
         if (category == null)
             return NotFound(new { message = "Category not found" });
+
+        if (!await CanManageCategoriesAsync(category.OrganizationId))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can delete financial categories." });
+        }
 
         bool inUse = category.Expenses.Any() || category.BudgetLineItems.Any() || category.DonorContributions.Any() || category.SubCategories.Any();
 

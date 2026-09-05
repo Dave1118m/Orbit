@@ -19,6 +19,8 @@ function authHeaders() {
   const headers = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (orgId) headers['X-Organization-Id'] = String(orgId);
+  const activePersona = localStorage.getItem('activePersona');
+  if (activePersona) headers['X-Active-Role'] = activePersona;
   return headers;
 }
 
@@ -100,6 +102,11 @@ export default function Expenses() {
   const [uploadingReceipt, setUploadingReceipt] = useState(false);
   const fileRef = useRef(null);
 
+  // Disburse & Pay modal state
+  const [payTarget, setPayTarget] = useState(null);
+  const [selectedDisburseBankId, setSelectedDisburseBankId] = useState('');
+  const [isDisbursing, setIsDisbursing] = useState(false);
+
   async function openReceiptPreview(expenseItem) {
     setPreviewModal({
       isOpen: true,
@@ -159,51 +166,50 @@ export default function Expenses() {
   const [budgetLoading, setBudgetLoading] = useState(false);
 
   async function fetchBudgetInfo(projectId, categoryId) {
-    if (!projectId || !categoryId) { setBudgetInfo(null); return; }
+    if (!categoryId) { setBudgetInfo(null); return; }
     try {
       setBudgetLoading(true);
-      const res = await fetch(`${API_BASE}/budgets?projectId=${projectId}`, { headers: authHeaders() });
+      const res = await fetch(`${API_BASE}/budgets`, { headers: authHeaders() });
       if (!res.ok) { setBudgetInfo(null); return; }
       const budgets = await res.json();
-      const projectBudget = Array.isArray(budgets)
-        ? budgets.find(b => b.level === 'Project' || b.level === 0)
-        : budgets;
-      if (!projectBudget) { setBudgetInfo(null); return; }
-
-      const lineItem = (projectBudget.lineItems || []).find(
-        li => String(li.categoryId) === String(categoryId)
-      );
-      if (!lineItem) { setBudgetInfo({ noLineItem: true }); return; }
-
-      // Fetch current spend for this project+category
-      const expRes = await fetch(`${API_BASE}/expenses`, { headers: authHeaders() });
-      let alreadySpent = 0;
-      if (expRes.ok) {
-        const allExp = await expRes.json();
-        const budgetCurrency = projectBudget.currency || 'USD';
-        alreadySpent = allExp
-          .filter(e =>
-            String(e.projectId) === String(projectId) &&
-            String(e.categoryId) === String(categoryId) &&
-            e.approvalStatus !== 'Rejected'
-          )
-          .reduce((sum, e) => {
-            let amt = e.amount || 0;
-            const expCurrency = e.currency || 'USD';
-            if (expCurrency !== budgetCurrency) {
-              // Convert to budget currency
-              if (budgetCurrency === 'USD' && expCurrency === 'ETB') amt = amt / (exchangeRates['ETB'] || 130);
-              else if (budgetCurrency === 'ETB' && expCurrency === 'USD') amt = amt * (exchangeRates['ETB'] || 130);
-            }
-            return sum + amt;
-          }, 0);
+      if (!Array.isArray(budgets) || budgets.length === 0) {
+        setBudgetInfo(null);
+        return;
       }
 
+      // 1. Match project-specific budget if projectId provided
+      // 2. Fall back to organization-level budget
+      let matchedBudget = null;
+      if (projectId) {
+        matchedBudget = budgets.find(b => String(b.projectId) === String(projectId));
+      }
+      if (!matchedBudget) {
+        matchedBudget = budgets.find(b => b.level === 'Organization' || b.level === 0 || (!b.projectId && !b.workspaceId && !b.taskId));
+      }
+      if (!matchedBudget && budgets.length > 0) {
+        matchedBudget = budgets[0];
+      }
+
+      if (!matchedBudget) { setBudgetInfo(null); return; }
+
+      const lineItem = (matchedBudget.lineItems || []).find(
+        li => String(li.categoryId) === String(categoryId)
+      );
+      if (!lineItem) { 
+        setBudgetInfo({ noLineItem: true, budgetName: matchedBudget.entityName }); 
+        return; 
+      }
+
+      const lineItemAmount = lineItem.amount || 0;
+      const alreadySpent = lineItem.spentAmount !== undefined ? lineItem.spentAmount : 0;
+      const remaining = lineItem.remainingAmount !== undefined ? lineItem.remainingAmount : (lineItemAmount - alreadySpent);
+
       setBudgetInfo({
-        lineItemAmount: lineItem.amount,
+        lineItemAmount,
         alreadySpent,
-        remaining: lineItem.amount - alreadySpent,
-        currency: projectBudget.currency || 'USD',
+        remaining,
+        currency: matchedBudget.currency || 'USD',
+        budgetName: matchedBudget.entityName,
         noLineItem: false
       });
     } catch { setBudgetInfo(null); }
@@ -431,8 +437,9 @@ export default function Expenses() {
         const msg = await parseErrorMessage(res, 'Failed to mark Finance Reviewed');
         throw new Error(msg);
       }
+      showSuccessToast('Expense marked as Finance Reviewed successfully.');
       fetchExpenses();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
   }
 
   async function handleManagerSignoff(id) {
@@ -442,19 +449,39 @@ export default function Expenses() {
         const msg = await parseErrorMessage(res, 'Failed to sign off');
         throw new Error(msg);
       }
+      showSuccessToast('Expense signed off by Manager successfully.');
       fetchExpenses();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
   }
 
-  async function handlePay(id) {
+  function openPayModal(eItem) {
+    setPayTarget(eItem);
+    setSelectedDisburseBankId(eItem.bankAccountId ? String(eItem.bankAccountId) : (bankAccounts[0]?.id ? String(bankAccounts[0].id) : ''));
+  }
+
+  async function handlePaySubmit(e) {
+    if (e) e.preventDefault();
+    if (!payTarget) return;
     try {
-      const res = await fetch(`${API_BASE}/expenses/${id}/pay`, { method: 'POST', headers: authHeaders() });
+      setIsDisbursing(true);
+      const res = await fetch(`${API_BASE}/expenses/${payTarget.id}/pay`, {
+        method: 'POST',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bankAccountId: selectedDisburseBankId ? parseInt(selectedDisburseBankId) : null })
+      });
       if (!res.ok) {
-        const msg = await parseErrorMessage(res, 'Failed to mark as paid');
+        const msg = await parseErrorMessage(res, 'Failed to disburse expense');
         throw new Error(msg);
       }
+      showSuccessToast('Expense disbursed/paid successfully.');
+      setPayTarget(null);
       fetchExpenses();
-    } catch (e) { showSuccessToast(e.message); }
+      fetchBankAccounts();
+    } catch (err) {
+      showErrorToast(err.message);
+    } finally {
+      setIsDisbursing(false);
+    }
   }
 
   async function handleRejectSubmit(e) {
@@ -466,11 +493,15 @@ export default function Expenses() {
         headers: { ...authHeaders(), 'Content-Type': 'application/json' },
         body: JSON.stringify({ reason: rejectReason })
       });
-      if (!res.ok) throw new Error('Failed to reject');
+      if (!res.ok) {
+        const msg = await parseErrorMessage(res, 'Failed to reject expense claim');
+        throw new Error(msg);
+      }
+      showSuccessToast('Expense claim rejected.');
       setRejectTarget(null);
       setRejectReason('');
       fetchExpenses();
-    } catch (e) { showSuccessToast(e.message); }
+    } catch (e) { showErrorToast(e.message); }
   }
 
   async function handleDeleteExpense(expenseId) {
@@ -480,8 +511,14 @@ export default function Expenses() {
         method: 'DELETE',
         headers: authHeaders()
       });
-      fetchExpenses();
-    } catch (e) { console.error(e); }
+      if (res.ok) {
+        showSuccessToast('Expense deleted successfully.');
+        fetchExpenses();
+      } else {
+        const msg = await parseErrorMessage(res, 'Failed to delete expense.');
+        showErrorToast(msg);
+      }
+    } catch (e) { showErrorToast(e.message); }
   }
 
 
@@ -497,7 +534,7 @@ export default function Expenses() {
       
       const response = await fetch(`${API_BASE}/expenses/${receiptTarget.id}/receipt`, {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+        headers: authHeaders(),
         body: fd
       });
 
@@ -565,18 +602,22 @@ export default function Expenses() {
             <option value="USD">USD ($)</option>
             <option value="ETB">ETB (Br)</option>
           </select>
-          <button
-            onClick={handleClearFinancialData}
-            className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold py-2.5 px-4 text-xs transition shadow-xs flex items-center gap-1.5"
-          >
-            <span>🗑️ Reset / Clear Test Data</span>
-          </button>
-          <button
-            onClick={() => { setIsDrawerOpen(true); setFormError(''); setBudgetInfo(null); }}
-            className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm"
-          >
-            + Record New Expense
-          </button>
+          {(hasRole('Owner') || hasRole('Admin')) && (
+            <button
+              onClick={handleClearFinancialData}
+              className="rounded-xl border border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 font-bold py-2.5 px-4 text-xs transition shadow-xs flex items-center gap-1.5"
+            >
+              <span>🗑️ Reset / Clear Test Data</span>
+            </button>
+          )}
+          {!hasRole('Viewer') && (
+            <button
+              onClick={() => { setIsDrawerOpen(true); setFormError(''); setBudgetInfo(null); }}
+              className="bg-gradient-to-r from-[#5A45FF] to-indigo-600 hover:from-indigo-600 hover:to-indigo-700 text-white font-semibold py-2.5 px-5 rounded-xl shadow-md shadow-[#5A45FF]/20 transition flex items-center gap-2 text-sm"
+            >
+              + Record New Expense
+            </button>
+          )}
         </div>
       </div>
 
@@ -644,9 +685,25 @@ export default function Expenses() {
                         <div className="font-bold text-slate-900 text-sm">
                           {new Date(eItem.date).toLocaleDateString()}
                         </div>
-                        <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700 mt-0.5">
-                          {eItem.categoryName || 'General Expense'}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                          <span className="inline-flex px-2 py-0.5 rounded text-[10px] font-bold bg-slate-100 text-slate-700">
+                            {eItem.categoryName || 'General Expense'}
+                          </span>
+                          {eItem.categoryRemainingBudget !== null && eItem.categoryRemainingBudget !== undefined && (
+                            <span
+                              className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                eItem.categoryRemainingBudget < 0
+                                  ? 'bg-rose-100 text-rose-700 border border-rose-200'
+                                  : eItem.categoryRemainingBudget < ((eItem.categoryAllocatedBudget || 1) * 0.2)
+                                  ? 'bg-amber-100 text-amber-700 border border-amber-200'
+                                  : 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                              }`}
+                              title={`Allocated: ${formatCurrency(eItem.categoryAllocatedBudget || 0, eItem.currency)} | Spent: ${formatCurrency(eItem.categorySpentBudget || 0, eItem.currency)}`}
+                            >
+                              Rem: {formatCurrency(eItem.categoryRemainingBudget, eItem.currency)}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td className="px-6 py-4 text-sm text-slate-700 max-w-xs truncate" title={eItem.description}>
                         {eItem.description || '-'}
@@ -683,15 +740,17 @@ export default function Expenses() {
                               📎 {eItem.attachmentFileName}
                             </button>
                           ) : (
-                            <button
-                              onClick={() => {
-                                setReceiptTarget(eItem);
-                                setTimeout(() => fileRef.current?.click(), 100);
-                              }}
-                              className="text-[11px] font-semibold text-slate-500 hover:text-[#5A45FF]"
-                            >
-                              + Attach Receipt
-                            </button>
+                            !hasRole('Viewer') && (
+                              <button
+                                onClick={() => {
+                                  setReceiptTarget(eItem);
+                                  setTimeout(() => fileRef.current?.click(), 100);
+                                }}
+                                className="text-[11px] font-semibold text-slate-500 hover:text-[#5A45FF]"
+                              >
+                                + Attach Receipt
+                              </button>
+                            )
                           )}
 
                           {eItem.budgetWarning && (
@@ -712,31 +771,31 @@ export default function Expenses() {
                         </span>
                       </td>
                       <td className="px-6 py-4 text-right text-xs font-semibold space-x-2">
-                        {eItem.approvalStatus === 'Pending' && isFinanceOfficerOrAdmin && eItem.submittedByUserId !== user?.id && (
+                        {eItem.approvalStatus === 'Pending' && isFinanceOfficerOrAdmin && (
                           <button
                             onClick={() => handleFinanceReview(eItem.id)}
-                            className="text-[#5A45FF] hover:underline"
+                            className="text-[#5A45FF] hover:underline font-bold"
                           >
                             Finance Review
                           </button>
                         )}
-                        {eItem.approvalStatus === 'FinanceReviewed' && isManagerOrAdmin && eItem.submittedByUserId !== user?.id && eItem.approvedByFinanceOfficerId !== user?.id && (
+                        {eItem.approvalStatus === 'FinanceReviewed' && isManagerOrAdmin && (
                           <button
                             onClick={() => handleManagerSignoff(eItem.id)}
-                            className="text-[#5A45FF] hover:underline"
+                            className="text-[#5A45FF] hover:underline font-bold"
                           >
                             Manager Sign-off
                           </button>
                         )}
                         {eItem.approvalStatus === 'Approved' && isFinanceOfficerOrAdmin && (
                           <button
-                            onClick={() => handlePay(eItem.id)}
+                            onClick={() => openPayModal(eItem)}
                             className="text-emerald-600 hover:underline font-bold"
                           >
                             Disburse / Pay
                           </button>
                         )}
-                        {(eItem.approvalStatus === 'Pending' || eItem.approvalStatus === 'FinanceReviewed') && (
+                        {(eItem.approvalStatus === 'Pending' || eItem.approvalStatus === 'FinanceReviewed') && (isFinanceOfficerOrAdmin || isManagerOrAdmin) && (
                           <button
                             onClick={() => setRejectTarget(eItem)}
                             className="text-rose-600 hover:underline"
@@ -744,13 +803,15 @@ export default function Expenses() {
                             Reject
                           </button>
                         )}
-                        <button
-                          onClick={() => handleDeleteExpense(eItem.id)}
-                          className="text-rose-600 hover:underline"
-                          title="Delete / Reject Expense"
-                        >
-                          🗑️ Delete
-                        </button>
+                        {(hasRole('Owner') || hasRole('Admin')) && (
+                          <button
+                            onClick={() => handleDeleteExpense(eItem.id)}
+                            className="text-rose-600 hover:underline"
+                            title="Delete / Reject Expense"
+                          >
+                            🗑️ Delete
+                          </button>
+                        )}
                         <button
                           onClick={() => setExpandedId(expandedId === eItem.id ? null : eItem.id)}
                           className="text-slate-500 hover:underline"
@@ -762,7 +823,7 @@ export default function Expenses() {
                     {expandedId === eItem.id && (
                       <tr>
                         <td colSpan={7} className="bg-slate-50/80 p-6 border-y border-slate-200">
-                          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
                             <div className="bg-white p-3 rounded-2xl border border-slate-200">
                               <p className="font-bold text-slate-900 mb-1">Step 1: Finance Officer Review</p>
                               <p className="text-slate-600">Reviewed By: {eItem.financeOfficerName || 'Pending'}</p>
@@ -777,6 +838,22 @@ export default function Expenses() {
                               <p className="font-bold text-slate-900 mb-1">Step 3: Disbursement / Payment</p>
                               <p className="text-slate-600">Paid By: {eItem.paidUserName || 'Pending'}</p>
                               <p className="text-slate-400 mt-0.5">{eItem.paidAt ? new Date(eItem.paidAt).toLocaleString() : 'Not disbursed yet'}</p>
+                              {eItem.bankAccountName && (
+                                <p className="text-indigo-600 font-semibold mt-1">Bank: {eItem.bankAccountName}</p>
+                              )}
+                            </div>
+                            <div className="bg-white p-3 rounded-2xl border border-slate-200">
+                              <p className="font-bold text-slate-900 mb-1">Category Budget Status</p>
+                              <p className="text-slate-600">Category: <span className="font-semibold">{eItem.categoryName || 'General'}</span></p>
+                              {eItem.categoryRemainingBudget !== null && eItem.categoryRemainingBudget !== undefined ? (
+                                <div className="mt-1 space-y-0.5">
+                                  <p className="text-slate-500">Allocated: <span className="font-bold text-slate-700">{formatCurrency(eItem.categoryAllocatedBudget || 0, eItem.currency)}</span></p>
+                                  <p className="text-slate-500">Spent: <span className="font-bold text-slate-700">{formatCurrency(eItem.categorySpentBudget || 0, eItem.currency)}</span></p>
+                                  <p className="text-slate-500">Remaining: <span className={`font-bold ${eItem.categoryRemainingBudget < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>{formatCurrency(eItem.categoryRemainingBudget, eItem.currency)}</span></p>
+                                </div>
+                              ) : (
+                                <p className="text-slate-400 mt-0.5">No budget item mapped</p>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -1143,6 +1220,105 @@ export default function Expenses() {
                   className="rounded-lg bg-brand-600 px-4 py-1.5 text-xs font-semibold text-white hover:bg-brand-700 transition shadow-xs disabled:opacity-50"
                 >
                   {isSubmitting ? 'Recording...' : 'Submit Claim'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* DISBURSE / PAY EXPENSE MODAL */}
+      {payTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => !isDisbursing && setPayTarget(null)} />
+          <div className="relative w-full max-w-md bg-white rounded-3xl shadow-2xl p-6 border border-slate-100">
+            <div className="flex items-center justify-between pb-3 mb-4 border-b border-slate-100">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <span>💳</span> Disburse & Pay Expense
+              </h3>
+              <button 
+                type="button" 
+                onClick={() => !isDisbursing && setPayTarget(null)} 
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-full"
+              >
+                ✕
+              </button>
+            </div>
+
+            <form onSubmit={handlePaySubmit} className="flex flex-col gap-4">
+              <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-2">
+                <div className="flex justify-between items-start">
+                  <span className="text-xs text-slate-500 font-medium">Expense Item:</span>
+                  <span className="text-xs font-bold text-slate-900 text-right max-w-[200px] truncate" title={payTarget.description}>
+                    {payTarget.description || 'Expense #' + payTarget.id}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-slate-500 font-medium">Category:</span>
+                  <span className="text-xs font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    {payTarget.categoryName || 'General Expense'}
+                  </span>
+                </div>
+                {payTarget.categoryRemainingBudget !== null && payTarget.categoryRemainingBudget !== undefined && (
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs text-slate-500 font-medium">Category Budget Remaining:</span>
+                    <span className={`text-xs font-bold ${payTarget.categoryRemainingBudget < 0 ? 'text-rose-600' : 'text-emerald-600'}`}>
+                      {formatCurrency(payTarget.categoryRemainingBudget, payTarget.currency)}
+                    </span>
+                  </div>
+                )}
+                <div className="pt-2 border-t border-slate-200/60 flex justify-between items-center">
+                  <span className="text-xs font-bold text-slate-700">Disbursement Amount:</span>
+                  <span className="text-base font-extrabold text-emerald-600">
+                    {formatCurrency(payTarget.amount, payTarget.currency)}
+                  </span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 mb-1.5">
+                  Source Bank Account *
+                </label>
+                <select
+                  value={selectedDisburseBankId}
+                  onChange={(e) => setSelectedDisburseBankId(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-300 px-4 py-2.5 text-xs font-semibold focus:border-[#5A45FF] focus:outline-none focus:ring-2 focus:ring-[#5A45FF]/20 bg-white"
+                  required
+                >
+                  <option value="">-- Select Bank Account to Debit --</option>
+                  {bankAccounts.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.bankName} - {b.accountNumber} ({formatCurrency(b.currentBalance ?? 0, b.currency)})
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  The disbursement will automatically decrement this bank account's balance and record a ledger transaction.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-2">
+                <button
+                  type="button"
+                  disabled={isDisbursing}
+                  onClick={() => setPayTarget(null)}
+                  className="rounded-full px-5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isDisbursing}
+                  className="rounded-full bg-emerald-600 px-6 py-2 text-xs font-bold text-white hover:bg-emerald-700 transition shadow-sm disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isDisbursing ? (
+                    <>
+                      <div className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span>Processing...</span>
+                    </>
+                  ) : (
+                    <span>Confirm & Pay Expense</span>
+                  )}
                 </button>
               </div>
             </form>

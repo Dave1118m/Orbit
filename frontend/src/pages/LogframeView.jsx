@@ -30,7 +30,14 @@ export default function LogframeView() {
   const [indicatorLevel, setIndicatorLevel] = useState(0);
 
   const canEdit = hasPermission('ProjectEdit');
-  const authHeaders = { 'Authorization': `Bearer ${localStorage.getItem('token')}`, 'Content-Type': 'application/json' };
+  const orgId = localStorage.getItem('selectedOrganizationId') || localStorage.getItem('selectedOrgId');
+  const activePersona = localStorage.getItem('activePersona');
+  const authHeaders = {
+    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+    'Content-Type': 'application/json',
+    ...(orgId ? { 'X-Organization-Id': String(orgId) } : {}),
+    ...(activePersona ? { 'X-Active-Role': activePersona } : {})
+  };
 
   useEffect(() => {
     fetchLogframe();

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import SearchSelect from '../SearchSelect';
 import DonorProgressReportModal from './DonorProgressReportModal';
+import { useUser } from '../../contexts/UserContext';
 import { COUNTRY_OPTIONS } from '../../lib/countries';
 import { getShortBankName } from '../../lib/ethiopianBanks';
 import { parseApiResponse, showErrorToast } from '../../utils/toastHelper';
@@ -17,9 +18,11 @@ function authHeaders() {
     }
   }
   if (!orgId) orgId = localStorage.getItem('selectedOrgId');
+  const activePersona = localStorage.getItem('activePersona');
   const headers = {};
   if (token) headers['Authorization'] = `Bearer ${token}`;
   if (orgId) headers['X-Organization-Id'] = String(orgId);
+  if (activePersona) headers['X-Active-Role'] = activePersona;
   return headers;
 }
 
@@ -52,6 +55,9 @@ const DONOR_TYPE_OPTIONS = [
 ];
 
 export default function DonorsContributions() {
+  const { hasRole, hasPermission } = useUser();
+  const canManageDonors = hasRole('Owner') || hasRole('Admin') || hasRole('FinanceOfficer') || hasPermission('DonorManage');
+
   const [donors, setDonors] = useState([]);
   const [projects, setProjects] = useState([]);
   const [bankAccounts, setBankAccounts] = useState([]);
@@ -167,6 +173,7 @@ export default function DonorsContributions() {
 
   const handleAddDonor = async (e) => {
     e.preventDefault();
+    if (!canManageDonors) return;
     try {
       setIsSubmitting(true);
       const payload = {
@@ -210,6 +217,7 @@ export default function DonorsContributions() {
   };
 
   const handleDeleteDonor = async (donorId, donorName) => {
+    if (!canManageDonors) return;
     if (!window.confirm(`Are you sure you want to delete donor "${donorName}"?`)) return;
     try {
       const res = await fetch(`${API_BASE}/donors/${donorId}`, {
@@ -238,12 +246,14 @@ export default function DonorsContributions() {
             Track multi-donor pledges, project allocations, and tranche disbursements
           </p>
         </div>
-        <button
-          onClick={() => setIsModalOpen(true)}
-          className="bg-[#5A45FF] hover:bg-indigo-600 text-white font-bold px-5 py-2.5 rounded-2xl text-xs shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
-        >
-          <span>+ Add New Donor</span>
-        </button>
+        {canManageDonors && (
+          <button
+            onClick={() => setIsModalOpen(true)}
+            className="bg-[#5A45FF] hover:bg-indigo-600 text-white font-bold px-5 py-2.5 rounded-2xl text-xs shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5 flex items-center gap-2"
+          >
+            <span>+ Add New Donor</span>
+          </button>
+        )}
       </div>
 
       {/* Summary Stat Cards */}
@@ -354,13 +364,15 @@ export default function DonorsContributions() {
                           >
                             {expandedDonorId === donor.id ? 'Hide Profile' : 'Manage Profile'}
                           </button>
-                          <button
-                            onClick={() => handleDeleteDonor(donor.id, donor.name)}
-                            className="text-rose-600 hover:text-rose-800 hover:underline text-xs"
-                            title="Delete Donor Profile"
-                          >
-                            🗑️ Delete
-                          </button>
+                          {canManageDonors && (
+                            <button
+                              onClick={() => handleDeleteDonor(donor.id, donor.name)}
+                              className="text-rose-600 hover:text-rose-800 hover:underline text-xs"
+                              title="Delete Donor Profile"
+                            >
+                              🗑️ Delete
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -372,6 +384,7 @@ export default function DonorsContributions() {
                             projects={projects}
                             bankAccounts={bankAccounts}
                             onUpdate={fetchDonors}
+                            canManageDonors={canManageDonors}
                           />
                         </td>
                       </tr>
@@ -482,7 +495,7 @@ export default function DonorsContributions() {
   );
 }
 
-function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
+function DonorDetails({ donor, projects, bankAccounts, onUpdate, canManageDonors }) {
   const [contributions, setContributions] = useState([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('contributions');
@@ -529,6 +542,7 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
 
   const handleContributionSubmit = async (e) => {
     e.preventDefault();
+    if (!canManageDonors) return;
     try {
       setSubmitting(true);
       const payload = {
@@ -573,6 +587,7 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
 
   const handleLinkSubmit = async (e) => {
     e.preventDefault();
+    if (!canManageDonors) return;
     try {
       setSubmitting(true);
       const payload = {
@@ -607,20 +622,22 @@ function DonorDetails({ donor, projects, bankAccounts, onUpdate }) {
             <div><span className="font-semibold text-slate-700">Country:</span> {donor.country || '-'}</div>
           </div>
         </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setIsContributionModalOpen(true)}
-            className="bg-[#5A45FF] hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-xl text-xs shadow-sm transition"
-          >
-            + Record Contribution
-          </button>
-          <button
-            onClick={() => setIsLinkModalOpen(true)}
-            className="bg-white border border-slate-300 hover:bg-slate-100 text-slate-900 font-semibold py-2 px-4 rounded-xl text-xs shadow-sm transition"
-          >
-            + Link Project
-          </button>
-        </div>
+        {canManageDonors && (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setIsContributionModalOpen(true)}
+              className="bg-[#5A45FF] hover:bg-indigo-600 text-white font-semibold py-2 px-4 rounded-xl text-xs shadow-sm transition"
+            >
+              + Record Contribution
+            </button>
+            <button
+              onClick={() => setIsLinkModalOpen(true)}
+              className="bg-white border border-slate-300 hover:bg-slate-100 text-slate-900 font-semibold py-2 px-4 rounded-xl text-xs shadow-sm transition"
+            >
+              + Link Project
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex gap-4 border-b border-slate-200 pb-2">

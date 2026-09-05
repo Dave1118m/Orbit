@@ -653,30 +653,68 @@ export default function Budgets() {
                                       <tr>
                                         <th className="px-4 py-3">Category</th>
                                         <th className="px-4 py-3">Description</th>
-                                        <th className="px-4 py-3">Line Amount</th>
+                                        <th className="px-4 py-3 text-right">Allocated Budget</th>
+                                        <th className="px-4 py-3 text-right">Expensed / Spent</th>
+                                        <th className="px-4 py-3 text-right">Remaining Budget</th>
+                                        <th className="px-4 py-3 text-center">Utilization</th>
                                         <th className="px-4 py-3 text-right">Actions</th>
                                       </tr>
                                     </thead>
                                     <tbody className="divide-y divide-slate-100">
-                                      {b.lineItems.map((item) => (
-                                        <tr key={item.id} className="hover:bg-slate-50">
-                                          <td className="px-4 py-2.5 font-bold text-slate-700">
-                                            {item.categoryName || 'General'}
-                                          </td>
-                                          <td className="px-4 py-2.5 text-slate-600">{item.description}</td>
-                                          <td className="px-4 py-2.5 font-bold text-slate-900">{formatCurrency(item.amount, b.currency)}</td>
-                                          <td className="px-4 py-2.5 text-right">
-                                            {canReviseOrDraftBudget && (
-                                              <button
-                                                onClick={() => handleDeleteLineItem(b.id, item.id)}
-                                                className="text-rose-600 hover:underline font-semibold"
-                                              >
-                                                Remove
-                                              </button>
-                                            )}
-                                          </td>
-                                        </tr>
-                                      ))}
+                                      {b.lineItems.map((item) => {
+                                        const allocated = item.amount || 0;
+                                        const spent = item.spentAmount || 0;
+                                        const remaining = item.remainingAmount !== undefined ? item.remainingAmount : (allocated - spent);
+                                        const pct = allocated > 0 ? Math.min(100, Math.round((spent / allocated) * 100)) : 0;
+                                        const isOverspent = remaining < 0;
+
+                                        return (
+                                          <tr key={item.id} className="hover:bg-slate-50 transition-colors">
+                                            <td className="px-4 py-2.5 font-bold text-slate-700">
+                                              {item.categoryName || 'General'}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-slate-600">{item.description}</td>
+                                            <td className="px-4 py-2.5 text-right font-semibold text-slate-900">
+                                              {formatCurrency(allocated, b.currency)}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right font-medium text-slate-600">
+                                              {formatCurrency(spent, b.currency)}
+                                            </td>
+                                            <td className={`px-4 py-2.5 text-right font-bold ${
+                                              isOverspent 
+                                                ? 'text-rose-600' 
+                                                : remaining > 0 
+                                                ? 'text-emerald-600' 
+                                                : 'text-slate-500'
+                                            }`}>
+                                              {formatCurrency(remaining, b.currency)}
+                                            </td>
+                                            <td className="px-4 py-2.5 text-center">
+                                              <div className="flex items-center justify-center gap-2">
+                                                <div className="w-16 bg-slate-100 rounded-full h-1.5 overflow-hidden border border-slate-200">
+                                                  <div
+                                                    className={`h-full rounded-full ${
+                                                      pct > 90 ? 'bg-rose-500' : pct > 75 ? 'bg-amber-500' : 'bg-emerald-500'
+                                                    }`}
+                                                    style={{ width: `${Math.min(100, pct)}%` }}
+                                                  />
+                                                </div>
+                                                <span className="text-[10px] font-semibold text-slate-500">{pct}%</span>
+                                              </div>
+                                            </td>
+                                            <td className="px-4 py-2.5 text-right">
+                                              {canReviseOrDraftBudget && (
+                                                <button
+                                                  onClick={() => handleDeleteLineItem(b.id, item.id)}
+                                                  className="text-rose-600 hover:underline font-semibold"
+                                                >
+                                                  Remove
+                                                </button>
+                                              )}
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
                                     </tbody>
                                   </table>
                                 </div>

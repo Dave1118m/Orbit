@@ -104,21 +104,52 @@ export default function FinancialReports({ selectedCurrency = 'USD' }) {
   }
 
   const handleExportCSV = () => {
-    let csv = `Category Name,Classification,Target Budget Limit (${currLabel}),Actual Spent / Income (${currLabel}),Variance / Surplus (${currLabel})\n`;
-    categories.forEach(cat => {
-      const isExpense = cat.type === 0 || cat.type === 2;
-      const rawSpent = isExpense ? getCategorySpent(cat) : getCategoryIncome(cat);
-      const spent = rawSpent * rate;
-      const limit = (cat.targetBudgetLimit || 0) * rate;
-      const variance = limit > 0 ? limit - spent : 0;
-      csv += `"${cat.name}",${cat.type === 0 ? 'Program Expense' : (cat.type === 1 ? 'Grant Revenue' : 'General')},${limit.toFixed(2)},${spent.toFixed(2)},${variance.toFixed(2)}\n`;
-    });
+    let csv = '';
+    const cleanCell = (val) => {
+      if (val === null || val === undefined) return '""';
+      let str = String(val).replace(/[\r\n]+/g, ' ').replace(/"/g, '""').trim();
+      return `"${str}"`;
+    };
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    if (activeReportTab === 'cashflow') {
+      csv += `"STATEMENT OF CASH FLOWS & LIQUIDITY RESERVES (${currLabel})"\n`;
+      csv += 'Activity Section,Description,Inflow / Outflow,Amount (' + currLabel + ')\n';
+      csv += `${cleanCell('1. Operating Inflows')},${cleanCell('Grant Revenues & Donor Contributions')},${cleanCell('Inflow')},+${(summary?.totalIncome * rate || 0).toFixed(2)}\n`;
+      csv += `${cleanCell('2. Operating Outflows')},${cleanCell('Programmatic & Operating Expenditures')},${cleanCell('Outflow')},-${(summary?.totalExpenses * rate || 0).toFixed(2)}\n`;
+      csv += `${cleanCell('3. Net Operating Cash Flow')},${cleanCell('Net Surplus / Deficit from Activities')},${cleanCell('Net Position')},${(summary?.netCashFlow * rate || 0).toFixed(2)}\n\n`;
+
+      csv += `"INSTITUTIONAL BANK ACCOUNTS & LIQUIDITY RESERVES"\n`;
+      csv += 'Bank Name,Account Name,Account Number,Currency,Calculated Balance,Exchange Rate,Equivalent (' + currLabel + ')\n';
+      if (summary?.bankAccounts?.length > 0) {
+        summary.bankAccounts.forEach(acc => {
+          const bal = acc.calculatedBalance || 0;
+          const equiv = acc.currency === selectedCurrency ? bal : (selectedCurrency === 'ETB' ? bal * (exchangeRates.ETB || 161.44) : bal / (exchangeRates.ETB || 161.44));
+          csv += `${cleanCell(acc.bankName)},${cleanCell(acc.accountName)},${cleanCell(acc.accountNumber)},${cleanCell(acc.currency)},${bal.toFixed(2)},${rate},${equiv.toFixed(2)}\n`;
+        });
+      } else {
+        csv += `${cleanCell('No bank accounts configured')},—,—,—,0,1,0\n`;
+      }
+    } else {
+      csv += 'Category Code,Category Name,Classification,Account Type,USAID Allowable,Target Budget Limit (' + currLabel + '),Actual Incurred / Income (' + currLabel + '),Variance / Surplus (' + currLabel + '),Burn Rate (%),Status\n';
+      categories.forEach(cat => {
+        const isExpense = cat.type === 0 || cat.type === 2;
+        const rawSpent = isExpense ? getCategorySpent(cat) : getCategoryIncome(cat);
+        const spent = rawSpent * rate;
+        const limit = (cat.targetBudgetLimit || 0) * rate;
+        const variance = limit > 0 ? limit - spent : 0;
+        const burnRate = limit > 0 ? ((spent / limit) * 100).toFixed(1) : 'N/A';
+        const isOver = limit > 0 && spent > limit;
+        const status = limit === 0 ? 'Uncapped' : (isOver ? 'OVER BUDGET' : (parseFloat(burnRate) >= 90 ? 'Critical' : (parseFloat(burnRate) >= 75 ? 'Warning' : 'On Track')));
+
+        csv += `${cleanCell(cat.code || '—')},${cleanCell(cat.name)},${cleanCell(cat.type === 0 ? 'Program Expense' : (cat.type === 1 ? 'Grant Revenue' : 'General'))},${cleanCell(cat.accountType || 'Direct Cost')},${cleanCell(cat.isUSAIDAllowable ? 'Yes' : 'No')},${limit > 0 ? limit.toFixed(2) : '0.00'},${spent.toFixed(2)},${limit > 0 ? variance.toFixed(2) : '0.00'},${burnRate}${burnRate !== 'N/A' ? '%' : ''},${cleanCell(status)}\n`;
+      });
+    }
+
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `NGO_Statement_of_Activities_Org_${orgId}_${currLabel}.csv`);
+    link.setAttribute('download', `NGO_${activeReportTab.toUpperCase()}_Statement_Org_${orgId}_${currLabel}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

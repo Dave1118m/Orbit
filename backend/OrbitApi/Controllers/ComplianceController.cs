@@ -11,6 +11,9 @@ using System.Security.Claims;
 using System.Text;
 using System.Threading.Tasks;
 
+using Microsoft.AspNetCore.Http;
+using OrbitApi.Authorization;
+
 namespace OrbitApi.Controllers
 {
     /// <summary>
@@ -24,11 +27,34 @@ namespace OrbitApi.Controllers
     {
         private readonly OrbitDbContext _db;
         private readonly ICacheService _cache;
+        private readonly IAuthorizationService _authorizationService;
 
-        public ComplianceController(OrbitDbContext db, ICacheService cache)
+        public ComplianceController(OrbitDbContext db, ICacheService cache, IAuthorizationService authorizationService)
         {
             _db = db;
             _cache = cache;
+            _authorizationService = authorizationService;
+        }
+
+        private async Task<bool> CanManageComplianceAsync(int orgId)
+        {
+            var activeRoleClaim = User.FindFirst("active_role")?.Value;
+            if (string.IsNullOrWhiteSpace(activeRoleClaim) && Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+            {
+                activeRoleClaim = headerVal.FirstOrDefault();
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
+            {
+                return switchedRole == RoleName.Owner || switchedRole == RoleName.Admin || switchedRole == RoleName.FinanceOfficer || switchedRole == RoleName.Coordinator || switchedRole == RoleName.Manager;
+            }
+
+            var orgResource = new ScopedResource(ScopeType.Organization, orgId);
+            var authResult = await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.OrganizationManageCompliance));
+            if (authResult.Succeeded) return true;
+
+            var reportsAuth = await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.ViewReports));
+            return reportsAuth.Succeeded;
         }
 
         private int? GetActiveOrganizationId()
@@ -81,7 +107,8 @@ namespace OrbitApi.Controllers
                 .Include(r => r.Project).ThenInclude(p => p!.Workspace)
                 .Include(r => r.Donor)
                 .Where(r => (r.Project != null && r.Project.Workspace != null && r.Project.Workspace.OrganizationId == targetOrgId.Value) ||
-                            (r.Donor != null && r.Donor.OrganizationId == targetOrgId.Value));
+                            (r.Donor != null && r.Donor.OrganizationId == targetOrgId.Value) ||
+                            (r.ProjectId == null && r.DonorId == null));
 
             var schedules = await query.OrderBy(r => r.DeadlineDate).ToListAsync();
 
@@ -107,6 +134,12 @@ namespace OrbitApi.Controllers
         [HttpPost("reports")]
         public async Task<ActionResult<GrantReportScheduleDto>> CreateReportSchedule([FromBody] CreateGrantReportScheduleRequest req)
         {
+            var targetOrgId = GetActiveOrganizationId();
+            if (targetOrgId.HasValue && !await CanManageComplianceAsync(targetOrgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only authorized compliance officers, Admins, and Owners can manage grant reporting schedules." });
+            }
+
             if (req.DeadlineDate.Date < DateTime.UtcNow.Date)
             {
                 return BadRequest("Grant report deadline date cannot be in the past.");
@@ -143,11 +176,11 @@ namespace OrbitApi.Controllers
             int.TryParse(userIdClaim, out var userId);
             if (userId <= 0) userId = 1;
             
-            var targetOrgId = project?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
+            var scheduleOrgId = project?.Workspace?.OrganizationId ?? targetOrgId;
 
             _db.AuditLogs.Add(new AuditLog
             {
-                OrganizationId = targetOrgId,
+                OrganizationId = scheduleOrgId,
                 PerformedByUserId = userId,
                 Action = "Created Grant Report Schedule",
                 Entity = "GrantReportSchedule",
@@ -192,6 +225,14 @@ namespace OrbitApi.Controllers
             var report = await _db.GrantReportSchedules.FindAsync(id);
             if (report == null) return NotFound();
 
+            var proj = await _db.Projects.Include(p => p.Workspace).FirstOrDefaultAsync(p => p.Id == report.ProjectId);
+            var reportOrgId = proj?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
+
+            if (reportOrgId.HasValue && !await CanManageComplianceAsync(reportOrgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only authorized compliance officers, Admins, and Owners can submit grant reports." });
+            }
+
             report.Status = ReportStatus.Submitted;
             report.SubmittedDate = DateTime.UtcNow;
 
@@ -203,9 +244,6 @@ namespace OrbitApi.Controllers
                 ?? User.FindFirst(ClaimTypes.Name)?.Value;
             int.TryParse(userIdClaim, out var userId);
             if (userId <= 0) userId = 1;
-
-            var proj = await _db.Projects.Include(p => p.Workspace).FirstOrDefaultAsync(p => p.Id == report.ProjectId);
-            var reportOrgId = proj?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
 
             _db.AuditLogs.Add(new AuditLog
             {
@@ -243,6 +281,14 @@ namespace OrbitApi.Controllers
             var report = await _db.GrantReportSchedules.FindAsync(id);
             if (report == null) return NotFound();
 
+            var proj = await _db.Projects.Include(p => p.Workspace).FirstOrDefaultAsync(p => p.Id == report.ProjectId);
+            var reportOrgId = proj?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
+
+            if (reportOrgId.HasValue && !await CanManageComplianceAsync(reportOrgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only authorized compliance officers, Admins, and Owners can delete grant reports." });
+            }
+
             _db.GrantReportSchedules.Remove(report);
             await _db.SaveChangesAsync();
             return NoContent();
@@ -258,6 +304,14 @@ namespace OrbitApi.Controllers
         {
             var report = await _db.GrantReportSchedules.FindAsync(id);
             if (report == null) return NotFound();
+
+            var proj = await _db.Projects.Include(p => p.Workspace).FirstOrDefaultAsync(p => p.Id == report.ProjectId);
+            var reportOrgId = proj?.Workspace?.OrganizationId ?? GetActiveOrganizationId();
+
+            if (reportOrgId.HasValue && !await CanManageComplianceAsync(reportOrgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only authorized compliance officers, Admins, and Owners can trigger grant reports." });
+            }
 
             report.SubmittedDate = DateTime.UtcNow;
             await _db.SaveChangesAsync();

@@ -73,6 +73,26 @@ namespace OrbitApi.Controllers
 
         private async Task<bool> UserHasRoleAsync(int userId, int orgId, params RoleName[] allowedRoles)
         {
+            // 1. Check explicit active persona header or claim first (segregation of duties enforcement)
+            var activeRoleStr = User.FindFirst("active_role")?.Value;
+            if (string.IsNullOrWhiteSpace(activeRoleStr) && HttpContext?.Request?.Headers != null)
+            {
+                if (HttpContext.Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+                {
+                    activeRoleStr = headerVal.FirstOrDefault();
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoleStr) && Enum.TryParse<RoleName>(activeRoleStr, true, out var switchedRole))
+            {
+                if (switchedRole == RoleName.Owner)
+                {
+                    var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == orgId);
+                    return isOwner && allowedRoles.Contains(RoleName.Owner);
+                }
+                return allowedRoles.Contains(switchedRole);
+            }
+
             var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == orgId);
             if (isOrgOwner && allowedRoles.Contains(RoleName.Owner)) return true;
 
@@ -101,8 +121,78 @@ namespace OrbitApi.Controllers
             return false;
         }
 
-        private static BudgetDto MapToDto(Budget b, decimal spentAmount = 0)
+        private async Task<BudgetDto> MapToDtoAsync(Budget b)
         {
+            var baseCurrency = b.Currency ?? "USD";
+            var expensesQuery = _db.Expenses
+                .Where(e => e.ApprovalStatus != ApprovalStatus.Rejected);
+
+            if (b.ProjectId.HasValue)
+            {
+                expensesQuery = expensesQuery.Where(e => e.ProjectId == b.ProjectId.Value);
+            }
+            else if (b.WorkspaceId.HasValue)
+            {
+                expensesQuery = expensesQuery.Where(e => e.Project != null && e.Project.WorkspaceId == b.WorkspaceId.Value);
+            }
+            else if (b.TaskId.HasValue)
+            {
+                expensesQuery = expensesQuery.Where(e => e.TaskId == b.TaskId.Value);
+            }
+            else if (b.Level == BudgetLevel.Organization || (b.OrganizationId.HasValue && b.OrganizationId.Value > 0))
+            {
+                var orgId = b.OrganizationId ?? 0;
+                expensesQuery = expensesQuery.Where(e => 
+                    (e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == orgId) ||
+                    (e.BankAccount != null && e.BankAccount.OrganizationId == orgId));
+            }
+
+            var expensesList = await expensesQuery
+                .Select(e => new { e.Amount, e.Currency, e.CategoryId, e.TaskId })
+                .ToListAsync();
+
+            decimal totalSpent = 0;
+            var convertedExpenses = new List<(decimal Amount, int? CategoryId, int? TaskId)>();
+            foreach (var e in expensesList)
+            {
+                var converted = await _currencyService.ConvertAsync(e.Amount, e.Currency, baseCurrency);
+                totalSpent += converted;
+                convertedExpenses.Add((converted, e.CategoryId, e.TaskId));
+            }
+
+            var lineItemDtos = new List<BudgetLineItemDto>();
+            if (b.LineItems != null)
+            {
+                foreach (var l in b.LineItems)
+                {
+                    decimal lineSpent = 0;
+                    if (l.CategoryId.HasValue)
+                    {
+                        lineSpent = convertedExpenses
+                            .Where(e => e.CategoryId == l.CategoryId.Value)
+                            .Sum(e => e.Amount);
+                    }
+                    else if (b.TaskId.HasValue)
+                    {
+                        lineSpent = convertedExpenses
+                            .Where(e => e.TaskId == b.TaskId.Value)
+                            .Sum(e => e.Amount);
+                    }
+
+                    lineItemDtos.Add(new BudgetLineItemDto
+                    {
+                        Id = l.Id,
+                        BudgetId = l.BudgetId,
+                        CategoryId = l.CategoryId,
+                        CategoryName = l.FinancialCategory?.Name ?? "General Line Item",
+                        Description = l.Description,
+                        Amount = l.Amount,
+                        SpentAmount = lineSpent,
+                        RemainingAmount = l.Amount - lineSpent
+                    });
+                }
+            }
+
             return new BudgetDto
             {
                 Id = b.Id,
@@ -110,7 +200,7 @@ namespace OrbitApi.Controllers
                 EntityName = GetEntityName(b),
                 TotalAmount = b.TotalAmount,
                 AllocatedAmount = b.LineItems?.Sum(l => l.Amount) ?? 0,
-                SpentAmount = spentAmount,
+                SpentAmount = totalSpent,
                 Currency = b.Currency,
                 FiscalYear = b.FiscalYear > 0 ? b.FiscalYear : DateTime.UtcNow.Year,
                 Status = b.Status,
@@ -118,15 +208,7 @@ namespace OrbitApi.Controllers
                 WorkspaceId = b.WorkspaceId,
                 ProjectId = b.ProjectId,
                 TaskId = b.TaskId,
-                LineItems = b.LineItems?.Select(l => new BudgetLineItemDto
-                {
-                    Id = l.Id,
-                    BudgetId = l.BudgetId,
-                    CategoryId = l.CategoryId,
-                    CategoryName = l.FinancialCategory?.Name ?? "General Line Item",
-                    Description = l.Description,
-                    Amount = l.Amount
-                }).ToList() ?? new List<BudgetLineItemDto>()
+                LineItems = lineItemDtos
             };
         }
 
@@ -147,51 +229,6 @@ namespace OrbitApi.Controllers
                 .Include(b => b.Project)
                 .Include(b => b.Workspace)
                 .Include(b => b.Task);
-
-        private async Task<decimal> GetSpentAsync(Budget b)
-        {
-            var baseCurrency = b.Currency ?? "USD";
-            List<Expense> expensesToSum = new List<Expense>();
-
-            if (b.ProjectId.HasValue)
-            {
-                expensesToSum = await _db.Expenses
-                    .Where(e => e.ProjectId == b.ProjectId.Value && e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
-                    .ToListAsync();
-            }
-            else if (b.WorkspaceId.HasValue)
-            {
-                expensesToSum = await _db.Expenses
-                    .Where(e => e.Project != null && e.Project.WorkspaceId == b.WorkspaceId.Value && e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
-                    .ToListAsync();
-            }
-            else if (b.TaskId.HasValue)
-            {
-                expensesToSum = await _db.Expenses
-                    .Where(e => e.TaskId == b.TaskId.Value && e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
-                    .ToListAsync();
-            }
-            else if (b.Level == BudgetLevel.Organization || (b.OrganizationId.HasValue && b.OrganizationId.Value > 0))
-            {
-                var orgId = b.OrganizationId ?? 0;
-                expensesToSum = await _db.Expenses
-                    .Where(e => ((e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == orgId) ||
-                                (e.BankAccount != null && e.BankAccount.OrganizationId == orgId)) &&
-                                e.ApprovalStatus != ApprovalStatus.Rejected)
-                    .Select(e => new Expense { Amount = e.Amount, Currency = e.Currency })
-                    .ToListAsync();
-            }
-
-            decimal totalSpent = 0;
-            foreach (var e in expensesToSum)
-            {
-                totalSpent += await _currencyService.ConvertAsync(e.Amount, e.Currency, baseCurrency);
-            }
-            return totalSpent;
-        }
 
         private async Task EnsureFiscalYearColumnExistsAsync()
         {
@@ -218,7 +255,7 @@ namespace OrbitApi.Controllers
             var budgets = await BudgetsWithIncludes(orgId.Value).ToListAsync();
             var dtos = new List<BudgetDto>();
             foreach (var b in budgets)
-                dtos.Add(MapToDto(b, await GetSpentAsync(b)));
+                dtos.Add(await MapToDtoAsync(b));
             return Ok(dtos);
         }
 
@@ -236,7 +273,7 @@ namespace OrbitApi.Controllers
 
             var budget = await BudgetsWithIncludes(orgId.Value).FirstOrDefaultAsync(b => b.Id == id);
             if (budget == null) return NotFound();
-            return Ok(MapToDto(budget, await GetSpentAsync(budget)));
+            return Ok(await MapToDtoAsync(budget));
         }
 
         /// <summary>
@@ -330,7 +367,7 @@ namespace OrbitApi.Controllers
             await _db.SaveChangesAsync();
 
             var created = await BudgetsWithIncludes(orgId.Value).FirstAsync(b => b.Id == budget.Id);
-            return CreatedAtAction(nameof(GetBudget), new { id = budget.Id }, MapToDto(created));
+            return CreatedAtAction(nameof(GetBudget), new { id = budget.Id }, await MapToDtoAsync(created));
         }
 
         /// <summary>
@@ -413,7 +450,7 @@ namespace OrbitApi.Controllers
 
             if (budget == null) return NotFound("Budget not found.");
 
-            var spent = await GetSpentAsync(budget);
+            var spent = (await MapToDtoAsync(budget)).SpentAmount;
             var remaining = budget.TotalAmount - spent;
 
             if (remaining <= 0)
@@ -610,6 +647,22 @@ namespace OrbitApi.Controllers
             _db.BudgetLineItems.Add(lineItem);
             await _db.SaveChangesAsync();
 
+            decimal lineSpent = 0;
+            if (dto.CategoryId.HasValue)
+            {
+                var baseCurrency = budget.Currency ?? "USD";
+                var expenses = await _db.Expenses
+                    .Where(e => (budget.ProjectId.HasValue ? e.ProjectId == budget.ProjectId.Value : true) &&
+                                e.CategoryId == dto.CategoryId.Value &&
+                                e.ApprovalStatus != ApprovalStatus.Rejected)
+                    .Select(e => new { e.Amount, e.Currency })
+                    .ToListAsync();
+                foreach (var exp in expenses)
+                {
+                    lineSpent += await _currencyService.ConvertAsync(exp.Amount, exp.Currency, baseCurrency);
+                }
+            }
+
             return Ok(new BudgetLineItemDto
             {
                 Id = lineItem.Id,
@@ -617,7 +670,9 @@ namespace OrbitApi.Controllers
                 CategoryId = lineItem.CategoryId,
                 CategoryName = catName ?? "General Line Item",
                 Description = lineItem.Description,
-                Amount = lineItem.Amount
+                Amount = lineItem.Amount,
+                SpentAmount = lineSpent,
+                RemainingAmount = lineItem.Amount - lineSpent
             });
         }
 

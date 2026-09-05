@@ -8,7 +8,8 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading.Tasks;
-
+using Microsoft.AspNetCore.Http;
+using OrbitApi.Authorization;
 using OrbitApi.Services;
 
 namespace OrbitApi.Controllers
@@ -24,11 +25,31 @@ namespace OrbitApi.Controllers
     {
         private readonly OrbitDbContext _db;
         private readonly ICurrencyService _currencyService;
+        private readonly IAuthorizationService _authorizationService;
 
-        public BankAccountsController(OrbitDbContext db, ICurrencyService currencyService)
+        public BankAccountsController(OrbitDbContext db, ICurrencyService currencyService, IAuthorizationService authorizationService)
         {
             _db = db;
             _currencyService = currencyService;
+            _authorizationService = authorizationService;
+        }
+
+        private async Task<bool> CanManageBankAccountsAsync(int orgId)
+        {
+            var activeRoleClaim = User.FindFirst("active_role")?.Value;
+            if (string.IsNullOrWhiteSpace(activeRoleClaim) && Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+            {
+                activeRoleClaim = headerVal.FirstOrDefault();
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoleClaim) && Enum.TryParse<RoleName>(activeRoleClaim, true, out var switchedRole))
+            {
+                return switchedRole == RoleName.Owner || switchedRole == RoleName.Admin || switchedRole == RoleName.FinanceOfficer;
+            }
+
+            var orgResource = new ScopedResource(ScopeType.Organization, orgId);
+            var authResult = await _authorizationService.AuthorizeAsync(User, orgResource, new PermissionRequirement(Permission.BudgetEdit));
+            return authResult.Succeeded;
         }
 
         private int? GetActiveOrganizationId()
@@ -275,6 +296,11 @@ namespace OrbitApi.Controllers
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest(new { message = "Organization context is required." });
 
+            if (!await CanManageBankAccountsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can create bank accounts." });
+            }
+
             var bankName = dto.BankName.Trim();
             var accountName = dto.AccountName.Trim();
             var accountNumber = dto.AccountNumber.Trim();
@@ -331,6 +357,11 @@ namespace OrbitApi.Controllers
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest(new { message = "Organization context is required." });
 
+            if (!await CanManageBankAccountsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can update bank accounts." });
+            }
+
             var account = await _db.BankAccounts
                 .Where(b => b.OrganizationId == orgId.Value)
                 .FirstOrDefaultAsync(b => b.Id == id);
@@ -375,6 +406,11 @@ namespace OrbitApi.Controllers
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
 
+            if (!await CanManageBankAccountsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can delete bank accounts." });
+            }
+
             var account = await _db.BankAccounts
                 .Where(b => b.OrganizationId == orgId.Value)
                 .FirstOrDefaultAsync(b => b.Id == id);
@@ -401,6 +437,11 @@ namespace OrbitApi.Controllers
         {
             var orgId = GetActiveOrganizationId();
             if (orgId == null) return BadRequest("Organization context is required.");
+
+            if (!await CanManageBankAccountsAsync(orgId.Value))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Permission denied. Only Finance Officers, Admins, and Owners can transfer funds between bank accounts." });
+            }
 
             var fromAccount = await _db.BankAccounts.FirstOrDefaultAsync(b => b.Id == dto.FromBankAccountId && b.OrganizationId == orgId.Value);
             var toAccount = await _db.BankAccounts.FirstOrDefaultAsync(b => b.Id == dto.ToBankAccountId && b.OrganizationId == orgId.Value);

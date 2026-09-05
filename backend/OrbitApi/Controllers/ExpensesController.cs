@@ -68,6 +68,71 @@ namespace OrbitApi.Controllers
             return null;
         }
 
+        private async Task<bool> UserHasRoleAsync(int userId, int orgId, params RoleName[] allowedRoles)
+        {
+            // 1. Check explicit active persona header or claim first (segregation of duties enforcement)
+            var activeRoleStr = User.FindFirst("active_role")?.Value;
+            if (string.IsNullOrWhiteSpace(activeRoleStr) && HttpContext?.Request?.Headers != null)
+            {
+                if (HttpContext.Request.Headers.TryGetValue("X-Active-Role", out var headerVal))
+                {
+                    activeRoleStr = headerVal.FirstOrDefault();
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(activeRoleStr) && Enum.TryParse<RoleName>(activeRoleStr, true, out var switchedRole))
+            {
+                if (switchedRole == RoleName.Owner)
+                {
+                    var isOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == orgId);
+                    return isOwner && allowedRoles.Contains(RoleName.Owner);
+                }
+                return allowedRoles.Contains(switchedRole);
+            }
+
+            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == orgId);
+            if (isOrgOwner && allowedRoles.Contains(RoleName.Owner)) return true;
+
+            var orgMember = await _db.OrganizationMembers
+                .Include(m => m.Role)
+                .FirstOrDefaultAsync(m => m.UserId == userId && m.OrganizationId == orgId && m.Status == OrgMemberStatus.Active);
+
+            if (orgMember?.Role != null && allowedRoles.Contains(orgMember.Role.Name))
+            {
+                return true;
+            }
+
+            var userRoleStrings = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
+            userRoleStrings.AddRange(User.FindAll("role").Select(r => r.Value));
+
+            foreach (var role in allowedRoles)
+            {
+                var roleStr = role.ToString();
+                if (userRoleStrings.Any(r => string.Equals(r, roleStr, StringComparison.OrdinalIgnoreCase)
+                    || (role == RoleName.FinanceOfficer && (string.Equals(r, "Finance Officer", StringComparison.OrdinalIgnoreCase) || string.Equals(r, "Finance", StringComparison.OrdinalIgnoreCase)))))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private async Task<int> GetExpenseOrgIdAsync(Expense expense)
+        {
+            if (expense.ProjectId.HasValue)
+            {
+                var p = await _db.Projects.Include(pr => pr.Workspace).FirstOrDefaultAsync(pr => pr.Id == expense.ProjectId.Value);
+                if (p?.Workspace != null) return p.Workspace.OrganizationId;
+            }
+            if (expense.BankAccountId.HasValue)
+            {
+                var b = await _db.BankAccounts.FindAsync(expense.BankAccountId.Value);
+                if (b != null) return b.OrganizationId;
+            }
+            return GetActiveOrganizationId() ?? 1;
+        }
+
         /// <summary>
         /// GET /api/v1/expenses — Fetch all expenses with full relation data
         /// </summary>
@@ -89,8 +154,38 @@ namespace OrbitApi.Controllers
                 .Include(e => e.FinancialCategory)
                 .Where(e => (e.Project != null && e.Project.Workspace != null && e.Project.Workspace.OrganizationId == targetOrgId.Value) || 
                             (e.Task != null && e.Task.Project != null && e.Task.Project.Workspace != null && e.Task.Project.Workspace.OrganizationId == targetOrgId.Value) ||
-                            (e.BankAccount != null && e.BankAccount.OrganizationId == targetOrgId.Value))
+                            (e.BankAccount != null && e.BankAccount.OrganizationId == targetOrgId.Value) ||
+                            (e.SubmittedByUser != null && _db.OrganizationMembers.Any(om => om.UserId == e.SubmittedByUserId && om.OrganizationId == targetOrgId.Value)))
                 .OrderByDescending(e => e.CreatedAt)
+                .ToListAsync();
+
+            // Auto-heal any orphaned Paid expenses to link to active bank account
+            var orphanedPaid = expenses.Where(e => e.ApprovalStatus == ApprovalStatus.Paid && !e.BankAccountId.HasValue).ToList();
+            if (orphanedPaid.Any())
+            {
+                var defaultBank = await _db.BankAccounts
+                    .Where(b => b.OrganizationId == targetOrgId.Value && b.IsActive)
+                    .OrderBy(b => b.Id)
+                    .FirstOrDefaultAsync();
+                if (defaultBank != null)
+                {
+                    foreach (var op in orphanedPaid)
+                    {
+                        op.BankAccountId = defaultBank.Id;
+                        op.BankAccount = defaultBank;
+                        var existingTxn = await _db.FinancialTransactions.FirstOrDefaultAsync(t => t.ExpenseId == op.Id);
+                        if (existingTxn != null && !existingTxn.BankAccountId.HasValue)
+                        {
+                            existingTxn.BankAccountId = defaultBank.Id;
+                        }
+                    }
+                    await _db.SaveChangesAsync();
+                }
+            }
+
+            var budgets = await _db.Budgets
+                .Where(b => b.OrganizationId == targetOrgId.Value)
+                .Include(b => b.LineItems)
                 .ToListAsync();
 
             var dtos = new List<ExpenseDto>();
@@ -98,17 +193,28 @@ namespace OrbitApi.Controllers
             {
                 var budgetWarning = false;
                 string? complianceWarning = null;
-                // The expense is likely missing some info initially since we only update status. 
-                // However, CheckBudgetOverspend uses the project and category, which don't change on approval.
-                // Re-running budget check is not strictly necessary here unless we want to enforce it at approval time.
-                // We'll leave it as is, but we must pass currency if we do. 
-                // e.Currency is not fully available here without fetching it if it was detached, but we have `e`.
-                if (e.ProjectId.HasValue && e.CategoryId.HasValue)
+
+                decimal? catAllocated = null;
+                decimal? catSpent = null;
+                decimal? catRemaining = null;
+
+                if (e.CategoryId.HasValue)
                 {
-                    var overspendReason = await CheckBudgetOverspend(e.ProjectId.Value, e.CategoryId, 0, e.Currency); // Check current state
-                    if (overspendReason != null)
+                    var matchingBudget = (e.ProjectId.HasValue ? budgets.FirstOrDefault(b => b.ProjectId == e.ProjectId.Value) : null)
+                        ?? budgets.FirstOrDefault(b => b.Level == BudgetLevel.Organization || b.OrganizationId == targetOrgId.Value);
+
+                    var lineItem = matchingBudget?.LineItems?.FirstOrDefault(li => li.CategoryId == e.CategoryId.Value);
+                    if (lineItem != null)
                     {
-                        // Log warning or handle
+                        catAllocated = lineItem.Amount;
+                        var categoryExpenses = expenses
+                            .Where(exp => (e.ProjectId.HasValue ? exp.ProjectId == e.ProjectId.Value : true) &&
+                                          exp.CategoryId == e.CategoryId.Value &&
+                                          exp.ApprovalStatus != ApprovalStatus.Rejected)
+                            .Sum(exp => exp.Amount);
+
+                        catSpent = categoryExpenses;
+                        catRemaining = lineItem.Amount - categoryExpenses;
                     }
                 }
 
@@ -124,6 +230,8 @@ namespace OrbitApi.Controllers
                     CategoryId = e.CategoryId,
                     CategoryName = e.FinancialCategory?.Name ?? "General Expense",
                     CategoryCode = e.FinancialCategory?.Code,
+                    BankAccountId = e.BankAccountId,
+                    BankAccountName = e.BankAccount != null ? $"{e.BankAccount.BankName} - {e.BankAccount.AccountName}" : null,
                     Amount = e.Amount,
                     GrossAmount = e.GrossAmount,
                     TaxAmount = e.TaxAmount,
@@ -146,7 +254,10 @@ namespace OrbitApi.Controllers
                     AttachmentFileName = e.Attachment?.FileName,
                     CreatedAt = e.CreatedAt,
                     BudgetWarning = budgetWarning,
-                    ComplianceWarningMessage = complianceWarning
+                    ComplianceWarningMessage = complianceWarning,
+                    CategoryAllocatedBudget = catAllocated,
+                    CategorySpentBudget = catSpent,
+                    CategoryRemainingBudget = catRemaining
                 });
             }
 
@@ -172,6 +283,13 @@ namespace OrbitApi.Controllers
             // Get current user ID from JWT
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
+
+            var activeOrgId = GetActiveOrganizationId() ?? 1;
+            var canSubmit = await UserHasRoleAsync(userId, activeOrgId, RoleName.Owner, RoleName.Admin, RoleName.Manager, RoleName.Coordinator, RoleName.FinanceOfficer, RoleName.Member);
+            if (!canSubmit)
+            {
+                return StatusCode(403, new { message = "Viewers and unauthorized roles cannot submit expense claims." });
+            }
 
             // Date validation: check past bounds, future dates and project bounds
             if (dto.Date.Year < 2000)
@@ -367,22 +485,17 @@ namespace OrbitApi.Controllers
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
 
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            userRoles.AddRange(User.FindAll("role").Select(r => r.Value));
-
-            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted);
-            var isDbAuthorized = isOrgOwner
-                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && (a.Role.Name == RoleName.Owner || a.Role.Name == RoleName.Admin || a.Role.Name == RoleName.FinanceOfficer || a.Role.Name == RoleName.Manager))
-                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && (m.Role.Name == RoleName.Owner || m.Role.Name == RoleName.Admin || m.Role.Name == RoleName.FinanceOfficer || m.Role.Name == RoleName.Manager));
-
-            var isOwnerOrAdmin = isOrgOwner || isDbAuthorized || userRoles.Any(r => r == "Owner" || r == "Admin" || r == "SystemOwner" || r == "FinanceOfficer" || r == "Finance");
-            var isFinanceOfficer = isOwnerOrAdmin || userRoles.Any(r => r == "FinanceOfficer" || r == "Finance");
+            var expenseOrgId = await GetExpenseOrgIdAsync(expense);
+            var isFinanceOfficer = await UserHasRoleAsync(userId, expenseOrgId, RoleName.Owner, RoleName.Admin, RoleName.FinanceOfficer);
 
             // Role Enforcement: Step 1 requires Finance Officer, Admin, or Owner role
             if (!isFinanceOfficer)
             {
-                return BadRequest(new { message = "Role Authorization Enforcement: Only Finance Officers, Admins, or Owners can perform Step 1 (Finance Officer Review)." });
+                return StatusCode(403, new { message = "Role Authorization Enforcement: Only Finance Officers, Admins, or Owners can perform Step 1 (Finance Officer Review)." });
             }
+
+            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == expenseOrgId);
+            var isOwnerOrAdmin = await UserHasRoleAsync(userId, expenseOrgId, RoleName.Owner, RoleName.Admin);
 
             // Self-Approval Prohibition Rule (bypassed for Org Owner / Admin in test mode if single user)
             if (expense.SubmittedByUserId == userId && !isOrgOwner)
@@ -421,32 +534,26 @@ namespace OrbitApi.Controllers
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
 
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            userRoles.AddRange(User.FindAll("role").Select(r => r.Value));
-
-            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted);
-            var isDbAuthorized = isOrgOwner
-                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && (a.Role.Name == RoleName.Owner || a.Role.Name == RoleName.Admin || a.Role.Name == RoleName.Manager || a.Role.Name == RoleName.FinanceOfficer))
-                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && (m.Role.Name == RoleName.Owner || m.Role.Name == RoleName.Admin || m.Role.Name == RoleName.Manager || m.Role.Name == RoleName.FinanceOfficer));
-
-            var isOwnerOrAdmin = isOrgOwner || isDbAuthorized || userRoles.Any(r => r == "Owner" || r == "Admin" || r == "SystemOwner" || r == "ProjectManager" || r == "Manager");
-            var isManager = isOwnerOrAdmin || userRoles.Any(r => r == "Manager" || r == "ProjectManager");
+            var expenseOrgId = await GetExpenseOrgIdAsync(expense);
+            var isManager = await UserHasRoleAsync(userId, expenseOrgId, RoleName.Owner, RoleName.Admin, RoleName.Manager);
 
             // Role Enforcement: Step 2 requires Manager, Admin, or Owner role
             if (!isManager)
             {
-                return BadRequest(new { message = "Role Authorization Enforcement: Only Project Managers, Admins, or Owners are authorized to perform Step 2 (Manager Sign-off)." });
+                return StatusCode(403, new { message = "Role Authorization Enforcement: Only Project Managers, Admins, or Owners are authorized to perform Step 2 (Manager Sign-off)." });
             }
 
-            // Self-Approval Prohibition Rule: Submitter cannot approve their own claim
-            if (expense.SubmittedByUserId == userId)
+            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted && o.Id == expenseOrgId);
+
+            // Self-Approval Prohibition Rule: Submitter cannot approve their own claim (bypassed for Org Owner in test/demo mode)
+            if (expense.SubmittedByUserId == userId && !isOrgOwner)
             {
                 return BadRequest(new { message = "Self-approval prohibition: A user cannot approve or sign off on an expense claim they submitted." });
             }
 
             // Segregation of Duties Enforcement (Dual 2-Step Approval Rule):
-            // Step 2 (Manager Sign-off) MUST be performed by a DIFFERENT user than Step 1 (Finance Officer Review)
-            if (expense.ApprovedByFinanceOfficerId == userId)
+            // Step 2 (Manager Sign-off) MUST be performed by a DIFFERENT user than Step 1 (Finance Officer Review) (bypassed for Org Owner in test/demo mode)
+            if (expense.ApprovedByFinanceOfficerId == userId && !isOrgOwner)
             {
                 return BadRequest(new { message = "Segregation of Duties Enforcement: Step 2 (Manager Sign-off) cannot be approved by the same user who performed Step 1 (Finance Officer Review). Dual approval requires sign-off from a different authorized user." });
             }
@@ -466,13 +573,22 @@ namespace OrbitApi.Controllers
         }
 
         /// <summary>
-        /// DELETE /api/v1/expenses/clear-data — Clears all test expense & financial ledger data for clean testing
+        /// DELETE /api/v1/expenses/clear-data — Clears all test expense & financial ledger data for clean testing (Owner/Admin only)
         /// </summary>
-        [AllowAnonymous]
         [HttpDelete("clear-data")]
         [HttpPost("clear-data")]
         public async Task<IActionResult> ClearFinancialTestData()
         {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
+
+            var orgId = GetActiveOrganizationId() ?? 1;
+            var canClear = await UserHasRoleAsync(userId, orgId, RoleName.Owner, RoleName.Admin);
+            if (!canClear)
+            {
+                return StatusCode(403, new { message = "Forbidden: Only Organization Owners and Administrators can clear financial data." });
+            }
+
             _db.FinancialTransactions.RemoveRange(_db.FinancialTransactions);
             _db.Expenses.RemoveRange(_db.Expenses);
             _db.DonorContributions.RemoveRange(_db.DonorContributions);
@@ -490,7 +606,7 @@ namespace OrbitApi.Controllers
         /// POST /api/v1/expenses/{id}/pay — Mark expense as Paid / Disbursed (Step 3)
         /// </summary>
         [HttpPost("{id}/pay")]
-        public async Task<ActionResult> PayExpense(int id)
+        public async Task<ActionResult> PayExpense(int id, [FromBody] PayExpenseRequest? req = null)
         {
             var expense = await _db.Expenses.FindAsync(id);
             if (expense == null) return NotFound();
@@ -503,45 +619,68 @@ namespace OrbitApi.Controllers
             var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
 
-            var userRoles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
-            userRoles.AddRange(User.FindAll("role").Select(r => r.Value));
-
-            var isOrgOwner = await _db.Organizations.AnyAsync(o => o.OwnerId == userId && !o.IsDeleted);
-            var isDbAuthorized = isOrgOwner
-                || await _db.RoleAssignments.AnyAsync(a => a.UserId == userId && a.Role != null && (a.Role.Name == RoleName.Owner || a.Role.Name == RoleName.Admin || a.Role.Name == RoleName.FinanceOfficer))
-                || await _db.OrganizationMembers.AnyAsync(m => m.UserId == userId && m.Status == OrgMemberStatus.Active && m.Role != null && (m.Role.Name == RoleName.Owner || m.Role.Name == RoleName.Admin || m.Role.Name == RoleName.FinanceOfficer));
-
-            var isOwnerOrAdmin = isOrgOwner || isDbAuthorized || userRoles.Any(r => r == "Owner" || r == "Admin" || r == "SystemOwner" || r == "FinanceOfficer" || r == "Finance");
-            var isFinanceOfficer = isOwnerOrAdmin || userRoles.Any(r => r == "FinanceOfficer" || r == "Finance");
+            var expenseOrgId = await GetExpenseOrgIdAsync(expense);
+            var isFinanceOfficer = await UserHasRoleAsync(userId, expenseOrgId, RoleName.Owner, RoleName.Admin, RoleName.FinanceOfficer);
 
             // Role Enforcement: Step 3 requires Finance Officer, Admin, or Owner role
             if (!isFinanceOfficer)
             {
-                return BadRequest(new { message = "Role Authorization Enforcement: Only Finance Officers, Treasury Officers, Admins, or Owners are authorized to perform Step 3 (Disbursement / Payment)." });
+                return StatusCode(403, new { message = "Role Authorization Enforcement: Only Finance Officers, Treasury Officers, Admins, or Owners are authorized to perform Step 3 (Disbursement / Payment)." });
+            }
+
+            // Assign or update BankAccountId
+            if (req?.BankAccountId.HasValue == true && req.BankAccountId.Value > 0)
+            {
+                var targetBank = await _db.BankAccounts.FirstOrDefaultAsync(b => b.Id == req.BankAccountId.Value && b.OrganizationId == expenseOrgId);
+                if (targetBank != null)
+                {
+                    expense.BankAccountId = targetBank.Id;
+                }
+            }
+
+            if (!expense.BankAccountId.HasValue)
+            {
+                var defaultBank = await _db.BankAccounts
+                    .Where(b => b.OrganizationId == expenseOrgId && b.IsActive)
+                    .OrderBy(b => b.Id)
+                    .FirstOrDefaultAsync();
+                if (defaultBank != null)
+                {
+                    expense.BankAccountId = defaultBank.Id;
+                }
             }
 
             // Bank Account Overdraft Control
             if (expense.BankAccountId.HasValue)
             {
-                var bankAcc = await _db.BankAccounts.FindAsync(expense.BankAccountId.Value);
+                var bankAcc = await _db.BankAccounts
+                    .Include(b => b.Contributions)
+                    .Include(b => b.Expenses)
+                    .FirstOrDefaultAsync(b => b.Id == expense.BankAccountId.Value);
+
                 if (bankAcc != null)
                 {
-                    var credits = await _db.FinancialTransactions
-                        .Where(t => (t.BankAccountId == bankAcc.Id && t.Type == FinancialTransactionType.Income) ||
-                                    (t.ToBankAccountId == bankAcc.Id && t.Type == FinancialTransactionType.Transfer))
-                        .SumAsync(t => (decimal?)t.Amount) ?? 0m;
+                    var baseBankCurrency = bankAcc.Currency;
+                    decimal totalReceived = 0;
+                    foreach (var c in bankAcc.Contributions.Where(x => x.Status == ContributionStatus.Received))
+                    {
+                        totalReceived += await _currencyService.ConvertAsync(c.Amount, c.Currency, baseBankCurrency);
+                    }
 
-                    var debits = await _db.FinancialTransactions
-                        .Where(t => (t.BankAccountId == bankAcc.Id && t.Type == FinancialTransactionType.Expense) ||
-                                    (t.BankAccountId == bankAcc.Id && t.Type == FinancialTransactionType.Transfer))
-                        .SumAsync(t => (decimal?)t.Amount) ?? 0m;
+                    decimal totalExpended = 0;
+                    foreach (var e in bankAcc.Expenses.Where(x => x.ApprovalStatus == ApprovalStatus.Paid && x.Id != expense.Id))
+                    {
+                        totalExpended += await _currencyService.ConvertAsync(e.Amount, e.Currency, baseBankCurrency);
+                    }
 
-                    var availableBalance = credits - debits;
-                    if (expense.Amount > availableBalance)
+                    var availableBalance = totalReceived - totalExpended;
+                    var expenseInBankCurrency = await _currencyService.ConvertAsync(expense.Amount, expense.Currency, baseBankCurrency);
+
+                    if (totalReceived > 0 && expenseInBankCurrency > availableBalance)
                     {
                         return BadRequest(new { 
                             error = "INSUFFICIENT_FUNDS", 
-                            message = $"Source bank account '{bankAcc.BankName} ({bankAcc.AccountNumber})' balance (${availableBalance:N2}) is insufficient to disburse this expense of ${expense.Amount:N2}." 
+                            message = $"Source bank account '{bankAcc.BankName} ({bankAcc.AccountNumber})' available balance ({availableBalance:N2} {baseBankCurrency}) is insufficient to disburse this expense of {expenseInBankCurrency:N2} {baseBankCurrency}." 
                         });
                     }
                 }
@@ -614,6 +753,16 @@ namespace OrbitApi.Controllers
         {
             var expense = await _db.Expenses.FindAsync(id);
             if (expense == null) return NotFound();
+
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
+
+            var expenseOrgId = await GetExpenseOrgIdAsync(expense);
+            var canReject = await UserHasRoleAsync(userId, expenseOrgId, RoleName.Owner, RoleName.Admin, RoleName.FinanceOfficer, RoleName.Manager);
+            if (!canReject)
+            {
+                return StatusCode(403, new { message = "Role Authorization Enforcement: Only Finance Officers, Project Managers, Admins, or Owners are authorized to reject expense claims." });
+            }
 
             if (expense.ApprovalStatus == ApprovalStatus.Approved)
             {
@@ -754,6 +903,32 @@ namespace OrbitApi.Controllers
 
             if (expense == null) return NotFound();
 
+            decimal? catAllocated = null;
+            decimal? catSpent = null;
+            decimal? catRemaining = null;
+
+            if (expense.CategoryId.HasValue)
+            {
+                var matchingBudget = (expense.ProjectId.HasValue 
+                    ? await _db.Budgets.Include(b => b.LineItems).FirstOrDefaultAsync(b => b.ProjectId == expense.ProjectId.Value) 
+                    : null)
+                    ?? await _db.Budgets.Include(b => b.LineItems).FirstOrDefaultAsync(b => b.Level == BudgetLevel.Organization || b.OrganizationId == orgId.Value);
+
+                var lineItem = matchingBudget?.LineItems?.FirstOrDefault(li => li.CategoryId == expense.CategoryId.Value);
+                if (lineItem != null)
+                {
+                    catAllocated = lineItem.Amount;
+                    var categoryExpenses = await _db.Expenses
+                        .Where(exp => (expense.ProjectId.HasValue ? exp.ProjectId == expense.ProjectId.Value : true) &&
+                                      exp.CategoryId == expense.CategoryId.Value &&
+                                      exp.ApprovalStatus != ApprovalStatus.Rejected)
+                        .SumAsync(exp => exp.Amount);
+
+                    catSpent = categoryExpenses;
+                    catRemaining = lineItem.Amount - categoryExpenses;
+                }
+            }
+
             return Ok(new ExpenseDto
             {
                 Id = expense.Id,
@@ -765,7 +940,12 @@ namespace OrbitApi.Controllers
                 CategoryId = expense.CategoryId,
                 CategoryName = expense.FinancialCategory?.Name ?? "General Expense",
                 CategoryCode = expense.FinancialCategory?.Code,
+                BankAccountId = expense.BankAccountId,
+                BankAccountName = expense.BankAccount != null ? $"{expense.BankAccount.BankName} - {expense.BankAccount.AccountName}" : null,
                 Amount = expense.Amount,
+                GrossAmount = expense.GrossAmount,
+                TaxAmount = expense.TaxAmount,
+                NetAmount = expense.NetAmount,
                 Currency = expense.Currency,
                 Date = expense.Date,
                 Description = expense.Description,
@@ -782,7 +962,10 @@ namespace OrbitApi.Controllers
                 RejectionReason = expense.RejectionReason,
                 AttachmentId = expense.AttachmentId,
                 AttachmentFileName = expense.Attachment?.FileName,
-                CreatedAt = expense.CreatedAt
+                CreatedAt = expense.CreatedAt,
+                CategoryAllocatedBudget = catAllocated,
+                CategorySpentBudget = catSpent,
+                CategoryRemainingBudget = catRemaining
             });
         }
 
@@ -795,6 +978,28 @@ namespace OrbitApi.Controllers
             var expense = await _db.Expenses.FindAsync(id);
             if (expense == null) return NotFound("Expense not found.");
 
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
+
+            var expenseOrgId = await GetExpenseOrgIdAsync(expense);
+            var canDelete = await UserHasRoleAsync(userId, expenseOrgId, RoleName.Owner, RoleName.Admin);
+            if (!canDelete)
+            {
+                return StatusCode(403, new { message = "Role Authorization Enforcement: Only Organization Owners and Administrators can delete expense claims." });
+            }
+
+            var relatedTxns = await _db.FinancialTransactions.Where(t => t.ExpenseId == id).ToListAsync();
+            if (relatedTxns.Any())
+            {
+                _db.FinancialTransactions.RemoveRange(relatedTxns);
+            }
+
+            var relatedAttachments = await _db.Attachments.Where(a => a.EntityType == "Expense" && a.EntityId == id).ToListAsync();
+            if (relatedAttachments.Any())
+            {
+                _db.Attachments.RemoveRange(relatedAttachments);
+            }
+
             _db.Expenses.Remove(expense);
             await _db.SaveChangesAsync();
             return Ok(new { message = "Expense deleted successfully." });
@@ -805,9 +1010,18 @@ namespace OrbitApi.Controllers
         /// </summary>
 
         [HttpPost("clear-financial-data")]
-        [AllowAnonymous]
         public async Task<ActionResult> ClearFinancialData()
         {
+            var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (!int.TryParse(userIdClaim, out var userId)) return Unauthorized();
+
+            var orgId = GetActiveOrganizationId() ?? 1;
+            var canClear = await UserHasRoleAsync(userId, orgId, RoleName.Owner, RoleName.Admin);
+            if (!canClear)
+            {
+                return StatusCode(403, new { message = "Forbidden: Only Organization Owners and Administrators can clear financial data." });
+            }
+
             var expenses = await _db.Expenses.ToListAsync();
             _db.Expenses.RemoveRange(expenses);
 
