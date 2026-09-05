@@ -129,6 +129,21 @@ namespace OrbitApi.Controllers
         }
 
         /// <summary>
+        /// POST /api/v1/compliance/reports/trigger-check — Manually trigger scheduled report processing to dispatch emails for reached dates
+        /// </summary>
+        [HttpPost("reports/trigger-check")]
+        public async Task<IActionResult> TriggerScheduledReportCheck()
+        {
+            var worker = HttpContext.RequestServices.GetRequiredService<ScheduledReportWorkerService>();
+            var processedCount = await worker.ProcessScheduledReportsAsync();
+            return Ok(new
+            {
+                message = $"Automated scheduled report check completed. {processedCount} report(s) dispatched to donors.",
+                processedCount
+            });
+        }
+
+        /// <summary>
         /// POST /api/v1/compliance/reports — Create a new grant report schedule
         /// </summary>
         [HttpPost("reports")]

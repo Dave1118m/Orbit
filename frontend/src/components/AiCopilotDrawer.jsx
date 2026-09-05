@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  Sparkles, Copy, Check, Download, CornerDownLeft, X,
+  Sparkles, CornerDownLeft, X,
   ExternalLink, Play, Clock, ArrowRight, ShieldCheck, FileText, CheckCircle2
 } from 'lucide-react';
 import { showErrorToast, showSuccessToast } from '../utils/toastHelper';
@@ -104,7 +104,6 @@ export default function AiCopilotDrawer() {
   const navigate = useNavigate();
   const [isOpen, setIsOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('chat'); // 'chat' or 'delegate'
-  const [copiedId, setCopiedId] = useState(null);
   const [isExecutingAction, setIsExecutingAction] = useState(false);
   
   // Personas & Delegate state
@@ -419,23 +418,7 @@ export default function AiCopilotDrawer() {
     }
   };
 
-  const handleCopy = (msgId, text) => {
-    navigator.clipboard.writeText(text);
-    setCopiedId(msgId);
-    showSuccessToast('Narrative copied to clipboard!');
-    setTimeout(() => setCopiedId(null), 2500);
-  };
 
-  const handleDownloadMarkdown = (text) => {
-    const blob = new Blob([text], { type: 'text/markdown;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `orbit_brief_${new Date().toISOString().slice(0, 10)}.md`;
-    a.click();
-    URL.revokeObjectURL(url);
-    showSuccessToast('Downloaded markdown report!');
-  };
 
   const handleExecuteAction = async (msgId, proposedAction) => {
     setIsExecutingAction(true);
@@ -494,68 +477,6 @@ export default function AiCopilotDrawer() {
       )
     );
   };
-
-  const generalPrompts = [
-    'Draft Donor Update for Merryjoy',
-    'Are there any expenses over $500?',
-    'Active project velocity',
-    'Volunteer community status',
-    'Create task: Review Q3 grant deliverables'
-  ];
-
-  const rolePrompts = {
-    Owner: [
-      'Org Overview',
-      'Portfolio Status',
-      'Audit Logs',
-      'Financial Summary'
-    ],
-    Admin: [
-      'Org Overview',
-      'Invite Member',
-      'Active Projects',
-      'Security Audit'
-    ],
-    Manager: [
-      'Create Task',
-      'Milestones',
-      'Risk Logs',
-      'Pending Tasks'
-    ],
-    FinanceOfficer: [
-      'Budget Summary',
-      'Pending Expenses',
-      'Category Spend',
-      'Funding Status'
-    ],
-    Finance: [
-      'Budget Summary',
-      'Pending Expenses',
-      'Category Spend',
-      'Funding Status'
-    ],
-    Coordinator: [
-      'Volunteers',
-      'Assign Task',
-      'Dependencies',
-      'Field Schedule'
-    ],
-    Member: [
-      'My Tasks',
-      'Deadlines',
-      'Submit Note',
-      'Project Updates'
-    ],
-    Viewer: [
-      'Project Status',
-      'Read-Only Briefing',
-      'Reports Overview'
-    ]
-  };
-
-  const activeQuickPrompts = activeTab === 'chat'
-    ? generalPrompts
-    : (rolePrompts[selectedPersona] || ['Summary Briefing', 'Active Projects', 'Pending Tasks']);
 
   const activeMessages = activeTab === 'chat' ? chatMessages : delegateMessages;
 
@@ -813,42 +734,9 @@ export default function AiCopilotDrawer() {
                       }`}
                     >
                       {msg.role === 'assistant' && (
-                        <div className="flex items-center justify-between pb-1.5 mb-1.5 border-b border-slate-100">
-                          <div className="flex items-center gap-1.5 text-[10px] font-bold text-indigo-900">
-                            <Sparkles className="w-3 h-3 text-indigo-600" />
-                            <span>{activeTab === 'chat' ? 'Orbit Assistant' : (msg.persona || selectedPersona)}</span>
-                          </div>
-
-                          {/* 1-Click Copy & Export Tools (Pillar 1) */}
-                          <div className="flex items-center gap-1">
-                            <button
-                              type="button"
-                              onClick={() => handleCopy(msg.id, msg.text)}
-                              title="Copy to clipboard"
-                              className="p-1 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition cursor-pointer flex items-center gap-1 text-[10px]"
-                            >
-                              {copiedId === msg.id ? (
-                                <>
-                                  <Check className="w-3 h-3 text-emerald-600" />
-                                  <span className="text-emerald-600 font-semibold">Copied!</span>
-                                </>
-                              ) : (
-                                <>
-                                  <Copy className="w-3 h-3" />
-                                  <span className="hidden sm:inline">Copy</span>
-                                </>
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadMarkdown(msg.text)}
-                              title="Download Markdown report"
-                              className="p-1 rounded-md text-slate-400 hover:text-indigo-600 hover:bg-slate-100 transition cursor-pointer flex items-center gap-1 text-[10px]"
-                            >
-                              <Download className="w-3 h-3" />
-                              <span className="hidden sm:inline">Export</span>
-                            </button>
-                          </div>
+                        <div className="flex items-center gap-1.5 pb-1.5 mb-1.5 border-b border-slate-100 text-[10px] font-bold text-indigo-900">
+                          <Sparkles className="w-3 h-3 text-indigo-600" />
+                          <span>{activeTab === 'chat' ? 'Orbit Assistant' : (msg.persona || selectedPersona)}</span>
                         </div>
                       )}
 
@@ -941,18 +829,7 @@ export default function AiCopilotDrawer() {
                 <div ref={messagesEndRef} />
               </div>
 
-              {/* Quick Prompt Chips */}
-              <div className="bg-white px-4 py-2 border-t border-slate-100 flex gap-2 overflow-x-auto">
-                {activeQuickPrompts.map((prompt, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => handleSendMessage(prompt)}
-                    className="shrink-0 text-[11px] font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition border border-slate-200 cursor-pointer"
-                  >
-                    {prompt}
-                  </button>
-                ))}
-              </div>
+
 
               {/* Input Form */}
               <div className="p-4 bg-white border-t border-slate-200">

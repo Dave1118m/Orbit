@@ -223,6 +223,14 @@ public class AiAgentController : ControllerBase
         });
     }
 
+    [HttpPost("delegate-trigger")]
+    public async Task<IActionResult> TriggerDelegateCycle()
+    {
+        var worker = HttpContext.RequestServices.GetRequiredService<AiDelegateWorkerService>();
+        await worker.ProcessActiveDelegatesAsync();
+        return Ok(new { message = "AI Delegate autonomous cycle executed successfully." });
+    }
+
     [HttpGet("delegate-handoff")]
     public async Task<IActionResult> GetDelegateHandoff([FromQuery] int orgId = 1)
     {

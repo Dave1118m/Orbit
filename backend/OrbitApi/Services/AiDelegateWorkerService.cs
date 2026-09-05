@@ -156,7 +156,7 @@ public class AiDelegateWorkerService : BackgroundService
                 .Where(t => projectIds.Contains(t.ProjectId)
                          && !t.IsDeleted
                          && t.Status == OrbitTaskStatus.ToDo
-                         && t.Priority < PriorityLevel.High
+                         && (t.Priority == PriorityLevel.Low || t.Priority == PriorityLevel.Medium)
                          && t.Deadline != null
                          && t.Deadline <= urgentDeadlineThreshold)
                 .Take(5)
